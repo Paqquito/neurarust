@@ -22,7 +22,7 @@ Merci de votre intérêt pour NeuraRust ! Nous apprécions toutes les contributi
 ### 📝 Contribuer au Code ou à la Documentation (Pull Requests)
 
 1.  **Forkez le Dépôt :** Créez un fork du dépôt [NeuraRust](https://github.com/Paqquito/NeuraRust) sur votre compte GitHub.
-2.  **Clonez votre Fork :** Clonez votre fork localement : `git clone https://github.com/VOTRE_NOM_UTILISATEUR/NeuraRust.git`
+2.  **Clonez votre Fork :** Clonez votre fork localement : `git clone https://github.com/Paqquito/NeuraRust.git`
 3.  **Créez une Branche :** Créez une branche descriptive pour vos modifications : `git checkout -b ma-super-fonctionnalite`
 4.  **Codez !** Faites vos modifications. 
     *   Suivez le style de code existant (utilisez `cargo fmt` pour formater).
@@ -38,8 +38,8 @@ Merci de votre intérêt pour NeuraRust ! Nous apprécions toutes les contributi
 7.  **Ouvrez une Pull Request (PR) :** Allez sur la page du dépôt NeuraRust original et ouvrez une Pull Request de votre branche vers la branche `main` de NeuraRust.
     *   Donnez un titre clair à votre PR.
     *   Décrivez les changements effectués et liez l'issue correspondante si applicable (ex: `Closes #123`).
-8.  **Revue de Code :** Les mainteneurs examineront votre PR. Il se peut qu'on vous demande d'apporter des modifications. Soyez réactif aux commentaires.
-9.  **Fusion :** Une fois approuvée, votre PR sera fusionnée !
+8.  **Revue de Code :** Les mainteneurs examineront votre PR. **C'est une étape standard et importante dans les projets open source pour assurer la qualité du code.** Il se peut qu'on vous demande d'apporter des modifications ou des améliorations. Soyez réactif aux commentaires et ouvert à la discussion.
+9.  **Fusion :** Une fois approuvée et les tests passés, votre PR sera fusionnée !
 
 ## Style de Code
 
@@ -52,6 +52,6 @@ Veuillez exécuter ces commandes avant de soumettre une PR.
 
 ## Conduite
 
-Nous attendons de tous les contributeurs qu'ils respectent notre [Code de Conduite](CODE_OF_CONDUCT.md) (à créer).
+Nous attendons de tous les contributeurs qu'ils respectent notre [`Code de Conduite`](CODE_OF_CONDUCT.md).
 
 Merci encore pour votre contribution ! 
