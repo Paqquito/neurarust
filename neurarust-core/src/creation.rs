@@ -49,9 +49,9 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*; // Imports Tensor from crate::tensor via crate root
+     // Imports Tensor from crate::tensor via crate root
     use crate::Tensor;
-    use num_traits::{One, Zero};
+    
 
     #[test]
     fn test_zeros() {

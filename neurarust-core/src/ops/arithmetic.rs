@@ -254,7 +254,7 @@ struct SubBackward<T> {
 }
 
 impl<T> BackwardOp<T> for SubBackward<T> {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
+    fn backward(&self, _upstream_grad: &Tensor<T>) {
         println!("SubBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation (dA = dC * 1, dB = dC * -1)
         // Requires Tensor negation and addition/accumulation
@@ -270,7 +270,7 @@ struct MulBackward<T> {
 }
 
 impl<T> BackwardOp<T> for MulBackward<T> {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
+    fn backward(&self, _upstream_grad: &Tensor<T>) {
         println!("MulBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation (dA = dC * B, dB = dC * A)
         // Requires Tensor element-wise multiplication and addition/accumulation
@@ -286,7 +286,7 @@ struct DivBackward<T> {
 }
 
 impl<T> BackwardOp<T> for DivBackward<T> {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
+    fn backward(&self, _upstream_grad: &Tensor<T>) {
         println!("DivBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation (dA = dC * (1/B), dB = dC * (-A / B^2))
         // Requires Tensor element-wise division, multiplication, negation, power/square, addition/accumulation
@@ -321,7 +321,7 @@ where
 
 #[cfg(test)]
 mod tests {
-    use super::*;
+    
     use crate::Tensor;
 
     // Helper pour créer des tenseurs dans les tests

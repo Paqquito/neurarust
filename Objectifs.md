@@ -1,4 +1,4 @@
-"""# ✨ Objectifs & Vision de NeuraRust 🦀🧠
+# ✨ Objectifs & Vision de NeuraRust 🦀🧠
 
 **NeuraRust** ambitionne de devenir un framework de **Deep Learning en Rust** de premier plan, alliant la flexibilité et l'ergonomie de PyTorch à la **performance brute**, la **sécurité mémoire** et la **portabilité** offertes par Rust.
 

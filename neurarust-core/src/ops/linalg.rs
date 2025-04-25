@@ -17,7 +17,7 @@ struct MatmulBackward<T> {
 }
 
 impl<T> BackwardOp<T> for MatmulBackward<T> {
-     fn backward(&self, upstream_grad: &Tensor<T>) {
+    fn backward(&self, _upstream_grad: &Tensor<T>) {
         println!("MatmulBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation
         // dA = dC @ B.T

@@ -3,11 +3,10 @@ use std::cell::{Ref, RefCell, RefMut}; // Import RefCell related types
 use std::fmt;
 use std::rc::{Rc, Weak}; // Import Rc and Weak
 use crate::autograd::BackwardOp; // Import the new trait
-use std::collections::{HashSet, VecDeque};
+use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use num_traits::One; // Import the One trait
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-use std::ops::{Add, Deref};
 
 // --- Internal Data Structure ---
 
@@ -121,13 +120,15 @@ impl<T> Tensor<T> {
 
     /// Provides temporary immutable access to the internal `TensorData` via `Ref`.
     /// The `Ref` acts like a read lock; ensure it's dropped promptly.
-    pub fn borrow_tensor_data(&self) -> Ref<TensorData<T>> {
+    /// Made `pub(crate)` because it exposes the internal `TensorData` type.
+    pub(crate) fn borrow_tensor_data(&self) -> Ref<TensorData<T>> {
         self.0.borrow()
     }
 
     /// Provides temporary mutable access to the internal `TensorData` via `RefMut`.
     /// The `RefMut` acts like a write lock; ensure it's dropped promptly.
-    pub fn borrow_tensor_data_mut(&self) -> RefMut<TensorData<T>> {
+    /// Made `pub(crate)` because it exposes the internal `TensorData` type.
+    pub(crate) fn borrow_tensor_data_mut(&self) -> RefMut<TensorData<T>> {
         self.0.borrow_mut()
     }
 
@@ -201,9 +202,10 @@ impl<T> Tensor<T> {
         ) {
             let node_ptr = Rc::as_ptr(&node.0);
             if visited.insert(node_ptr) { // Insert the pointer
-                if let Some(grad_fn) = &node.0.borrow().grad_fn {
+                // Prefix grad_fn with _ as it's not used yet for traversal
+                if let Some(_grad_fn) = &node.0.borrow().grad_fn {
                     // Placeholder: Assume grad_fn has a method to get inputs
-                    // let inputs = grad_fn.get_inputs(); // Hypothetical
+                    // let inputs = _grad_fn.get_inputs(); // Hypothetical
                     // for input_weak in inputs {
                     //     if let Some(input_rc) = input_weak.upgrade() {
                     //          let input_tensor = Tensor(input_rc); // Need to reconstruct Tensor wrapper
@@ -224,7 +226,7 @@ impl<T> Tensor<T> {
 
         // --- Initialize Gradient for the Final Node ---
         {
-            let mut self_data_mut = self.0.borrow_mut();
+            let self_data_mut = self.0.borrow_mut();
             if self_data_mut.grad.is_none() {
                 // Need a way to create Tensor::ones. For now, assume it exists and T is compatible.
                 // This is awkward. Ideally, gradient init is handled differently or `ones` is accessible.
@@ -330,8 +332,8 @@ impl<T> Hash for Tensor<T> {
 #[cfg(test)]
 mod tests {
     use super::*; // Import the public Tensor wrapper
-    use num_traits::{One, Zero}; // Import necessary traits for tests
-    use std::ops::{Add, AddAssign};
+    use num_traits::Zero; // Import necessary traits for tests
+    
 
     // Helper to create a simple tensor for testing
     fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
@@ -400,15 +402,16 @@ mod tests {
     #[test]
     fn test_backward_basic() {
         // Should work with floats now (no Eq constraint on helper)
-        let x = create_test_tensor_with_grad(vec![2.0], vec![1]);
-        let y = create_test_tensor_with_grad(vec![3.0], vec![1]);
+        // Prefix x and y with _ as they are unused in this basic test
+        let _x = create_test_tensor_with_grad(vec![2.0], vec![1]);
+        let _y = create_test_tensor_with_grad(vec![3.0], vec![1]);
 
         // Mock a simple operation: z = x * y
         // Need a proper grad_fn for a real test, create dummy tensor for now.
         let z = Tensor::new_with_grad(vec![6.0], vec![1]); // Dummy result
         
         // If Mul op existed and set grad_fn:
-        // let z = &x * &y;
+        // let z = &_x * &_y;
         // assert!(z.0.borrow().grad_fn.is_some());
 
         z.backward(); // Call the backward function

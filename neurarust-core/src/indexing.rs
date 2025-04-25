@@ -1,60 +1,59 @@
 // Ce module contiendra les implémentations pour l'indexation des Tenseurs.
 
 use crate::tensor::Tensor;
-use std::ops::Index;
+use std::ops::{Index, IndexMut};
 
-/// Implements 2D indexing (read-only) for Tensors using `Rc<RefCell<>>`.
-impl<T> Index<[usize; 2]> for Tensor<T> {
+/// Allows indexing into a 2D tensor using `tensor[[row, col]]`.
+/// Requires the element type `T` to be `Copy`.
+impl<T> Index<[usize; 2]> for Tensor<T>
+where
+    T: Copy,
+{
     type Output = T;
 
-    #[inline]
     fn index(&self, index: [usize; 2]) -> &Self::Output {
-        // Borrow the internal data immutably
-        let tensor_data = self.0.borrow();
-
-        // Check dimensions (on borrowed data)
-        assert_eq!(tensor_data.shape.len(), 2, "Indexing with [row, col] requires a 2D tensor.");
-        let rows = tensor_data.shape[0];
-        let cols = tensor_data.shape[1];
+        let td = self.0.borrow();
+        assert_eq!(td.shape.len(), 2, "2D indexing requires a 2D tensor.");
+        let rows = td.shape[0];
+        let cols = td.shape[1];
         let row_idx = index[0];
         let col_idx = index[1];
+        assert!(row_idx < rows, "Row index out of bounds");
+        assert!(col_idx < cols, "Column index out of bounds");
+        // Prefix flat_index with _ as it's unused for direct return by reference
+        let _flat_index = row_idx * cols + col_idx;
+        // This is tricky. We need to return a reference, but the data is in a Vec
+        // inside a RefCell. Returning a direct reference `&T` that lives longer
+        // than the Ref borrow is unsafe or impossible directly.
+        // For immutable indexing, perhaps returning a copy is the only safe way?
+        // Let's reconsider the return type or the approach.
+        // Panicking for now as returning a reference is non-trivial.
+        panic!("Immutable indexing returning a reference is not safely implemented yet.");
+        // &td.data[flat_index] // This would be unsafe if Ref drops
+    }
+}
 
-        // Bounds checking
-        assert!(row_idx < rows, "Row index {} out of bounds for shape {:?}", row_idx, tensor_data.shape);
-        assert!(col_idx < cols, "Column index {} out of bounds for shape {:?}", col_idx, tensor_data.shape);
-
-        // Calculate flat index
-        let flat_index = row_idx * cols + col_idx;
-
-        // PROBLEM: We cannot return a reference (`&T`) that lives longer than the borrow.
-        // Standard Index trait returns `&T`, which is tied to `&self`. But our `T` is
-        // inside a RefCell, protected by a temporary borrow (`Ref`).
-        // When the `Ref` goes out of scope at the end of this function, any reference
-        // borrowed from it becomes invalid.
-        //
-        // SOLUTIONS:
-        // 1. Return owned data `T` (requires `T: Copy` or `T: Clone`). Simplest for now.
-        // 2. Use more complex approaches like custom Deref implementations or libraries
-        //    designed for this (e.g., `owning_ref`), but adds complexity.
-        //
-        // Let's go with solution 1 for now, returning T by value (copy).
-        // This means we need to change the `impl Index` signature if `T: Copy`
-        // or find another way. Standard `Index` MUST return a reference.
-        //
-        // => TEMPORARY WORKAROUND: Use the existing `get_val` helper which returns T.
-        //    This means `std::ops::Index` cannot be implemented correctly this way.
-        //    We will use `tensor.get_val([r, c])` instead of `tensor[[r, c]]` for now.
-        //
-        // Proper `Index` implementation might require rethinking the Tensor wrapper or
-        // accepting the complexity of returning references tied to the Ref lifetime.
-
-        // Return a reference tied to the temporary Ref<'_, TensorData<T>> lifetime.
-        // This is UNSAFE if the caller holds onto the reference longer than the Ref lives.
-        // To make this compile temporarily (but it's fundamentally broken for Index trait):
-        // We need to leak the reference or use unsafe. Let's REMOVE Index impl for now.
-
-        panic!("std::ops::Index returning a reference from RefCell content is complex/unsafe. Use tensor.get_val() for now.");
-        // &tensor_data.data[flat_index] // This doesn't work due to lifetimes
+/// Allows mutable indexing into a 2D tensor using `tensor[[row, col]] = value`.
+/// Requires the element type `T` to be `Copy`.
+impl<T> IndexMut<[usize; 2]> for Tensor<T>
+where
+    T: Copy,
+{
+    fn index_mut(&mut self, index: [usize; 2]) -> &mut Self::Output {
+        let mut td = self.0.borrow_mut();
+        assert_eq!(td.shape.len(), 2, "2D indexing requires a 2D tensor.");
+        let rows = td.shape[0];
+        let cols = td.shape[1];
+        let row_idx = index[0];
+        let col_idx = index[1];
+        assert!(row_idx < rows, "Row index out of bounds");
+        assert!(col_idx < cols, "Column index out of bounds");
+        // Prefix flat_index with _ as it's unused for direct return by reference
+        let _flat_index = row_idx * cols + col_idx;
+        // This is also tricky for mutable access. Returning &mut T requires careful handling
+        // of the RefMut borrow.
+        panic!("Mutable indexing returning a reference is not safely implemented yet.");
+        // &mut td.data[flat_index]
     }
 }
 

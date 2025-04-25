@@ -2,7 +2,7 @@
 
 **Objectif** : Créer un framework de deep learning performant, sûr et ergonomique en Rust, inspiré par PyTorch mais exploitant les avantages uniques de Rust.
 
-[![Rust](https://github.com/TODO/NeuraRust/actions/workflows/rust.yml/badge.svg)](https://github.com/TODO/NeuraRust/actions/workflows/rust.yml)
+[![Rust](https://github.com/Paqquito/NeuraRust/actions/workflows/rust.yml/badge.svg)](https://github.com/Paqquito/NeuraRust/actions/workflows/rust.yml)
 
 ---
 
