@@ -1,0 +1,6 @@
+[workspace]
+members = [
+    "neurarust-core",
+    # D'autres crates comme neurarust-nn viendront ici
+]
+resolver = "2" 

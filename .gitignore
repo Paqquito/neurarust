@@ -1,0 +1,14 @@
+# Rust/Cargo build artifacts
+/target/
+
+# Cargo lock file (often committed in libraries, but can be ignored in applications or workspaces initially)
+# Let's ignore it for now for simplicity, can be changed later.
+# Cargo.lock
+
+# Editor/IDE specific files
+.idea/
+.vscode/
+
+# OS specific files
+.DS_Store
+Thumbs.db 
