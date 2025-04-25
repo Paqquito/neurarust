@@ -60,13 +60,21 @@ where
     /// # Panics
     /// Panics if the shapes of the two tensors are not identical.
     fn sub(self, other: &'b Tensor<T>) -> Self::Output {
-        assert_eq!(self.shape(), other.shape(), "Tensor shapes must be identical for element-wise subtraction.");
+        assert_eq!(self.shape(), other.shape(), "Tensor shapes must match for element-wise subtraction.");
         let result_data: Vec<T> = self.data()
             .iter()
             .zip(other.data().iter())
             .map(|(&a, &b)| a - b)
             .collect();
-        Tensor::new(result_data, self.shape().to_vec())
+
+        // Determine if the result requires gradients
+        let requires_grad = self.requires_grad || other.requires_grad;
+        let mut result = Tensor::new(result_data, self.shape().to_vec());
+        result.requires_grad = requires_grad;
+
+        // TODO: If requires_grad, set up the grad_fn for subtraction
+
+        result
     }
 }
 
@@ -87,13 +95,21 @@ where
     /// # Panics
     /// Panics if the shapes of the two tensors are not identical.
     fn mul(self, other: &'b Tensor<T>) -> Self::Output {
-        assert_eq!(self.shape(), other.shape(), "Tensor shapes must be identical for element-wise multiplication.");
+        assert_eq!(self.shape(), other.shape(), "Tensor shapes must match for element-wise multiplication.");
         let result_data: Vec<T> = self.data()
             .iter()
             .zip(other.data().iter())
             .map(|(&a, &b)| a * b)
             .collect();
-        Tensor::new(result_data, self.shape().to_vec())
+
+        // Determine if the result requires gradients
+        let requires_grad = self.requires_grad || other.requires_grad;
+        let mut result = Tensor::new(result_data, self.shape().to_vec());
+        result.requires_grad = requires_grad;
+
+        // TODO: If requires_grad, set up the grad_fn for multiplication
+
+        result
     }
 }
 
@@ -115,13 +131,21 @@ where
     /// Panics if the shapes of the two tensors are not identical.
     /// Behavior on division by zero depends on the type `T` (e.g., floats might produce `inf` or `NaN`, integers might panic).
     fn div(self, other: &'b Tensor<T>) -> Self::Output {
-        assert_eq!(self.shape(), other.shape(), "Tensor shapes must be identical for element-wise division.");
+        assert_eq!(self.shape(), other.shape(), "Tensor shapes must match for element-wise division.");
         let result_data: Vec<T> = self.data()
             .iter()
             .zip(other.data().iter())
             .map(|(&a, &b)| a / b)
             .collect();
-        Tensor::new(result_data, self.shape().to_vec())
+
+        // Determine if the result requires gradients
+        let requires_grad = self.requires_grad || other.requires_grad;
+        let mut result = Tensor::new(result_data, self.shape().to_vec());
+        result.requires_grad = requires_grad;
+
+        // TODO: If requires_grad, set up the grad_fn for division
+
+        result
     }
 }
 
