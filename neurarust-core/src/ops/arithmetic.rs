@@ -2,7 +2,7 @@
 // comme l'addition, la soustraction, etc.
 
 use crate::tensor::Tensor;
-use std::ops::{Add, Sub, Mul, Div};
+use std::ops::{Add, AddAssign, Sub, Mul, Div};
 use crate::autograd::BackwardOp;
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -24,33 +24,32 @@ where
     /// # Panics
     /// Panics if the shapes of the two tensors are not identical.
     fn add(self, other: &'b Tensor<T>) -> Self::Output {
-        let self_shape = self.shape(); // Clones shape
+        let self_shape = self.shape();
         let other_shape = other.shape();
         assert_eq!(self_shape, other_shape, "Tensor shapes must match for element-wise addition.");
 
-        let self_data_ref = self.borrow_data(); // Get Ref<Vec<T>>
-        let other_data_ref = other.borrow_data();
+        let self_td = self.borrow_tensor_data();
+        let other_td = other.borrow_tensor_data();
 
-        let result_data: Vec<T> = self_data_ref
-            .iter()
-            .zip(other_data_ref.iter())
+        let result_data: Vec<T> = self_td.data.iter()
+            .zip(other_td.data.iter())
             .map(|(&a, &b)| a + b)
             .collect();
 
+        drop(self_td);
+        drop(other_td);
+
         let requires_grad = self.requires_grad() || other.requires_grad();
-        let result = Tensor::new(result_data, self_shape); // Use original shape
-        if requires_grad { // Only set if true, default is false
+        let result = Tensor::new(result_data, self_shape);
+        if requires_grad {
             result.set_requires_grad(true);
-            // Create the backward operation context
             let grad_fn = AddBackward {
-                input_a: self.get_weak_ref(), // Get Weak ref from Tensor wrapper
+                input_a: self.get_weak_ref(),
                 input_b: other.get_weak_ref(),
                 _phantom: PhantomData,
             };
-            // Store it in the result tensor's data
             result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
-        // TODO: Set grad_fn if requires_grad
         result
     }
 }
@@ -75,14 +74,16 @@ where
         let other_shape = other.shape();
         assert_eq!(self_shape, other_shape, "Tensor shapes must match for element-wise subtraction.");
 
-        let self_data_ref = self.borrow_data();
-        let other_data_ref = other.borrow_data();
+        let self_td = self.borrow_tensor_data();
+        let other_td = other.borrow_tensor_data();
 
-        let result_data: Vec<T> = self_data_ref
-            .iter()
-            .zip(other_data_ref.iter())
+        let result_data: Vec<T> = self_td.data.iter()
+            .zip(other_td.data.iter())
             .map(|(&a, &b)| a - b)
             .collect();
+
+        drop(self_td);
+        drop(other_td);
 
         let requires_grad = self.requires_grad() || other.requires_grad();
         let result = Tensor::new(result_data, self_shape);
@@ -95,7 +96,6 @@ where
             };
             result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
-        // TODO: Set grad_fn if requires_grad
         result
     }
 }
@@ -121,21 +121,23 @@ where
         let other_shape = other.shape();
         assert_eq!(self_shape, other_shape, "Tensor shapes must match for element-wise multiplication.");
 
-        let self_data_ref = self.borrow_data();
-        let other_data_ref = other.borrow_data();
+        let self_td = self.borrow_tensor_data();
+        let other_td = other.borrow_tensor_data();
 
-        let result_data: Vec<T> = self_data_ref
-            .iter()
-            .zip(other_data_ref.iter())
+        let result_data: Vec<T> = self_td.data.iter()
+            .zip(other_td.data.iter())
             .map(|(&a, &b)| a * b)
             .collect();
+
+        drop(self_td);
+        drop(other_td);
 
         let requires_grad = self.requires_grad() || other.requires_grad();
         let result = Tensor::new(result_data, self_shape);
         if requires_grad {
             result.set_requires_grad(true);
             let grad_fn = MulBackward {
-                input_a: self.clone(), // Clone inputs for backward pass
+                input_a: self.clone(),
                 input_b: other.clone(),
                 input_a_grad: self.get_weak_ref(),
                 input_b_grad: other.get_weak_ref(),
@@ -143,7 +145,6 @@ where
             };
             result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
-        // TODO: Set grad_fn if requires_grad
         result
     }
 }
@@ -170,21 +171,23 @@ where
         let other_shape = other.shape();
         assert_eq!(self_shape, other_shape, "Tensor shapes must match for element-wise division.");
 
-        let self_data_ref = self.borrow_data();
-        let other_data_ref = other.borrow_data();
+        let self_td = self.borrow_tensor_data();
+        let other_td = other.borrow_tensor_data();
 
-        let result_data: Vec<T> = self_data_ref
-            .iter()
-            .zip(other_data_ref.iter())
+        let result_data: Vec<T> = self_td.data.iter()
+            .zip(other_td.data.iter())
             .map(|(&a, &b)| a / b) // Note: Potential division by zero depending on T
             .collect();
+
+        drop(self_td);
+        drop(other_td);
 
         let requires_grad = self.requires_grad() || other.requires_grad();
         let result = Tensor::new(result_data, self_shape);
         if requires_grad {
             result.set_requires_grad(true);
             let grad_fn = DivBackward {
-                input_a: self.clone(), // Clone inputs needed for backward
+                input_a: self.clone(),
                 input_b: other.clone(),
                 input_a_grad: self.get_weak_ref(),
                 input_b_grad: other.get_weak_ref(),
@@ -192,7 +195,6 @@ where
             };
             result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
-        // TODO: Set grad_fn if requires_grad
         result
     }
 }
@@ -209,41 +211,35 @@ struct AddBackward<T> {
     _phantom: PhantomData<T>, // Use PhantomData if T is unused directly
 }
 
-impl<T> BackwardOp<T> for AddBackward<T> {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
-        println!("AddBackward: Accumulating gradients...");
-
-        // Attempt to upgrade weak references to strong ones (Rc)
+impl<T> BackwardOp<T> for AddBackward<T>
+where
+    T: Add<Output = T> + Copy + Clone + 'static,
+{
+     fn backward(&self, upstream_grad: &Tensor<T>) {
         if let (Some(input_a_rc), Some(input_b_rc)) =
             (self.input_a.upgrade(), self.input_b.upgrade())
         {
-            // Borrow gradients mutably
-            let mut input_a_tensor_data = input_a_rc.borrow_mut();
-            let mut input_b_tensor_data = input_b_rc.borrow_mut();
+            let input_a_tensor = Tensor(input_a_rc);
+            let input_b_tensor = Tensor(input_b_rc);
 
-            // --- Accumulate gradient for input A --- 
-            // This part requires Tensor addition and clone. 
-            // Placeholder logic:
-            if let Some(ref mut existing_grad_a) = input_a_tensor_data.grad {
-                 // Need to implement += or similar for Tensor
-                 // *existing_grad_a = existing_grad_a + upstream_grad; // Hypothetical
-                 println!("  -> Accumulating grad for input A (Op needed)");
+            // Accumulate gradient for input A using Add + Clone
+            let mut grad_a_opt = input_a_tensor.borrow_grad_mut();
+            let new_grad_a = if let Some(existing_grad_a) = grad_a_opt.as_ref() {
+                 // Use Add instead of AddAssign
+                 &*existing_grad_a + upstream_grad // Requires Add<&Tensor<T>> for &Tensor<T>
             } else {
-                 input_a_tensor_data.grad = Some(upstream_grad.clone());
-                 println!("  -> Setting grad for input A");
-            }
-            // Ensure requires_grad is true if we set a grad
-            // input_a_tensor_data.requires_grad = true;
+                 upstream_grad.clone()
+            };
+            *grad_a_opt = Some(new_grad_a);
 
-            // --- Accumulate gradient for input B --- 
-            if let Some(ref mut existing_grad_b) = input_b_tensor_data.grad {
-                 println!("  -> Accumulating grad for input B (Op needed)");
-                 // *existing_grad_b = existing_grad_b + upstream_grad; // Hypothetical
+            // Accumulate gradient for input B using Add + Clone
+            let mut grad_b_opt = input_b_tensor.borrow_grad_mut();
+            let new_grad_b = if let Some(existing_grad_b) = grad_b_opt.as_ref() {
+                  &*existing_grad_b + upstream_grad
             } else {
-                 input_b_tensor_data.grad = Some(upstream_grad.clone());
-                 println!("  -> Setting grad for input B");
-            }
-            // input_b_tensor_data.requires_grad = true;
+                  upstream_grad.clone()
+            };
+             *grad_b_opt = Some(new_grad_b);
 
         } else {
             eprintln!("Error: Could not upgrade weak references in AddBackward. Inputs might have been dropped.");
@@ -294,6 +290,32 @@ impl<T> BackwardOp<T> for DivBackward<T> {
         println!("DivBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation (dA = dC * (1/B), dB = dC * (-A / B^2))
         // Requires Tensor element-wise division, multiplication, negation, power/square, addition/accumulation
+    }
+}
+
+// --- Addition Assign ---
+
+/// Implements in-place element-wise addition (`+=`).
+///
+/// Performs `tensor1 += &tensor2`.
+/// Modifies `tensor1` directly.
+/// The shapes of the two tensors must be identical.
+/// Requires the element type `T` to implement `AddAssign` and `Copy`.
+impl<'a, T> AddAssign<&'a Tensor<T>> for Tensor<T>
+where
+    T: AddAssign + Copy, // T must support in-place addition and be copyable
+{
+    fn add_assign(&mut self, other: &'a Tensor<T>) {
+        let self_shape = self.shape();
+        let other_shape = other.shape();
+        assert_eq!(self_shape, other_shape, "Tensor shapes must match for AddAssign.");
+
+        let mut self_td_mut = self.borrow_tensor_data_mut();
+        let other_td = other.borrow_tensor_data();
+
+        self_td_mut.data.iter_mut()
+            .zip(other_td.data.iter())
+            .for_each(|(a, &b)| *a += b); // Perform in-place addition on elements
     }
 }
 
@@ -429,5 +451,26 @@ mod tests {
         let t1 = create_test_tensor(vec![1.0_f32, 2.0, 3.0, 4.0], vec![2, 2]);
         let t2 = create_test_tensor(vec![5.0_f32, 6.0], vec![1, 2]);
         let _result = &t1 / &t2;
+    }
+
+    // --- Test AddAssign ---
+    #[test]
+    fn test_add_assign_ok() {
+        let mut t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
+        let t2 = create_test_tensor(vec![5_i32, 6, 7, 8], vec![2, 2]);
+        let expected = create_test_tensor(vec![6_i32, 8, 10, 12], vec![2, 2]);
+
+        t1 += &t2; // Use AddAssign
+
+        assert_eq!(t1, expected);
+    }
+
+    #[test]
+    #[should_panic]
+    fn test_add_assign_shape_mismatch() {
+        let mut t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
+        let t2 = create_test_tensor(vec![5_i32, 6], vec![1, 2]);
+
+        t1 += &t2; // Should panic
     }
 } 

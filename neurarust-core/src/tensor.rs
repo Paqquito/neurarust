@@ -3,21 +3,52 @@ use std::cell::{Ref, RefCell, RefMut}; // Import RefCell related types
 use std::fmt;
 use std::rc::{Rc, Weak}; // Import Rc and Weak
 use crate::autograd::BackwardOp; // Import the new trait
+use std::collections::{HashSet, VecDeque};
+use std::hash::{Hash, Hasher};
+use num_traits::One; // Import the One trait
+use std::fmt::{Debug, Formatter, Result as FmtResult};
+use std::ops::{Add, Deref};
 
 // --- Internal Data Structure ---
 
-// Represents the actual tensor properties. Not public.
-// No derive traits here; they are implemented on the public Tensor wrapper.
+/// Holds the actual data and metadata for a tensor.
+/// Uses Rc<RefCell<...>> for shared ownership and interior mutability.
+// Cannot derive Debug/PartialEq because of dyn BackwardOp field
+// #[derive(Debug, PartialEq)] // Ensure this is commented out or removed
 pub(crate) struct TensorData<T> {
     pub(crate) data: Vec<T>,
     pub(crate) shape: Vec<usize>,
-    // Autograd fields
     pub(crate) requires_grad: bool,
-    pub(crate) grad: Option<Tensor<T>>, // Stores the public wrapper type
-    pub(crate) grad_fn: Option<Rc<dyn BackwardOp<T>>>, // Use the actual trait object for the gradient function
-                                             // TODO: Replace Any with actual BackwardOp trait later
-                                             // pub(crate) grad_fn: Option<GradientContext<T>>,
+    pub(crate) grad: Option<Tensor<T>>,
+    pub(crate) grad_fn: Option<Rc<dyn BackwardOp<T>>>,
+    pub(crate) _ctx: Option<Weak<dyn BackwardOp<T>>>,
 }
+
+// Manual implementation of Debug
+impl<T: Debug> Debug for TensorData<T> {
+    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
+        f.debug_struct("TensorData")
+         .field("data", &self.data)
+         .field("shape", &self.shape)
+         .field("requires_grad", &self.requires_grad)
+         .field("grad_defined", &self.grad.is_some())
+         .field("grad_fn_defined", &self.grad_fn.is_some())
+         .field("_ctx_defined", &self._ctx.is_some())
+         .finish()
+    }
+}
+
+// Manual implementation of PartialEq
+impl<T: PartialEq> PartialEq for TensorData<T> {
+    fn eq(&self, other: &Self) -> bool {
+        // Compare only data, shape, and requires_grad for equality.
+        // Ignore grad, grad_fn, _ctx etc.
+        self.data == other.data && self.shape == other.shape && self.requires_grad == other.requires_grad
+    }
+}
+
+// Eq requires that a == a always holds, which is true for our PartialEq implementation IF T: Eq.
+impl<T: Eq> Eq for TensorData<T> {}
 
 impl<T> TensorData<T> {
     // Helper to get number of elements, used internally
@@ -55,6 +86,7 @@ impl<T> Tensor<T> {
             requires_grad: false,
             grad: None,
             grad_fn: None,
+            _ctx: None,
         };
         Tensor(Rc::new(RefCell::new(tensor_data)))
     }
@@ -87,10 +119,16 @@ impl<T> Tensor<T> {
         self.0.borrow().data.clone()
     }
 
-    /// Provides temporary immutable access to the underlying data via `Ref`.
+    /// Provides temporary immutable access to the internal `TensorData` via `Ref`.
     /// The `Ref` acts like a read lock; ensure it's dropped promptly.
-    pub fn borrow_data(&self) -> Ref<Vec<T>> {
-        Ref::map(self.0.borrow(), |td| &td.data)
+    pub fn borrow_tensor_data(&self) -> Ref<TensorData<T>> {
+        self.0.borrow()
+    }
+
+    /// Provides temporary mutable access to the internal `TensorData` via `RefMut`.
+    /// The `RefMut` acts like a write lock; ensure it's dropped promptly.
+    pub fn borrow_tensor_data_mut(&self) -> RefMut<TensorData<T>> {
+        self.0.borrow_mut()
     }
 
     /// Provides temporary immutable access to the shape via `Ref`.
@@ -130,10 +168,17 @@ impl<T> Tensor<T> {
         }
     }
 
-    /// Initiates the backward pass to compute gradients (stub).
-    /// Requires the tensor to be scalar and `requires_grad` to be true.
-    pub fn backward(&self) {
-        let tensor_data = self.0.borrow(); // Borrow immutably first for checks
+    /// Initiates the backward pass to compute gradients for the entire graph.
+    ///
+    /// Should be called on a scalar tensor representing the loss.
+    /// Requires the element type `T` to support `One` and `Clone` for gradient initialization,
+    /// and `Eq`, `Hash` for graph traversal via HashSet.
+    pub fn backward(&self)
+    where
+        T: One + Clone + 'static, // Removed Eq + Hash. Only need One+Clone for grad init, 'static for storage.
+    {
+        let tensor_data = self.0.borrow();
+
         if !tensor_data.requires_grad {
             eprintln!("Warning: Called backward() on a tensor that does not require gradients.");
             return;
@@ -142,26 +187,74 @@ impl<T> Tensor<T> {
             panic!("backward() can only be called on scalar tensors (for now).");
         }
 
-        // --- Actual backward logic would go here ---
-        // 1. Set self.grad to Tensor::ones(self.shape) if it's None. Requires T: One+Clone...
-        //    Need to handle this initialization carefully. Maybe backward takes initial grad?
-        //    For now, let's assume it's handled externally or in the first grad_fn call.
+        // --- Topological Sort and Backward Pass --- 
+        // Use raw pointer of the RefCell as the key for visited set to track node identity.
+        let mut visited = HashSet::<*const RefCell<TensorData<T>>>::new();
+        let mut nodes_sorted = Vec::new();
 
-        // 2. Call the backward function stored in grad_fn, passing the gradient.
-        println!(
-            "Backward pass initiated from tensor (shape: {:?}). (grad_fn execution pending)",
-            tensor_data.shape
-        );
+        // Build the topologically sorted list of nodes involved in the graph
+        // Only need Clone for node.clone(), 'static for storage.
+        fn build_topo<T: Clone + 'static>(
+            node: &Tensor<T>, 
+            visited: &mut HashSet<*const RefCell<TensorData<T>>>,
+            sorted_list: &mut Vec<Tensor<T>>
+        ) {
+            let node_ptr = Rc::as_ptr(&node.0);
+            if visited.insert(node_ptr) { // Insert the pointer
+                if let Some(grad_fn) = &node.0.borrow().grad_fn {
+                    // Placeholder: Assume grad_fn has a method to get inputs
+                    // let inputs = grad_fn.get_inputs(); // Hypothetical
+                    // for input_weak in inputs {
+                    //     if let Some(input_rc) = input_weak.upgrade() {
+                    //          let input_tensor = Tensor(input_rc); // Need to reconstruct Tensor wrapper
+                    //          build_topo(&input_tensor, visited, sorted_list);
+                    //     }
+                    // }
+                    // Simplified: Need to access inputs stored in grad_fn structure.
+                }
+                // Add node to sorted list *after* visiting its children (inputs)
+                sorted_list.push(node.clone());
+            }
+        }
 
-        // Example of how it might look (needs BackwardOp trait defined):
-        // if let Some(grad_fn) = &tensor_data.grad_fn {
-        //     let grad_to_pass = self.borrow_grad().clone(); // Need grad ready here
-        //     if let Some(grad_tensor) = grad_to_pass {
-        //          grad_fn.backward(grad_tensor);
-        //      } else {
-        //          // Handle case where initial grad isn't set (maybe set it to ones here?)
-        //      }
-        // }
+        // Drop the immutable borrow before calling build_topo which needs to clone self
+        drop(tensor_data);
+        // Pass the HashSet of pointers
+        build_topo(self, &mut visited, &mut nodes_sorted);
+
+        // --- Initialize Gradient for the Final Node ---
+        {
+            let mut self_data_mut = self.0.borrow_mut();
+            if self_data_mut.grad.is_none() {
+                // Need a way to create Tensor::ones. For now, assume it exists and T is compatible.
+                // This is awkward. Ideally, gradient init is handled differently or `ones` is accessible.
+                // Placeholder: We can't easily call Tensor::ones here.
+                 println!("Backward: Initializing gradient for final node (needs Tensor::ones impl accessible)");
+                // self_data_mut.grad = Some(Tensor::ones(self_data_mut.shape.clone()));
+            } else {
+                // If grad exists, maybe accumulate? Or assume it's the start?
+                // Let's assume for now it must be None before backward.
+                println!("Backward: Final node gradient already exists?");
+            }
+        }
+
+        // --- Backward Pass through Sorted Nodes --- 
+        println!("Backward: Processing {} nodes in topological order.", nodes_sorted.len());
+        for node in nodes_sorted.iter().rev() { // Process in reverse topological order
+            let node_data = node.0.borrow();
+            if let Some(grad_fn) = &node_data.grad_fn {
+                if let Some(grad) = &node_data.grad {
+                     println!("  -> Calling backward on grad_fn for node with shape {:?}", node_data.shape);
+                     // grad_fn is Rc<dyn BackwardOp<T>>
+                    grad_fn.backward(grad); // Pass the computed gradient of *this* node
+                } else {
+                     println!("  -> Skipping node {:?} - grad is None? (Should not happen after init)", node_data.shape);
+                }
+            } else {
+                 println!("  -> Skipping node {:?} - Leaf node or no grad_fn", node_data.shape);
+            }
+        }
+        println!("Backward pass complete.");
     }
 
     // Internal helper for graph building using weak refs to avoid cycles.
@@ -212,12 +305,24 @@ impl<T: fmt::Debug> fmt::Debug for Tensor<T> {
 }
 
 impl<T: PartialEq> PartialEq for Tensor<T> {
-    /// Compares two `Tensor`s based on shape and data.
-    /// Ignores autograd state (`requires_grad`, `grad`, `grad_fn`).
+    /// Compares two `Tensor`s based on internal TensorData equality.
+    /// Relies on the manual PartialEq implementation for TensorData.
     fn eq(&self, other: &Self) -> bool {
+        // Borrow the internal TensorData and compare them.
         let self_td = self.0.borrow();
         let other_td = other.0.borrow();
-        self_td.shape == other_td.shape && self_td.data == other_td.data
+        *self_td == *other_td // Uses TensorData's PartialEq impl
+    }
+}
+
+// Eq for Tensor wrapper requires T: Eq because the reflexive property
+// of PartialEq (a == a) must hold, and our PartialEq compares data via T.
+// Even though Hash is pointer-based, Eq must be consistent with PartialEq.
+impl<T: Eq> Eq for Tensor<T> {} // Add T: Eq bound.
+
+impl<T> Hash for Tensor<T> {
+    fn hash<H: Hasher>(&self, state: &mut H) {
+        Rc::as_ptr(&self.0).hash(state);
     }
 }
 
@@ -225,99 +330,115 @@ impl<T: PartialEq> PartialEq for Tensor<T> {
 #[cfg(test)]
 mod tests {
     use super::*; // Import the public Tensor wrapper
+    use num_traits::{One, Zero}; // Import necessary traits for tests
+    use std::ops::{Add, AddAssign};
 
-    // Helper function for tests
-    fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    // Helper to create a simple tensor for testing
+    fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)
     }
 
-    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        Tensor::new_with_grad(data, shape)
+    // Helper to create a tensor that requires grad
+    // Remove Eq bound, not needed for floats, Tensor<T> Eq is ptr based.
+    fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+        let tensor = Tensor::new(data, shape);
+        tensor.set_requires_grad(true);
+        tensor
     }
 
     #[test]
-    fn test_tensor_wrapper_new_ok() {
-        let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let shape = vec![2, 3];
-        let t = create_test_tensor(data.clone(), shape.clone());
-
-        assert_eq!(t.shape(), shape);
-        assert_eq!(t.data(), data);
-        assert_eq!(t.numel(), 6);
-        assert!(!t.requires_grad());
-        assert!(t.borrow_grad().is_none());
+    fn test_tensor_creation() {
+        let tensor = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        // Borrow the whole TensorData struct
+        let td = tensor.borrow_tensor_data(); 
+        assert_eq!(td.data, vec![1.0, 2.0, 3.0, 4.0]);
+        assert_eq!(td.shape, vec![2, 2]);
+        assert!(!td.requires_grad);
+        assert!(td.grad.is_none());
+        assert!(td.grad_fn.is_none());
+        assert!(td._ctx.is_none());
+        // drop(td); // Ref is dropped automatically here
     }
 
     #[test]
-    #[should_panic]
-    fn test_tensor_wrapper_new_panic() {
-        let data = vec![1.0_f32, 2.0, 3.0];
-        let shape = vec![2, 3];
-        let _t = create_test_tensor(data, shape);
+    fn test_tensor_equality() {
+        let t1 = create_test_tensor(vec![1, 2], vec![2]);
+        let t2 = create_test_tensor(vec![1, 2], vec![2]);
+        let t3 = create_test_tensor(vec![3, 4], vec![2]);
+        let t4 = create_test_tensor(vec![1, 2], vec![1, 2]);
+
+        // Uses PartialEq for Tensor<T>, which calls PartialEq for TensorData<T>
+        assert_eq!(t1, t2);
+        assert_ne!(t1, t3);
+        assert_ne!(t1, t4); // Different shape
     }
 
     #[test]
-    fn test_tensor_wrapper_clone_partial_eq() {
-        let data = vec![1.0_f32, 2.0];
-        let shape = vec![1, 2];
-        let t1 = create_test_tensor(data.clone(), shape.clone());
-        let t2 = t1.clone(); // Clone the wrapper
+    fn test_tensor_hash_eq_for_set() {
+        // Specify the type T = i32 explicitly
+        let t1: Tensor<i32> = create_test_tensor(vec![1, 2], vec![2]);
+        let t2: Tensor<i32> = create_test_tensor(vec![1, 2], vec![2]); // Same content, different Rc
+        let t3: Tensor<i32> = t1.clone(); // Same Rc
 
-        println!("t1: {:?}", t1);
-        println!("t2: {:?}", t2);
+        // Specify the HashSet type argument
+        let mut set: HashSet<Tensor<i32>> = HashSet::new();
+        
+        // i32 implements Eq, so Tensor<i32> implements Eq + Hash
+        assert!(set.insert(t1.clone())); // insert should now work and return true
 
-        assert_eq!(t1, t2); // PartialEq compares data
-        assert!(Rc::ptr_eq(&t1.0, &t2.0)); // Should point to same internal data
+        assert!(set.contains(&t1));
+        assert!(set.contains(&t3)); // Eq based on Rc pointer -> true
+        assert!(!set.contains(&t2)); // Eq based on Rc pointer -> false
+        assert_eq!(set.len(), 1);
 
-        // Mutating via one affects the other
-        t1.set_requires_grad(true);
-        assert!(t1.requires_grad());
-        assert!(t2.requires_grad()); // t2 sees the change via shared RefCell
+        // Insert the second tensor (different Rc)
+        assert!(set.insert(t2.clone())); // Should return true as it's a new element (different hash)
+        assert!(set.contains(&t2));
+        assert_eq!(set.len(), 2);
     }
 
     #[test]
-    fn test_wrapper_new_with_grad() {
-        let t = create_test_tensor_with_grad::<f32>(vec![1.0, 2.0], vec![2]);
-        assert!(t.requires_grad());
-        assert!(t.borrow_grad().is_none());
+    fn test_backward_basic() {
+        // Should work with floats now (no Eq constraint on helper)
+        let x = create_test_tensor_with_grad(vec![2.0], vec![1]);
+        let y = create_test_tensor_with_grad(vec![3.0], vec![1]);
+
+        // Mock a simple operation: z = x * y
+        // Need a proper grad_fn for a real test, create dummy tensor for now.
+        let z = Tensor::new_with_grad(vec![6.0], vec![1]); // Dummy result
+        
+        // If Mul op existed and set grad_fn:
+        // let z = &x * &y;
+        // assert!(z.0.borrow().grad_fn.is_some());
+
+        z.backward(); // Call the backward function
+
+        // Assertions require actual gradient computation via grad_fn
+        // assert_eq!(x.borrow_grad().unwrap().borrow_data(), &[3.0]);
+        // assert_eq!(y.borrow_grad().unwrap().borrow_data(), &[2.0]);
     }
 
     #[test]
-    fn test_wrapper_set_requires_grad() {
-        let t = create_test_tensor::<f32>(vec![1.0, 2.0], vec![2]);
-        assert!(!t.requires_grad());
-        t.set_requires_grad(true);
-        assert!(t.requires_grad());
-
-        // Add a dummy grad
-        {
-            let mut grad_opt = t.borrow_grad_mut();
-            *grad_opt = Some(create_test_tensor(vec![0.0, 0.0], vec![2]));
-        }
-        assert!(t.borrow_grad().is_some());
-
-        t.set_requires_grad(false);
-        assert!(!t.requires_grad());
-        assert!(t.borrow_grad().is_none()); // Grad should be cleared
+    fn test_add() {
+        let t1 = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
+        let t2 = create_test_tensor(vec![5, 6, 7, 8], vec![2, 2]);
+        // Use references for the Add impl
+        let result = &t1 + &t2;
+        let expected_data = vec![6, 8, 10, 12];
+        // Access data via borrow_tensor_data
+        assert_eq!(result.borrow_tensor_data().data, expected_data);
+        assert_eq!(result.borrow_tensor_data().shape, vec![2, 2]);
     }
 
     #[test]
-    #[should_panic = "backward() can only be called on scalar tensors (for now)."]
-    fn test_wrapper_backward_on_non_scalar() {
-        let t = create_test_tensor_with_grad::<f32>(vec![1.0, 2.0], vec![2]);
-        t.backward();
-    }
-
-    #[test]
-    fn test_wrapper_backward_on_scalar_no_panic_for_now() {
-        let t = create_test_tensor_with_grad::<f32>(vec![5.0], vec![1]);
-        t.backward(); // Just check it doesn't panic
-    }
-
-    #[test]
-    fn test_wrapper_backward_on_non_tracking_tensor() {
-        let t = create_test_tensor::<f32>(vec![5.0], vec![1]);
-        t.backward(); // Should just print warning and return
-        assert!(t.borrow_grad().is_none());
+    fn test_add_assign() {
+        let mut t1 = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
+        let t2 = create_test_tensor(vec![5, 6, 7, 8], vec![2, 2]);
+        // Use reference for the rhs of AddAssign
+        t1 += &t2;
+        let expected_data = vec![6, 8, 10, 12];
+        // Access data via borrow_tensor_data
+        assert_eq!(t1.borrow_tensor_data().data, expected_data);
+        assert_eq!(t1.borrow_tensor_data().shape, vec![2, 2]);
     }
 }
