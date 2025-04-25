@@ -3,6 +3,10 @@
 
 use crate::tensor::Tensor;
 use std::ops::{Add, Sub, Mul, Div};
+use crate::autograd::BackwardOp;
+use std::rc::{Rc, Weak};
+use std::marker::PhantomData;
+use std::cell::{RefCell};
 
 /// Implements element-wise addition for two Tensors.
 ///
@@ -11,7 +15,7 @@ use std::ops::{Add, Sub, Mul, Div};
 /// Requires the element type `T` to implement `Add<Output = T>` and `Copy`.
 impl<'a, 'b, T> Add<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Add<Output = T> + Copy, // Copy needed for map logic
+    T: Add<Output = T> + Copy + Clone + 'static, // 'static needed for Rc<dyn Trait>
 {
     type Output = Tensor<T>;
 
@@ -37,6 +41,14 @@ where
         let result = Tensor::new(result_data, self_shape); // Use original shape
         if requires_grad { // Only set if true, default is false
             result.set_requires_grad(true);
+            // Create the backward operation context
+            let grad_fn = AddBackward {
+                input_a: self.get_weak_ref(), // Get Weak ref from Tensor wrapper
+                input_b: other.get_weak_ref(),
+                _phantom: PhantomData,
+            };
+            // Store it in the result tensor's data
+            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         // TODO: Set grad_fn if requires_grad
         result
@@ -160,6 +172,60 @@ where
         }
         // TODO: Set grad_fn if requires_grad
         result
+    }
+}
+
+// Define the concrete BackwardOp struct for addition
+// (Could be in autograd/add.rs later)
+struct AddBackward<T> {
+    // Need Weak refs to the input tensors' data RefCells to accumulate gradients.
+    // We need the Tensor wrapper to manage the Rc<RefCell<...>> access.
+    // Let's store Weak references to the *Tensor wrappers* for now.
+    // We'll access their gradients via methods later in the backward pass.
+    input_a: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_b: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    _phantom: PhantomData<T>, // Use PhantomData if T is unused directly
+}
+
+impl<T> BackwardOp<T> for AddBackward<T> {
+    fn backward(&self, upstream_grad: &Tensor<T>) {
+        println!("AddBackward: Accumulating gradients...");
+
+        // Attempt to upgrade weak references to strong ones (Rc)
+        if let (Some(input_a_rc), Some(input_b_rc)) =
+            (self.input_a.upgrade(), self.input_b.upgrade())
+        {
+            // Borrow gradients mutably
+            let mut input_a_tensor_data = input_a_rc.borrow_mut();
+            let mut input_b_tensor_data = input_b_rc.borrow_mut();
+
+            // --- Accumulate gradient for input A --- 
+            // This part requires Tensor addition and clone. 
+            // Placeholder logic:
+            if let Some(ref mut existing_grad_a) = input_a_tensor_data.grad {
+                 // Need to implement += or similar for Tensor
+                 // *existing_grad_a = existing_grad_a + upstream_grad; // Hypothetical
+                 println!("  -> Accumulating grad for input A (Op needed)");
+            } else {
+                 input_a_tensor_data.grad = Some(upstream_grad.clone());
+                 println!("  -> Setting grad for input A");
+            }
+            // Ensure requires_grad is true if we set a grad
+            // input_a_tensor_data.requires_grad = true;
+
+            // --- Accumulate gradient for input B --- 
+            if let Some(ref mut existing_grad_b) = input_b_tensor_data.grad {
+                 println!("  -> Accumulating grad for input B (Op needed)");
+                 // *existing_grad_b = existing_grad_b + upstream_grad; // Hypothetical
+            } else {
+                 input_b_tensor_data.grad = Some(upstream_grad.clone());
+                 println!("  -> Setting grad for input B");
+            }
+            // input_b_tensor_data.requires_grad = true;
+
+        } else {
+            eprintln!("Error: Could not upgrade weak references in AddBackward. Inputs might have been dropped.");
+        }
     }
 }
 

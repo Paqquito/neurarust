@@ -2,6 +2,7 @@
 use std::cell::{Ref, RefCell, RefMut}; // Import RefCell related types
 use std::fmt;
 use std::rc::{Rc, Weak}; // Import Rc and Weak
+use crate::autograd::BackwardOp; // Import the new trait
 
 // --- Internal Data Structure ---
 
@@ -13,7 +14,7 @@ pub(crate) struct TensorData<T> {
     // Autograd fields
     pub(crate) requires_grad: bool,
     pub(crate) grad: Option<Tensor<T>>, // Stores the public wrapper type
-    pub(crate) grad_fn: Option<Rc<dyn std::any::Any>>, // Placeholder type
+    pub(crate) grad_fn: Option<Rc<dyn BackwardOp<T>>>, // Use the actual trait object for the gradient function
                                              // TODO: Replace Any with actual BackwardOp trait later
                                              // pub(crate) grad_fn: Option<GradientContext<T>>,
 }

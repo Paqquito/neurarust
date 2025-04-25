@@ -1,4 +1,5 @@
 // Déclare les modules principaux de la crate
+pub mod autograd;
 pub mod creation;
 pub mod indexing;
 pub mod ops;
