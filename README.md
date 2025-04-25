@@ -45,7 +45,7 @@ Voir [`Objectifs.md`](Objectifs.md) pour la roadmap complète.
 1.  **Prérequis :** Assurez-vous d'avoir [Rust installé](https://www.rust-lang.org/tools/install).
 2.  **Cloner le dépôt :**
     ```bash
-    git clone https://github.com/TODO/NeuraRust.git # Mettre l'URL correcte
+    git clone https://github.com/Paqquito/NeuraRust.git # Mettre l'URL correcte
     cd NeuraRust
     ```
 3.  **Compiler :**
@@ -59,8 +59,8 @@ Voir [`Objectifs.md`](Objectifs.md) pour la roadmap complète.
 
 ## 🤝 Contribution
 
-Les contributions sont les bienvenues ! Veuillez consulter `CONTRIBUTING.md` (à créer) pour les directives.
+Les contributions sont les bienvenues ! Veuillez consulter [`CONTRIBUTING.md`](CONTRIBUTING.md) pour les directives.
 
 ## 📜 Licence
 
-Ce projet est sous licence [LICENSE] (à choisir, ex: MIT ou Apache 2.0). 
+Ce projet est sous licence [MIT](LICENSE). 
