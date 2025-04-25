@@ -62,7 +62,7 @@ where
 /// Requires the element type `T` to implement `Sub<Output = T>` and `Copy`.
 impl<'a, 'b, T> Sub<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Sub<Output = T> + Copy,
+    T: Sub<Output = T> + Copy + Clone + 'static, // Add Clone and 'static
 {
     type Output = Tensor<T>;
 
@@ -88,6 +88,12 @@ where
         let result = Tensor::new(result_data, self_shape);
         if requires_grad {
             result.set_requires_grad(true);
+            let grad_fn = SubBackward {
+                input_a: self.get_weak_ref(),
+                input_b: other.get_weak_ref(),
+                _phantom: PhantomData,
+            };
+            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         // TODO: Set grad_fn if requires_grad
         result
@@ -102,7 +108,7 @@ where
 /// Note: This is NOT matrix multiplication.
 impl<'a, 'b, T> Mul<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Mul<Output = T> + Copy,
+    T: Mul<Output = T> + Copy + Clone + 'static, // Add Clone and 'static
 {
     type Output = Tensor<T>;
 
@@ -128,6 +134,14 @@ where
         let result = Tensor::new(result_data, self_shape);
         if requires_grad {
             result.set_requires_grad(true);
+            let grad_fn = MulBackward {
+                input_a: self.clone(), // Clone inputs for backward pass
+                input_b: other.clone(),
+                input_a_grad: self.get_weak_ref(),
+                input_b_grad: other.get_weak_ref(),
+                _phantom: PhantomData,
+            };
+            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         // TODO: Set grad_fn if requires_grad
         result
@@ -142,7 +156,7 @@ where
 /// Division by zero behavior depends on the underlying type `T`.
 impl<'a, 'b, T> Div<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Div<Output = T> + Copy,
+    T: Div<Output = T> + Copy + Clone + 'static, // Add Clone and 'static
 {
     type Output = Tensor<T>;
 
@@ -169,6 +183,14 @@ where
         let result = Tensor::new(result_data, self_shape);
         if requires_grad {
             result.set_requires_grad(true);
+            let grad_fn = DivBackward {
+                input_a: self.clone(), // Clone inputs needed for backward
+                input_b: other.clone(),
+                input_a_grad: self.get_weak_ref(),
+                input_b_grad: other.get_weak_ref(),
+                _phantom: PhantomData,
+            };
+            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         // TODO: Set grad_fn if requires_grad
         result
@@ -226,6 +248,52 @@ impl<T> BackwardOp<T> for AddBackward<T> {
         } else {
             eprintln!("Error: Could not upgrade weak references in AddBackward. Inputs might have been dropped.");
         }
+    }
+}
+
+struct SubBackward<T> {
+    input_a: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_b: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> BackwardOp<T> for SubBackward<T> {
+    fn backward(&self, upstream_grad: &Tensor<T>) {
+        println!("SubBackward: backward called (gradient accumulation pending)");
+        // TODO: Implement gradient accumulation (dA = dC * 1, dB = dC * -1)
+        // Requires Tensor negation and addition/accumulation
+    }
+}
+
+struct MulBackward<T> {
+    input_a: Tensor<T>, // Need to store clones of inputs for Mul gradient
+    input_b: Tensor<T>,
+    input_a_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_b_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> BackwardOp<T> for MulBackward<T> {
+    fn backward(&self, upstream_grad: &Tensor<T>) {
+        println!("MulBackward: backward called (gradient accumulation pending)");
+        // TODO: Implement gradient accumulation (dA = dC * B, dB = dC * A)
+        // Requires Tensor element-wise multiplication and addition/accumulation
+    }
+}
+
+struct DivBackward<T> {
+    input_a: Tensor<T>, // Need A for dB/dC
+    input_b: Tensor<T>, // Need B for dA/dC and dB/dC
+    input_a_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_b_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> BackwardOp<T> for DivBackward<T> {
+    fn backward(&self, upstream_grad: &Tensor<T>) {
+        println!("DivBackward: backward called (gradient accumulation pending)");
+        // TODO: Implement gradient accumulation (dA = dC * (1/B), dB = dC * (-A / B^2))
+        // Requires Tensor element-wise division, multiplication, negation, power/square, addition/accumulation
     }
 }
 

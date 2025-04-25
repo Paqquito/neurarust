@@ -3,6 +3,28 @@
 use crate::tensor::Tensor;
 use num_traits::Zero;
 use std::ops::{Add, Mul};
+use crate::autograd::BackwardOp;
+use std::rc::{Rc, Weak};
+use std::marker::PhantomData;
+use std::cell::RefCell;
+
+struct MatmulBackward<T> {
+    input_a: Tensor<T>, // Need clones of inputs for matmul gradient
+    input_b: Tensor<T>,
+    input_a_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_b_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    _phantom: PhantomData<T>,
+}
+
+impl<T> BackwardOp<T> for MatmulBackward<T> {
+     fn backward(&self, upstream_grad: &Tensor<T>) {
+        println!("MatmulBackward: backward called (gradient accumulation pending)");
+        // TODO: Implement gradient accumulation
+        // dA = dC @ B.T
+        // dB = A.T @ dC
+        // Requires Tensor transpose and matmul
+    }
+}
 
 impl<T> Tensor<T> {
     /// Performs matrix multiplication (matmul) between two 2D tensors (matrices).
@@ -19,7 +41,7 @@ impl<T> Tensor<T> {
     /// - Panics if the inner dimensions (`K`) do not match.
     pub fn matmul(&self, other: &Tensor<T>) -> Tensor<T>
     where
-        T: Add<Output = T> + Mul<Output = T> + Zero + Copy, // Constraints needed for matmul
+        T: Add<Output = T> + Mul<Output = T> + Zero + Copy + Clone + 'static,
     {
         // Get shapes (cloned)
         let self_shape = self.shape();
@@ -55,11 +77,19 @@ impl<T> Tensor<T> {
             }
         }
 
-        // Create the result tensor
+        // Create the result tensor and set up autograd context
         let requires_grad = self.requires_grad() || other.requires_grad();
         let result = Tensor::new(result_data, result_shape);
          if requires_grad {
             result.set_requires_grad(true);
+            let grad_fn = MatmulBackward {
+                input_a: self.clone(), // Clone inputs needed for backward
+                input_b: other.clone(),
+                input_a_grad: self.get_weak_ref(),
+                input_b_grad: other.get_weak_ref(),
+                _phantom: PhantomData,
+            };
+            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         // TODO: Set grad_fn if requires_grad
         result
