@@ -51,19 +51,22 @@ where
 mod tests {
     use super::*; // Imports Tensor from crate::tensor via crate root
     use crate::Tensor;
+    use num_traits::{One, Zero};
 
     #[test]
     fn test_zeros() {
         let shape = vec![2, 3];
         let t_zeros_f32 = Tensor::<f32>::zeros(shape.clone());
         let expected_data_f32 = vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0];
-        assert_eq!(t_zeros_f32.shape(), &shape);
-        assert_eq!(t_zeros_f32.data(), &expected_data_f32);
+        assert_eq!(t_zeros_f32.shape(), shape);
+        assert_eq!(t_zeros_f32.data(), expected_data_f32);
+        assert!(!t_zeros_f32.requires_grad());
 
         let t_zeros_i32 = Tensor::<i32>::zeros(shape.clone());
         let expected_data_i32 = vec![0, 0, 0, 0, 0, 0];
-        assert_eq!(t_zeros_i32.shape(), &shape);
-        assert_eq!(t_zeros_i32.data(), &expected_data_i32);
+        assert_eq!(t_zeros_i32.shape(), shape);
+        assert_eq!(t_zeros_i32.data(), expected_data_i32);
+        assert!(!t_zeros_i32.requires_grad());
     }
 
      #[test]
@@ -71,12 +74,14 @@ mod tests {
         let shape = vec![1, 4];
         let t_ones_f64 = Tensor::<f64>::ones(shape.clone());
         let expected_data_f64 = vec![1.0, 1.0, 1.0, 1.0];
-        assert_eq!(t_ones_f64.shape(), &shape);
-        assert_eq!(t_ones_f64.data(), &expected_data_f64);
+        assert_eq!(t_ones_f64.shape(), shape);
+        assert_eq!(t_ones_f64.data(), expected_data_f64);
+        assert!(!t_ones_f64.requires_grad());
 
         let t_ones_u8 = Tensor::<u8>::ones(shape.clone());
         let expected_data_u8 = vec![1, 1, 1, 1];
-         assert_eq!(t_ones_u8.shape(), &shape);
-        assert_eq!(t_ones_u8.data(), &expected_data_u8);
+        assert_eq!(t_ones_u8.shape(), shape);
+        assert_eq!(t_ones_u8.data(), expected_data_u8);
+        assert!(!t_ones_u8.requires_grad());
     }
 } 
