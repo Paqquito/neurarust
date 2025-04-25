@@ -12,10 +12,10 @@ use std::cell::{RefCell};
 ///
 /// Performs `&tensor1 + &tensor2`.
 /// The shapes of the two tensors must be identical.
-/// Requires the element type `T` to implement `Add<Output = T>` and `Copy`.
+/// Requires the element type `T` to implement `Add<Output = T>`, `AddAssign` (for grad), `Copy` and `Clone`.
 impl<'a, 'b, T> Add<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Add<Output = T> + Copy + Clone + 'static, // 'static needed for Rc<dyn Trait>
+    T: Add<Output = T> + AddAssign + Copy + Clone + 'static,
 {
     type Output = Tensor<T>;
 
@@ -200,12 +200,7 @@ where
 }
 
 // Define the concrete BackwardOp struct for addition
-// (Could be in autograd/add.rs later)
 struct AddBackward<T> {
-    // Need Weak refs to the input tensors' data RefCells to accumulate gradients.
-    // We need the Tensor wrapper to manage the Rc<RefCell<...>> access.
-    // Let's store Weak references to the *Tensor wrappers* for now.
-    // We'll access their gradients via methods later in the backward pass.
     input_a: Weak<RefCell<crate::tensor::TensorData<T>>>,
     input_b: Weak<RefCell<crate::tensor::TensorData<T>>>,
     _phantom: PhantomData<T>, // Use PhantomData if T is unused directly
@@ -213,36 +208,38 @@ struct AddBackward<T> {
 
 impl<T> BackwardOp<T> for AddBackward<T>
 where
-    T: Add<Output = T> + Copy + Clone + 'static,
+    // Need Clone for deep copy grad init, AddAssign for accum, Copy for AddAssign op, 'static
+    T: AddAssign + Copy + Clone + 'static, 
 {
      fn backward(&self, upstream_grad: &Tensor<T>) {
-        if let (Some(input_a_rc), Some(input_b_rc)) =
-            (self.input_a.upgrade(), self.input_b.upgrade())
-        {
-            let input_a_tensor = Tensor(input_a_rc);
-            let input_b_tensor = Tensor(input_b_rc);
-
-            // Accumulate gradient for input A using Add + Clone
-            let mut grad_a_opt = input_a_tensor.borrow_grad_mut();
-            let new_grad_a = if let Some(existing_grad_a) = grad_a_opt.as_ref() {
-                 // Use Add instead of AddAssign
-                 &*existing_grad_a + upstream_grad // Requires Add<&Tensor<T>> for &Tensor<T>
-            } else {
-                 upstream_grad.clone()
-            };
-            *grad_a_opt = Some(new_grad_a);
-
-            // Accumulate gradient for input B using Add + Clone
-            let mut grad_b_opt = input_b_tensor.borrow_grad_mut();
-            let new_grad_b = if let Some(existing_grad_b) = grad_b_opt.as_ref() {
-                  &*existing_grad_b + upstream_grad
-            } else {
-                  upstream_grad.clone()
-            };
-             *grad_b_opt = Some(new_grad_b);
-
+        // Accumulate gradient for Input A
+        if let Some(input_a_rc) = self.input_a.upgrade() {
+            let mut input_a_td = input_a_rc.borrow_mut();
+            if input_a_td.requires_grad {
+                if let Some(existing_grad_a) = input_a_td.grad.as_mut() {
+                    *existing_grad_a += upstream_grad;
+                } else {
+                    // Initialize gradient with a deep copy
+                    input_a_td.grad = Some(Tensor::new(upstream_grad.data(), upstream_grad.shape())); // Requires T: Clone
+                }
+            }
         } else {
-            eprintln!("Error: Could not upgrade weak references in AddBackward. Inputs might have been dropped.");
+             eprintln!("Warning: Weak ref upgrade failed for input A in AddBackward.");
+        }
+
+        // Accumulate gradient for Input B
+        if let Some(input_b_rc) = self.input_b.upgrade() {
+            let mut input_b_td = input_b_rc.borrow_mut();
+            if input_b_td.requires_grad {
+                if let Some(existing_grad_b) = input_b_td.grad.as_mut() {
+                    *existing_grad_b += upstream_grad;
+                } else {
+                    // Initialize gradient with a deep copy
+                    input_b_td.grad = Some(Tensor::new(upstream_grad.data(), upstream_grad.shape())); // Requires T: Clone
+                }
+            }
+        } else {
+             eprintln!("Warning: Weak ref upgrade failed for input B in AddBackward.");
         }
     }
 }
@@ -472,5 +469,55 @@ mod tests {
         let t2 = create_test_tensor(vec![5_i32, 6], vec![1, 2]);
 
         t1 += &t2; // Should panic
+    }
+
+    #[test]
+    fn test_add_backward() {
+        //Requires T: AddAssign + Copy + Clone + 'static + PartialEq + Debug + Zero
+        let a = create_test_tensor_with_grad::<f32>(vec![2.0, 3.0], vec![2]);
+        let b = create_test_tensor_with_grad::<f32>(vec![4.0, 5.0], vec![2]);
+
+        // Perform addition - this sets up the grad_fn
+        let c = &a + &b;
+        assert!(c.requires_grad());
+        let grad_fn_option = c.0.borrow().grad_fn.clone(); // Clone the Rc
+        assert!(grad_fn_option.is_some());
+        let grad_fn = grad_fn_option.unwrap(); // grad_fn is Rc<dyn BackwardOp<f32>>
+
+        // Check initial grads of a and b are None
+        assert!(a.borrow_grad().is_none());
+        assert!(b.borrow_grad().is_none());
+
+        // Create upstream gradient (gradient of loss w.r.t c)
+        let upstream_grad = Tensor::new(vec![1.0, 1.0], vec![2]); // Usually starts with ones for scalars
+
+        // Execute the backward pass for the Add operation
+        grad_fn.backward(&upstream_grad);
+
+        // Check gradients of a and b within a scope to drop borrows early
+        {
+            let grad_a = a.borrow_grad();
+            let grad_b = b.borrow_grad();
+
+            assert!(grad_a.is_some());
+            assert!(grad_b.is_some());
+
+            // Gradients dA and dB should be equal to upstream_grad for addition
+            let expected_grad = Tensor::new(vec![1.0, 1.0], vec![2]);
+            assert_eq!(grad_a.as_ref().unwrap(), &expected_grad);
+            assert_eq!(grad_b.as_ref().unwrap(), &expected_grad);
+        } // grad_a and grad_b (Ref<...>) are dropped here
+
+        // Test accumulation: call backward again with a different upstream grad
+        let upstream_grad_2 = Tensor::new(vec![0.5, -0.5], vec![2]);
+        grad_fn.backward(&upstream_grad_2); // Should not panic now
+
+        // Check accumulated gradients
+        let grad_a_accum = a.borrow_grad();
+        let grad_b_accum = b.borrow_grad();
+        let expected_accum_grad = Tensor::new(vec![1.5, 0.5], vec![2]); // 1.0 + 0.5, 1.0 - 0.5
+
+        assert_eq!(grad_a_accum.as_ref().unwrap(), &expected_accum_grad);
+        assert_eq!(grad_b_accum.as_ref().unwrap(), &expected_accum_grad);
     }
 } 
