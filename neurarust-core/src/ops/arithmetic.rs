@@ -330,12 +330,44 @@ struct MulBackward<T> {
     _phantom: PhantomData<T>,
 }
 
-impl<T> BackwardOp<T> for MulBackward<T> {
-    fn backward(&self, _upstream_grad: &Tensor<T>) {
-        println!("MulBackward: backward called (gradient accumulation pending)");
-        // TODO: Implement gradient accumulation (dA = dC * B, dB = dC * A)
-        // Use self.input_a_val and self.input_b_val for calculations
-        // Accumulate into refs obtained from self.input_a_ref.upgrade(), self.input_b_ref.upgrade()
+impl<T> BackwardOp<T> for MulBackward<T>
+where
+    // Needs Mul for grad calc, AddAssign for accum, Clone for init, Copy for ops, 'static
+    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static,
+{
+    fn backward(&self, upstream_grad: &Tensor<T>) {
+        // Calculate local gradients: dA = upstream_grad * B; dB = upstream_grad * A
+        // Use the stored values (input_a_val, input_b_val)
+        let grad_a_local = upstream_grad * &self.input_b_val; // Requires Mul<&Tensor<T>> for &Tensor<T>
+        let grad_b_local = upstream_grad * &self.input_a_val; 
+
+        // Accumulate gradient for Input A
+        if let Some(input_a_rc) = self.input_a_ref.upgrade() {
+            let mut input_a_td = input_a_rc.borrow_mut();
+            if input_a_td.requires_grad {
+                if let Some(existing_grad_a) = input_a_td.grad.as_mut() {
+                    *existing_grad_a += &grad_a_local;
+                } else {
+                    input_a_td.grad = Some(grad_a_local); // grad_a_local is already a new Tensor
+                }
+            }
+        } else {
+             eprintln!("Warning: Weak ref upgrade failed for input A in MulBackward.");
+        }
+
+        // Accumulate gradient for Input B
+        if let Some(input_b_rc) = self.input_b_ref.upgrade() {
+            let mut input_b_td = input_b_rc.borrow_mut();
+            if input_b_td.requires_grad {
+                if let Some(existing_grad_b) = input_b_td.grad.as_mut() {
+                    *existing_grad_b += &grad_b_local;
+                } else {
+                    input_b_td.grad = Some(grad_b_local); // grad_b_local is already a new Tensor
+                }
+            }
+        } else {
+             eprintln!("Warning: Weak ref upgrade failed for input B in MulBackward.");
+        }
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
@@ -353,7 +385,10 @@ struct DivBackward<T> {
     _phantom: PhantomData<T>,
 }
 
-impl<T> BackwardOp<T> for DivBackward<T> {
+impl<T> BackwardOp<T> for DivBackward<T>
+where
+    T: Div<Output = T> + Copy + Clone + 'static + AddAssign, // Tentatively add AddAssign+Copy
+{
     fn backward(&self, _upstream_grad: &Tensor<T>) {
         println!("DivBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation (dA = dC * (1/B), dB = dC * (-A / B^2))
@@ -667,6 +702,63 @@ mod tests {
         let grad_b_accum = b.borrow_grad();
         let expected_accum_grad_a_data = vec![1.5, -0.5]; 
         let expected_accum_grad_b_data = vec![-1.5, 0.5];
+        let expected_accum_shape = vec![2];
+
+        assert_eq!(grad_a_accum.as_ref().unwrap().data(), expected_accum_grad_a_data, "Accum Grad A data mismatch");
+        assert_eq!(grad_a_accum.as_ref().unwrap().shape(), expected_accum_shape, "Accum Grad A shape mismatch");
+        assert_eq!(grad_b_accum.as_ref().unwrap().data(), expected_accum_grad_b_data, "Accum Grad B data mismatch");
+        assert_eq!(grad_b_accum.as_ref().unwrap().shape(), expected_accum_shape, "Accum Grad B shape mismatch");
+    }
+
+    #[test]
+    fn test_mul_backward() {
+        // Requires T: Mul, AddAssign, Copy, Clone, 'static, PartialEq, Debug, Zero
+        let a = create_test_tensor_with_grad::<f32>(vec![2.0, 3.0], vec![2]);
+        let b = create_test_tensor_with_grad::<f32>(vec![4.0, 5.0], vec![2]);
+
+        // Perform multiplication C = A * B
+        let c = &a * &b;
+        assert!(c.requires_grad());
+        let grad_fn_option = c.0.borrow().grad_fn.clone();
+        assert!(grad_fn_option.is_some());
+        let grad_fn = grad_fn_option.unwrap();
+
+        // Check initial grads
+        assert!(a.borrow_grad().is_none());
+        assert!(b.borrow_grad().is_none());
+
+        // Upstream gradient dL/dC
+        let upstream_grad = Tensor::new(vec![1.0, -1.0], vec![2]);
+
+        // Execute backward
+        grad_fn.backward(&upstream_grad);
+
+        // Check gradients
+        // dL/dA = dL/dC * B = [1.0, -1.0] * [4.0, 5.0] = [4.0, -5.0]
+        // dL/dB = dL/dC * A = [1.0, -1.0] * [2.0, 3.0] = [2.0, -3.0]
+        {
+            let grad_a = a.borrow_grad();
+            let grad_b = b.borrow_grad();
+            assert!(grad_a.is_some());
+            assert!(grad_b.is_some());
+            let expected_grad_a_data = vec![4.0, -5.0];
+            let expected_grad_b_data = vec![2.0, -3.0]; 
+            let expected_shape = vec![2];
+            assert_eq!(grad_a.as_ref().unwrap().data(), expected_grad_a_data, "Grad A data mismatch");
+            assert_eq!(grad_a.as_ref().unwrap().shape(), expected_shape, "Grad A shape mismatch");
+            assert_eq!(grad_b.as_ref().unwrap().data(), expected_grad_b_data, "Grad B data mismatch");
+            assert_eq!(grad_b.as_ref().unwrap().shape(), expected_shape, "Grad B shape mismatch");
+        }
+
+        // Test accumulation
+        let upstream_grad_2 = Tensor::new(vec![0.5, 0.5], vec![2]);
+        grad_fn.backward(&upstream_grad_2);
+        // Accumulate A: [4.0, -5.0] + ( [0.5, 0.5] * [4.0, 5.0] ) = [4.0, -5.0] + [2.0, 2.5] = [6.0, -2.5]
+        // Accumulate B: [2.0, -3.0] + ( [0.5, 0.5] * [2.0, 3.0] ) = [2.0, -3.0] + [1.0, 1.5] = [3.0, -1.5]
+        let grad_a_accum = a.borrow_grad();
+        let grad_b_accum = b.borrow_grad();
+        let expected_accum_grad_a_data = vec![6.0, -2.5]; 
+        let expected_accum_grad_b_data = vec![3.0, -1.5];
         let expected_accum_shape = vec![2];
 
         assert_eq!(grad_a_accum.as_ref().unwrap().data(), expected_accum_grad_a_data, "Accum Grad A data mismatch");
