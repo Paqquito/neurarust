@@ -5,7 +5,6 @@ use std::ops::{Neg, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
-use std::iter::Sum as IterSum;
 
 // --- Forward Operation --- 
 

@@ -6,7 +6,6 @@ use crate::autograd::BackwardOp; // Import the new trait
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use num_traits::{One, Zero}; // Import the One and Zero traits
-use std::fmt::{Debug, Formatter, Result as FmtResult};
 use crate::tensor_data::TensorData; // Use the new module
 
 // --- Public Tensor Wrapper ---
