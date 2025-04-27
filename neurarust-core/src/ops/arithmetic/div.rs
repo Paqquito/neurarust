@@ -108,7 +108,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::Tensor;
-    use num_traits::{Zero, One};
+    use num_traits::Zero;
 
     fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)

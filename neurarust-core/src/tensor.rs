@@ -222,18 +222,6 @@ impl<T> Tensor<T> {
     pub(crate) fn get_weak_ref(&self) -> Weak<RefCell<TensorData<T>>> {
         Rc::downgrade(&self.0)
     }
-
-     // Helper for indexing (temporary replacement for std::ops::Index)
-     // Needed by naive matmul. Returns owned value.
-     pub(crate) fn get_val(&self, index: [usize; 2]) -> T
-     where T: Copy
-     {
-         let td = self.0.borrow();
-         assert_eq!(td.shape.len(), 2, "get_val with [row, col] requires a 2D tensor.");
-         let (rows, cols) = (td.shape[0], td.shape[1]);
-         assert!(index[0] < rows && index[1] < cols, "Index out of bounds");
-         td.data[index[0] * cols + index[1]]
-     }
 }
 
 // --- Trait Implementations for Tensor ---
@@ -289,19 +277,21 @@ impl<T> Hash for Tensor<T> {
 // --- Tests ---
 
 #[cfg(test)]
-mod tests {
-    use super::*; // Import items from parent module (Tensor, TensorData, etc.)
-    use num_traits::Zero; // Needed for test helpers
+pub(crate) mod tests {
+    use super::*; // Import parent module content
+    use num_traits::Zero;
+    use std::collections::HashSet;
+     
 
-    // Helper to create basic tensors for tests
-    fn create_test_tensor<T: Clone + Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    // Helper to create a basic tensor for tests
+    pub(crate) fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)
     }
-    // Helper to create tensors requiring gradients
-     fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        let tensor = Tensor::new(data, shape);
-        tensor.set_requires_grad(true);
-        tensor
+    // Helper to create a tensor that requires grad for tests
+    pub(crate) fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+        let t = Tensor::new(data, shape);
+        t.set_requires_grad(true);
+        t
     }
 
     #[test]

@@ -80,20 +80,25 @@ where
     T: Copy + Clone + 'static + AddAssign + One,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
+        let grad_clone = upstream_grad.clone(); // Clone upstream_grad to avoid borrow issues
+        grad_clone.set_requires_grad(false); // Ensure the clone doesn't require grad
+
         if let Some(input_rc) = self.input_ref.upgrade() { 
             let mut input_td = input_rc.borrow_mut();
             if input_td.requires_grad {
                 // The gradient of transpose is the transpose of the gradient.
-                let local_grad = upstream_grad.transpose(); // Transpose the upstream grad
+                // Use the clone in calculations
+                let local_grad = grad_clone.transpose(); 
+                local_grad.set_requires_grad(false); // Ensure gradient tensor does not require grad
                 
                 // Sanity check: shape should match original input
                 assert_eq!(local_grad.shape(), self.original_shape, "Gradient shape mismatch in TransposeBackward");
 
                 // Accumulate gradient
-                if let Some(ref mut grad) = input_td.grad {
-                    *grad += &local_grad;
+                if let Some(existing_grad) = input_td.grad.as_mut() {
+                    *existing_grad += &local_grad; // Use AddAssign
                 } else {
-                    input_td.grad = Some(local_grad);
+                    input_td.grad = Some(local_grad); // Assign the new grad (requires_grad=false)
                 }
             }
         }

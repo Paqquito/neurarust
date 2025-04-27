@@ -72,7 +72,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::Tensor;
-    use crate::tensor_data::TensorData;
+    
     use num_traits::{Zero, One};
     use std::ops::AddAssign;
     use std::iter::Sum as IterSum;

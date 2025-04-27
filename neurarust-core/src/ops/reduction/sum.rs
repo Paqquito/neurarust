@@ -56,6 +56,8 @@ where
     T: Clone + Copy + One + AddAssign + 'static,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
+        upstream_grad.set_requires_grad(false); // Ensure upstream grad doesn't require grad
+        
         if let Some(input_rc) = self.input_ref.upgrade() {
             let mut input_td = input_rc.borrow_mut();
             if input_td.requires_grad {
@@ -67,12 +69,13 @@ where
                 // Create the local gradient tensor (same shape as input)
                 let grad_data = vec![grad_val; self.input_numel];
                 let local_grad = Tensor::new(grad_data, self.input_shape.clone());
+                // local_grad already has requires_grad=false from Tensor::new
 
                 // Accumulate gradient
-                if let Some(ref mut grad) = input_td.grad {
-                    *grad += &local_grad;
+                if let Some(existing_grad) = input_td.grad.as_mut() {
+                    *existing_grad += &local_grad; // Use AddAssign
                 } else {
-                    input_td.grad = Some(local_grad);
+                    input_td.grad = Some(local_grad); // Assign the new grad (requires_grad=false)
                 }
             }
         }

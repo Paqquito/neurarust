@@ -24,33 +24,41 @@ where
     fn backward(&self, upstream_grad: &Tensor<T>) {
         // grad_A = upstream_grad @ B.T
         // grad_B = A.T @ upstream_grad
+        let grad_clone = upstream_grad.clone(); // Clone upstream_grad to avoid borrow issues
+        grad_clone.set_requires_grad(false); // Ensure the clone doesn't require grad
         
         // Calculate gradient for input A
         if let Some(input_a_rc) = self.input_a_ref.upgrade() {
-            if input_a_rc.borrow().requires_grad { 
+            let mut input_a_td = input_a_rc.borrow_mut(); // Borrow mutably once
+            if input_a_td.requires_grad { 
                 let input_b_transposed = self.input_b.transpose();
-                let grad_a = upstream_grad.matmul(&input_b_transposed);
+                // Use the clone in calculations
+                let grad_a = grad_clone.matmul(&input_b_transposed);
+                grad_a.set_requires_grad(false); // Ensure gradient tensor does not require grad
+                
                 // Accumulate gradient for A
-                let mut input_a_td = input_a_rc.borrow_mut(); // Borrow mutably now
-                if let Some(ref mut grad) = input_a_td.grad {
-                    *grad += &grad_a; 
+                if let Some(existing_grad) = input_a_td.grad.as_mut() {
+                    *existing_grad += &grad_a; // Use AddAssign
                 } else {
-                    input_a_td.grad = Some(grad_a);
+                    input_a_td.grad = Some(grad_a); // Assign the new grad (requires_grad=false)
                 }
             }
         }
         
         // Calculate gradient for input B
         if let Some(input_b_rc) = self.input_b_ref.upgrade() {
-            if input_b_rc.borrow().requires_grad {
+            let mut input_b_td = input_b_rc.borrow_mut(); // Borrow mutably once
+            if input_b_td.requires_grad {
                  let input_a_transposed = self.input_a.transpose();
-                 let grad_b = input_a_transposed.matmul(upstream_grad);
+                 // Use the clone in calculations
+                 let grad_b = input_a_transposed.matmul(&grad_clone);
+                 grad_b.set_requires_grad(false); // Ensure gradient tensor does not require grad
+                 
                  // Accumulate gradient for B
-                 let mut input_b_td = input_b_rc.borrow_mut(); // Borrow mutably now
-                 if let Some(ref mut grad) = input_b_td.grad {
-                     *grad += &grad_b;
+                 if let Some(existing_grad) = input_b_td.grad.as_mut() {
+                     *existing_grad += &grad_b; // Use AddAssign
                  } else {
-                     input_b_td.grad = Some(grad_b);
+                     input_b_td.grad = Some(grad_b); // Assign the new grad (requires_grad=false)
                  }
             }
         }

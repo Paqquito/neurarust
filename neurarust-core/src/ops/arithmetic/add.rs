@@ -84,14 +84,22 @@ where
     T: AddAssign + Copy + Clone + 'static,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
+        // Ensure the upstream grad tensor itself does not require grad
+        // (Already handled by cloning below)
+        let grad_clone = upstream_grad.clone(); // Clone upstream_grad to avoid borrow issues
+        grad_clone.set_requires_grad(false);
+
         // Accumulate gradient for Input A
         if let Some(input_a_rc) = self.input_a.upgrade() {
             let mut input_a_td = input_a_rc.borrow_mut();
             if input_a_td.requires_grad {
                 if let Some(existing_grad_a) = input_a_td.grad.as_mut() {
-                    *existing_grad_a += upstream_grad;
+                    // Use AddAssign directly on the existing gradient tensor
+                    *existing_grad_a += &grad_clone;
                 } else {
-                    input_a_td.grad = Some(Tensor::new(upstream_grad.data(), upstream_grad.shape()));
+                    // Create a new gradient tensor (Tensor::new sets requires_grad=false)
+                    // Clone data/shape from the clone, not the original ref
+                    input_a_td.grad = Some(Tensor::new(grad_clone.data(), grad_clone.shape()));
                 }
             }
         } else {
@@ -103,9 +111,12 @@ where
             let mut input_b_td = input_b_rc.borrow_mut();
             if input_b_td.requires_grad {
                 if let Some(existing_grad_b) = input_b_td.grad.as_mut() {
-                    *existing_grad_b += upstream_grad;
+                    // Use AddAssign directly on the existing gradient tensor
+                    *existing_grad_b += &grad_clone;
                 } else {
-                    input_b_td.grad = Some(Tensor::new(upstream_grad.data(), upstream_grad.shape()));
+                    // Create a new gradient tensor (Tensor::new sets requires_grad=false)
+                    // Clone data/shape from the clone, not the original ref
+                    input_b_td.grad = Some(Tensor::new(grad_clone.data(), grad_clone.shape()));
                 }
             }
         } else {

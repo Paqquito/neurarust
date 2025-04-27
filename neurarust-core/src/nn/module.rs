@@ -1,5 +1,4 @@
 use crate::tensor::Tensor;
-use crate::nn::parameter::Parameter;
 use std::fmt::Debug;
 
 /// The base trait for all neural network modules (layers, containers, etc.).
