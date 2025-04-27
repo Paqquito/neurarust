@@ -5,6 +5,7 @@ use std::ops::{Neg, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
+use std::iter::Sum as IterSum;
 
 // --- Forward Operation --- 
 
@@ -75,11 +76,12 @@ mod tests {
     use crate::tensor_data::TensorData;
     use num_traits::{Zero, One};
     use std::ops::AddAssign;
+    use std::iter::Sum as IterSum;
 
-    fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq + Zero + AddAssign + One + Copy + IterSum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)
     }
-     fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+     fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero + AddAssign + One + Copy + IterSum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new_with_grad(data, shape)
     }
 
@@ -116,48 +118,11 @@ mod tests {
         let t3 = &t1 + &t2;
         let t4 = -&t3;
 
-        let loss = {
-             let t4_data = t4.data();
-             let sum_val = t4_data.iter().sum::<f32>();
-             let loss_tensor = Tensor::new_with_grad(vec![sum_val], vec![1]);
-
-             struct SimpleSumBackward<T> {
-                 input_ref: std::rc::Weak<std::cell::RefCell<TensorData<T>>>,
-                 input_numel: usize,
-                 input_shape: Vec<usize>,
-                 _phantom: std::marker::PhantomData<T>
-             }
-             impl<T: Clone + Copy + One + AddAssign + 'static> crate::autograd::BackwardOp<T> for SimpleSumBackward<T> {
-                 fn backward(&self, up_grad: &Tensor<T>) {
-                    if let Some(in_rc) = self.input_ref.upgrade() {
-                         let mut in_td = in_rc.borrow_mut();
-                         if in_td.requires_grad {
-                             let grad_val = up_grad.data()[0];
-                             let grad_data = vec![grad_val; self.input_numel];
-                             let local_grad = Tensor::new(grad_data, self.input_shape.clone());
-                             if let Some(ref mut grad) = in_td.grad {
-                                 *grad += &local_grad;
-                             } else {
-                                 in_td.grad = Some(local_grad);
-                             }
-                         }
-                     }
-                 }
-                 fn inputs(&self) -> Vec<std::rc::Weak<std::cell::RefCell<TensorData<T>>>> {
-                     vec![self.input_ref.clone()]
-                 }
-             }
-             loss_tensor.0.borrow_mut().grad_fn = Some(std::rc::Rc::new(SimpleSumBackward{
-                 input_ref: t4.get_weak_ref(),
-                 input_numel: t4.numel(),
-                 input_shape: t4.shape(),
-                 _phantom: std::marker::PhantomData
-             }));
-             loss_tensor
-        };
+        let loss = t4.sum();
 
         assert!(loss.requires_grad());
         assert_eq!(loss.data(), vec![-21.0_f32]);
+        assert!(loss.grad_fn().is_some());
 
         assert!(t1.grad().is_none());
         assert!(t2.grad().is_none());
@@ -169,11 +134,7 @@ mod tests {
         let expected_grad = vec![-1.0_f32, -1.0, -1.0];
         let expected_grad_t4 = vec![1.0_f32, 1.0, 1.0];
 
-        // Check gradients
-        // The grad of the 'loss' tensor itself is initialized to One by backward(), so we don't check for None.
-        // assert!(loss.grad().is_none()); // REMOVED THIS ASSERTION
-        assert_eq!(loss.grad().expect("Grad for loss missing").data(), vec![1.0_f32], "Initial grad for loss should be 1.0");
-
+        assert_eq!(loss.grad().expect("Grad for loss missing").data(), vec![1.0_f32]);
         assert_eq!(t4.grad().expect("Grad for t4 missing").data(), expected_grad_t4);
         assert_eq!(t3.grad().expect("Grad for t3 missing").data(), expected_grad);
         assert_eq!(t1.grad().expect("Grad for t1 missing").data(), expected_grad);
