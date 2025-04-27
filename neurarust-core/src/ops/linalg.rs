@@ -16,13 +16,19 @@ struct MatmulBackward<T> {
     _phantom: PhantomData<T>,
 }
 
-impl<T> BackwardOp<T> for MatmulBackward<T> {
+impl<T> BackwardOp<T> for MatmulBackward<T> 
+where
+    T: 'static, // Add any other bounds needed by backward logic later
+{
     fn backward(&self, _upstream_grad: &Tensor<T>) {
         println!("MatmulBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation
-        // dA = dC @ B.T
-        // dB = A.T @ dC
-        // Requires Tensor transpose and matmul
+        // Requires tensor transpose, matmul, and gradient accumulation logic
+    }
+
+    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
+        // Return the weak references to the inputs used for gradient propagation
+        vec![self.input_a_grad.clone(), self.input_b_grad.clone()]
     }
 }
 
@@ -113,10 +119,13 @@ mod tests {
     fn test_matmul_2x2() {
         let a = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
         let b = create_test_tensor(vec![5, 6, 7, 8], vec![2, 2]);
-        let expected = create_test_tensor(vec![19, 22, 43, 50], vec![2, 2]);
+        let expected_data = vec![19, 22, 43, 50];
+        let expected_shape = vec![2, 2];
 
         let result = a.matmul(&b);
-        assert_eq!(result, expected);
+        // Compare content
+        assert_eq!(result.data(), expected_data, "Data mismatch");
+        assert_eq!(result.shape(), expected_shape, "Shape mismatch");
         assert!(!result.requires_grad());
     }
 
@@ -124,10 +133,13 @@ mod tests {
     fn test_matmul_2x3_3x2() {
         let a = create_test_tensor(vec![1, 2, 3, 4, 5, 6], vec![2, 3]);
         let b = create_test_tensor(vec![7, 8, 9, 10, 11, 12], vec![3, 2]);
-        let expected = create_test_tensor(vec![58, 64, 139, 154], vec![2, 2]);
+        let expected_data = vec![58, 64, 139, 154];
+        let expected_shape = vec![2, 2];
 
         let result = a.matmul(&b);
-        assert_eq!(result, expected);
+        // Compare content
+        assert_eq!(result.data(), expected_data, "Data mismatch");
+        assert_eq!(result.shape(), expected_shape, "Shape mismatch");
         assert!(!result.requires_grad());
     }
 

@@ -40,7 +40,7 @@ where
     T: Copy,
 {
     fn index_mut(&mut self, index: [usize; 2]) -> &mut Self::Output {
-        let mut td = self.0.borrow_mut();
+        let td = self.0.borrow_mut();
         assert_eq!(td.shape.len(), 2, "2D indexing requires a 2D tensor.");
         let rows = td.shape[0];
         let cols = td.shape[1];

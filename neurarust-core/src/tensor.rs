@@ -178,83 +178,60 @@ impl<T> Tensor<T> {
     where
         T: One + Clone + 'static, // Removed Eq + Hash. Only need One+Clone for grad init, 'static for storage.
     {
-        let tensor_data = self.0.borrow();
+        // Check requires_grad and scalar property
+        {
+            let tensor_data = self.0.borrow();
+            if !tensor_data.requires_grad {
+                eprintln!("Warning: Called backward() on a tensor that does not require gradients.");
+                return;
+            }
+            if tensor_data.numel() != 1 {
+                // TODO: Allow backward on non-scalar tensors by providing the initial gradient
+                panic!("backward() can only be called on scalar tensors (for now).");
+            }
+        } // Drop borrow
 
-        if !tensor_data.requires_grad {
-            eprintln!("Warning: Called backward() on a tensor that does not require gradients.");
-            return;
-        }
-        if tensor_data.numel() != 1 {
-            panic!("backward() can only be called on scalar tensors (for now).");
-        }
-
-        // --- Topological Sort and Backward Pass --- 
-        // Use raw pointer of the RefCell as the key for visited set to track node identity.
+        // --- Topological Sort --- 
         let mut visited = HashSet::<*const RefCell<TensorData<T>>>::new();
         let mut nodes_sorted = Vec::new();
 
-        // Build the topologically sorted list of nodes involved in the graph
-        // Only need Clone for node.clone(), 'static for storage.
-        fn build_topo<T: Clone + 'static>(
-            node: &Tensor<T>, 
-            visited: &mut HashSet<*const RefCell<TensorData<T>>>,
-            sorted_list: &mut Vec<Tensor<T>>
-        ) {
-            let node_ptr = Rc::as_ptr(&node.0);
-            if visited.insert(node_ptr) { // Insert the pointer
-                // Prefix grad_fn with _ as it's not used yet for traversal
-                if let Some(_grad_fn) = &node.0.borrow().grad_fn {
-                    // Placeholder: Assume grad_fn has a method to get inputs
-                    // let inputs = _grad_fn.get_inputs(); // Hypothetical
-                    // for input_weak in inputs {
-                    //     if let Some(input_rc) = input_weak.upgrade() {
-                    //          let input_tensor = Tensor(input_rc); // Need to reconstruct Tensor wrapper
-                    //          build_topo(&input_tensor, visited, sorted_list);
-                    //     }
-                    // }
-                    // Simplified: Need to access inputs stored in grad_fn structure.
-                }
-                // Add node to sorted list *after* visiting its children (inputs)
-                sorted_list.push(node.clone());
-            }
-        }
-
-        // Drop the immutable borrow before calling build_topo which needs to clone self
-        drop(tensor_data);
-        // Pass the HashSet of pointers
+        // build_topo recursively adds nodes to nodes_sorted
         build_topo(self, &mut visited, &mut nodes_sorted);
 
-        // --- Initialize Gradient for the Final Node ---
-        {
-            let self_data_mut = self.0.borrow_mut();
-            if self_data_mut.grad.is_none() {
-                // Need a way to create Tensor::ones. For now, assume it exists and T is compatible.
-                // This is awkward. Ideally, gradient init is handled differently or `ones` is accessible.
-                // Placeholder: We can't easily call Tensor::ones here.
-                 println!("Backward: Initializing gradient for final node (needs Tensor::ones impl accessible)");
-                // self_data_mut.grad = Some(Tensor::ones(self_data_mut.shape.clone()));
-            } else {
-                // If grad exists, maybe accumulate? Or assume it's the start?
-                // Let's assume for now it must be None before backward.
-                println!("Backward: Final node gradient already exists?");
-            }
+        // --- Initialize Gradient for the Final Node --- 
+        // Gradient of the loss (self) w.r.t itself is 1.
+        { // New scope for mutable borrow
+            let mut self_data_mut = self.0.borrow_mut();
+            // Create a tensor of ones with the same shape as self
+            // Requires T: One + Clone
+            let grad_data = vec![T::one(); self_data_mut.numel()];
+            let grad_shape = self_data_mut.shape.clone();
+            // Initialize or overwrite the gradient
+            self_data_mut.grad = Some(Tensor::new(grad_data, grad_shape));
         }
 
         // --- Backward Pass through Sorted Nodes --- 
         println!("Backward: Processing {} nodes in topological order.", nodes_sorted.len());
         for node in nodes_sorted.iter().rev() { // Process in reverse topological order
-            let node_data = node.0.borrow();
-            if let Some(grad_fn) = &node_data.grad_fn {
-                if let Some(grad) = &node_data.grad {
-                     println!("  -> Calling backward on grad_fn for node with shape {:?}", node_data.shape);
-                     // grad_fn is Rc<dyn BackwardOp<T>>
-                    grad_fn.backward(grad); // Pass the computed gradient of *this* node
+            let node_data = node.0.borrow(); // Immutable borrow for reading grad_fn and grad
+            
+            // Option 1: Clone grad and pass it (safer borrow-wise)
+            let current_grad = node_data.grad.clone(); // Clone Option<Tensor<T>>
+            let grad_fn = node_data.grad_fn.clone(); // Clone Rc<dyn BackwardOp<T>>
+            
+            // Drop the borrow on node_data before calling backward potentially on the same node?
+            // Unlikely needed if we pass cloned grad, but good practice.
+            drop(node_data);
+
+            if let Some(grad_fn) = grad_fn {
+                if let Some(grad) = current_grad { // Use the cloned grad
+                     println!("  -> Calling backward on grad_fn for node..."); // Avoid borrow in format
+                    grad_fn.backward(&grad); // Pass the computed gradient of *this* node
                 } else {
-                     println!("  -> Skipping node {:?} - grad is None? (Should not happen after init)", node_data.shape);
+                     // This should ideally not happen for nodes in the graph after init
+                     eprintln!("  -> Skipping node - grad is None unexpectedly.");
                 }
-            } else {
-                 println!("  -> Skipping node {:?} - Leaf node or no grad_fn", node_data.shape);
-            }
+            } // else: Leaf node or node without grad_fn, do nothing
         }
         println!("Backward pass complete.");
     }
@@ -306,21 +283,17 @@ impl<T: fmt::Debug> fmt::Debug for Tensor<T> {
     }
 }
 
-impl<T: PartialEq> PartialEq for Tensor<T> {
-    /// Compares two `Tensor`s based on internal TensorData equality.
-    /// Relies on the manual PartialEq implementation for TensorData.
+/// PartialEq for Tensor is based on Rc pointer equality, consistent with Hash.
+/// Two Tensors are considered equal only if they point to the exact same data allocation.
+impl<T> PartialEq for Tensor<T> {
     fn eq(&self, other: &Self) -> bool {
-        // Borrow the internal TensorData and compare them.
-        let self_td = self.0.borrow();
-        let other_td = other.0.borrow();
-        *self_td == *other_td // Uses TensorData's PartialEq impl
+        Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-// Eq for Tensor wrapper requires T: Eq because the reflexive property
-// of PartialEq (a == a) must hold, and our PartialEq compares data via T.
-// Even though Hash is pointer-based, Eq must be consistent with PartialEq.
-impl<T: Eq> Eq for Tensor<T> {} // Add T: Eq bound.
+// Eq for Tensor follows from PartialEq (pointer equality is reflexive, symmetric, transitive).
+// No dependency on T needed here.
+impl<T> Eq for Tensor<T> {}
 
 impl<T> Hash for Tensor<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
@@ -369,10 +342,18 @@ mod tests {
         let t3 = create_test_tensor(vec![3, 4], vec![2]);
         let t4 = create_test_tensor(vec![1, 2], vec![1, 2]);
 
-        // Uses PartialEq for Tensor<T>, which calls PartialEq for TensorData<T>
-        assert_eq!(t1, t2);
+        // PartialEq now compares Rc pointers, so t1 != t2
+        assert_ne!(t1, t2);
         assert_ne!(t1, t3);
-        assert_ne!(t1, t4); // Different shape
+        assert_ne!(t1, t4);
+
+        // Check content equality explicitly where needed
+        assert_eq!(t1.data(), t2.data());
+        assert_eq!(t1.shape(), t2.shape());
+
+        // Check pointer equality for clones
+        let t1_clone = t1.clone();
+        assert_eq!(t1, t1_clone); // Pointer equality holds for clones
     }
 
     #[test]
@@ -443,5 +424,33 @@ mod tests {
         // Access data via borrow_tensor_data
         assert_eq!(t1.borrow_tensor_data().data, expected_data);
         assert_eq!(t1.borrow_tensor_data().shape, vec![2, 2]);
+    }
+}
+
+// --- Standalone Helper Function for Topological Sort ---
+// Moved outside impl block, takes HashSet by value now? No, needs mut ref.
+// Only need Clone for node.clone(), 'static for storage.
+fn build_topo<T: Clone + 'static>(
+    node: &Tensor<T>, 
+    visited: &mut HashSet<*const RefCell<TensorData<T>>>,
+    sorted_list: &mut Vec<Tensor<T>>
+) {
+    let node_ptr = Rc::as_ptr(&node.0);
+    if visited.insert(node_ptr) { 
+        // Clone grad_fn Rc to avoid holding borrow across recursive calls
+        let grad_fn = node.0.borrow().grad_fn.clone(); 
+        if let Some(grad_fn_rc) = grad_fn {
+            // Get inputs using the trait method
+            for input_weak in grad_fn_rc.inputs() {
+                if let Some(input_rc) = input_weak.upgrade() {
+                    // Reconstruct Tensor wrapper to pass to build_topo
+                    let input_tensor = Tensor(input_rc);
+                    build_topo(&input_tensor, visited, sorted_list);
+                }
+                // Optional: Warn if upgrade fails?
+            }
+        }
+        // Add node to sorted list *after* visiting its children (inputs)
+        sorted_list.push(node.clone());
     }
 }
