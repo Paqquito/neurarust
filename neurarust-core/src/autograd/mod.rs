@@ -1,6 +1,9 @@
-use crate::Tensor;
+use crate::tensor::Tensor;
+use crate::tensor_data::TensorData;
 use std::cell::RefCell;
 use std::rc::Weak;
+
+pub mod graph;
 
 /// Trait representing an operation that can perform backpropagation.
 /// Each operation (Add, Mul, Matmul, etc.) will have a corresponding struct
@@ -14,7 +17,7 @@ pub(crate) trait BackwardOp<T> {
 
     /// Returns weak references to the input tensors' data required for backpropagation.
     /// This allows traversing the computation graph.
-    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>>;
+    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>>;
 }
 
 // Concrete BackwardOp implementations will live alongside their corresponding

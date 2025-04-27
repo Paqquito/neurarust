@@ -5,56 +5,9 @@ use std::rc::{Rc, Weak}; // Import Rc and Weak
 use crate::autograd::BackwardOp; // Import the new trait
 use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
-use num_traits::One; // Import the One trait
+use num_traits::{One, Zero}; // Import the One and Zero traits
 use std::fmt::{Debug, Formatter, Result as FmtResult};
-
-// --- Internal Data Structure ---
-
-/// Holds the actual data and metadata for a tensor.
-/// Uses Rc<RefCell<...>> for shared ownership and interior mutability.
-// Cannot derive Debug/PartialEq because of dyn BackwardOp field
-// #[derive(Debug, PartialEq)] // Ensure this is commented out or removed
-pub(crate) struct TensorData<T> {
-    pub(crate) data: Vec<T>,
-    pub(crate) shape: Vec<usize>,
-    pub(crate) requires_grad: bool,
-    pub(crate) grad: Option<Tensor<T>>,
-    pub(crate) grad_fn: Option<Rc<dyn BackwardOp<T>>>,
-    pub(crate) _ctx: Option<Weak<dyn BackwardOp<T>>>,
-}
-
-// Manual implementation of Debug
-impl<T: Debug> Debug for TensorData<T> {
-    fn fmt(&self, f: &mut Formatter<'_>) -> FmtResult {
-        f.debug_struct("TensorData")
-         .field("data", &self.data)
-         .field("shape", &self.shape)
-         .field("requires_grad", &self.requires_grad)
-         .field("grad_defined", &self.grad.is_some())
-         .field("grad_fn_defined", &self.grad_fn.is_some())
-         .field("_ctx_defined", &self._ctx.is_some())
-         .finish()
-    }
-}
-
-// Manual implementation of PartialEq
-impl<T: PartialEq> PartialEq for TensorData<T> {
-    fn eq(&self, other: &Self) -> bool {
-        // Compare only data, shape, and requires_grad for equality.
-        // Ignore grad, grad_fn, _ctx etc.
-        self.data == other.data && self.shape == other.shape && self.requires_grad == other.requires_grad
-    }
-}
-
-// Eq requires that a == a always holds, which is true for our PartialEq implementation IF T: Eq.
-impl<T: Eq> Eq for TensorData<T> {}
-
-impl<T> TensorData<T> {
-    // Helper to get number of elements, used internally
-    pub(crate) fn numel(&self) -> usize {
-        self.data.len()
-    }
-}
+use crate::tensor_data::TensorData; // Use the new module
 
 // --- Public Tensor Wrapper ---
 
@@ -95,6 +48,26 @@ impl<T> Tensor<T> {
         let tensor = Self::new(data, shape);
         tensor.0.borrow_mut().requires_grad = true;
         tensor
+    }
+
+    /// Creates a new tensor filled with zeros.
+    pub fn zeros(shape: Vec<usize>) -> Self
+    where
+        T: Zero + Clone, // Requires Zero trait and Clone for vec! macro
+    {
+        let numel = shape.iter().product::<usize>();
+        let data = vec![T::zero(); numel];
+        Tensor::new(data, shape)
+    }
+
+    /// Creates a new tensor filled with ones.
+    pub fn ones(shape: Vec<usize>) -> Self
+    where
+        T: One + Clone, // Requires One trait and Clone
+    {
+        let numel = shape.iter().product::<usize>();
+        let data = vec![T::one(); numel];
+        Tensor::new(data, shape)
     }
 
     /// Creates a tensor of ones with the same shape as the given tensor.
@@ -201,9 +174,8 @@ impl<T> Tensor<T> {
     /// and `Eq`, `Hash` for graph traversal via HashSet.
     pub fn backward(&self)
     where
-        T: One + Clone + 'static, // Removed Eq + Hash. Only need One+Clone for grad init, 'static for storage.
+        T: One + Clone + 'static,
     {
-        // Check requires_grad and scalar property
         {
             let tensor_data = self.0.borrow();
             if !tensor_data.requires_grad {
@@ -211,52 +183,38 @@ impl<T> Tensor<T> {
                 return;
             }
             if tensor_data.numel() != 1 {
-                // TODO: Allow backward on non-scalar tensors by providing the initial gradient
                 panic!("backward() can only be called on scalar tensors (for now).");
             }
-        } // Drop borrow
+        }
 
-        // --- Topological Sort ---
         let mut visited = HashSet::<*const RefCell<TensorData<T>>>::new();
         let mut nodes_sorted = Vec::new();
 
-        // build_topo recursively adds nodes to nodes_sorted
-        build_topo(self, &mut visited, &mut nodes_sorted);
+        // Call build_topo from the autograd::graph module
+        crate::autograd::graph::build_topo(self, &mut visited, &mut nodes_sorted);
 
-        // --- Initialize Gradient for the Final Node ---
-        // Gradient of the loss (self) w.r.t itself is 1.
-        { // New scope for mutable borrow
+        { 
             let mut self_data_mut = self.0.borrow_mut();
-            // Create a tensor of ones with the same shape as self
-            // Requires T: One + Clone
             let grad_data = vec![T::one(); self_data_mut.numel()];
             let grad_shape = self_data_mut.shape.clone();
-            // Initialize or overwrite the gradient
             self_data_mut.grad = Some(Tensor::new(grad_data, grad_shape));
         }
 
-        // --- Backward Pass through Sorted Nodes ---
         println!("Backward: Processing {} nodes in topological order.", nodes_sorted.len());
-        for node in nodes_sorted.iter().rev() { // Process in reverse topological order
-            let node_data = node.0.borrow(); // Immutable borrow for reading grad_fn and grad
-
-            // Option 1: Clone grad and pass it (safer borrow-wise)
-            let current_grad = node_data.grad.clone(); // Clone Option<Tensor<T>>
-            let grad_fn = node_data.grad_fn.clone(); // Clone Rc<dyn BackwardOp<T>>
-
-            // Drop the borrow on node_data before calling backward potentially on the same node?
-            // Unlikely needed if we pass cloned grad, but good practice.
+        for node in nodes_sorted.iter().rev() {
+            let node_data = node.0.borrow(); 
+            let current_grad = node_data.grad.clone();
+            let grad_fn = node_data.grad_fn.clone();
             drop(node_data);
 
             if let Some(grad_fn) = grad_fn {
-                if let Some(grad) = current_grad { // Use the cloned grad
-                     println!("  -> Calling backward on grad_fn for node..."); // Avoid borrow in format
-                    grad_fn.backward(&grad); // Pass the computed gradient of *this* node
+                if let Some(grad) = current_grad { 
+                     println!("  -> Calling backward on grad_fn for node...");
+                    grad_fn.backward(&grad);
                 } else {
-                     // This should ideally not happen for nodes in the graph after init
                      eprintln!("  -> Skipping node - grad is None unexpectedly.");
                 }
-            } // else: Leaf node or node without grad_fn, do nothing
+            }
         }
         println!("Backward pass complete.");
     }
@@ -328,43 +286,6 @@ impl<T> Hash for Tensor<T> {
 }
 
 // --- Arithmetic Operators are now in neurarust-core/src/ops/arithmetic/ ---
-
-// --- Helper Functions (like build_topo) ---
-
-/// Recursively builds a topological sort of the computation graph.
-/// Used by `backward()` to process nodes in the correct order.
-/// Uses `HashSet` based on `Tensor`'s `Hash` impl (pointer address).
-fn build_topo<T: Clone + 'static>(
-    node: &Tensor<T>,
-    visited: &mut HashSet<*const RefCell<TensorData<T>>>,
-    sorted_list: &mut Vec<Tensor<T>>
-) {
-    let node_ptr = Rc::as_ptr(&node.0);
-    if !visited.contains(&node_ptr) {
-        visited.insert(node_ptr);
-
-        // Clone the Rc for grad_fn to avoid holding borrow across recursive call
-        let grad_fn_clone = node.0.borrow().grad_fn.clone();
-
-        if let Some(grad_fn) = grad_fn_clone {
-            // Get weak references to inputs from the BackwardOp
-            let inputs_weak = grad_fn.inputs();
-            for input_weak in inputs_weak {
-                // Attempt to upgrade the weak reference to a strong one (Rc)
-                if let Some(input_rc) = input_weak.upgrade() {
-                    // Create a temporary Tensor wrapper around the upgraded Rc
-                    let input_tensor = Tensor(input_rc);
-                    // Recurse
-                    build_topo(&input_tensor, visited, sorted_list);
-                }
-                // If upgrade fails, the input tensor was dropped, which is expected in some cases
-            }
-        }
-        // Add node to the sorted list *after* visiting all its children
-        sorted_list.push(node.clone());
-    }
-}
-
 
 // --- Tests ---
 
@@ -456,6 +377,3 @@ mod tests {
     // e.g., neurarust-core/src/ops/arithmetic/add.rs
 
 } // end mod tests
-
-// Existing build_topo function remains here as it's related to Tensor's backward method
-// fn build_topo<T: Clone + 'static>( ... ) { ... } - already present above

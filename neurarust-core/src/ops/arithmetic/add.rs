@@ -2,6 +2,7 @@
 
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
+use crate::tensor_data::TensorData;
 use std::ops::{Add, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -73,8 +74,8 @@ where
 // --- Backward Operation --- 
 
 struct AddBackward<T> {
-    input_a: Weak<RefCell<crate::tensor::TensorData<T>>>,
-    input_b: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_a: Weak<RefCell<TensorData<T>>>,
+    input_b: Weak<RefCell<TensorData<T>>>,
     _phantom: PhantomData<T>,
 }
 
@@ -112,7 +113,7 @@ where
         }
     }
 
-    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
+    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
         vec![self.input_a.clone(), self.input_b.clone()]
     }
 }

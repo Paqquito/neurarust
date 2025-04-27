@@ -1,5 +1,6 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
+use crate::tensor_data::TensorData;
 use std::ops::{Div, Mul, Neg, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -52,8 +53,8 @@ where
 struct DivBackward<T> {
     input_a_val: Tensor<T>,
     input_b_val: Tensor<T>,
-    input_a_ref: Weak<RefCell<crate::tensor::TensorData<T>>>,
-    input_b_ref: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_a_ref: Weak<RefCell<TensorData<T>>>,
+    input_b_ref: Weak<RefCell<TensorData<T>>>,
     _phantom: PhantomData<T>,
 }
 
@@ -97,7 +98,7 @@ where
         }
     }
 
-    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
+    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
         vec![self.input_a_ref.clone(), self.input_b_ref.clone()]
     }
 }

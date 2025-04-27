@@ -1,5 +1,6 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
+use crate::tensor_data::TensorData;
 use std::ops::{Neg, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -38,7 +39,7 @@ where
 // --- Backward Operation --- 
 
 struct NegBackward<T> {
-    input_ref: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_ref: Weak<RefCell<TensorData<T>>>,
     _phantom: PhantomData<T>,
 }
 
@@ -60,7 +61,7 @@ where
         }
     }
 
-    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
+    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
         vec![self.input_ref.clone()]
     }
 }
@@ -71,6 +72,7 @@ where
 #[cfg(test)]
 mod tests {
     use crate::Tensor;
+    use crate::tensor_data::TensorData;
     use num_traits::{Zero, One};
     use std::ops::AddAssign;
 
@@ -78,9 +80,7 @@ mod tests {
         Tensor::new(data, shape)
     }
      fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        let tensor = Tensor::new(data, shape);
-        tensor.set_requires_grad(true);
-        tensor
+        Tensor::new_with_grad(data, shape)
     }
 
     #[test]
@@ -122,7 +122,7 @@ mod tests {
              let loss_tensor = Tensor::new_with_grad(vec![sum_val], vec![1]);
 
              struct SimpleSumBackward<T> {
-                 input_ref: std::rc::Weak<std::cell::RefCell<crate::tensor::TensorData<T>>>,
+                 input_ref: std::rc::Weak<std::cell::RefCell<TensorData<T>>>,
                  input_numel: usize,
                  input_shape: Vec<usize>,
                  _phantom: std::marker::PhantomData<T>
@@ -143,7 +143,7 @@ mod tests {
                          }
                      }
                  }
-                 fn inputs(&self) -> Vec<std::rc::Weak<std::cell::RefCell<crate::tensor::TensorData<T>>>> {
+                 fn inputs(&self) -> Vec<std::rc::Weak<std::cell::RefCell<TensorData<T>>>> {
                      vec![self.input_ref.clone()]
                  }
              }

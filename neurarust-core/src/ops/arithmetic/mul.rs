@@ -1,5 +1,6 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
+use crate::tensor_data::TensorData;
 use std::ops::{Mul, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -10,7 +11,7 @@ use std::cell::RefCell;
 /// Implements element-wise multiplication (Hadamard product) for two Tensors.
 impl<'a, 'b, T> Mul<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Mul<Output = T> + Copy + Clone + 'static + AddAssign, 
+    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static,
 {
     type Output = Tensor<T>;
 
@@ -52,8 +53,8 @@ where
 struct MulBackward<T> {
     input_a_val: Tensor<T>,
     input_b_val: Tensor<T>,
-    input_a_ref: Weak<RefCell<crate::tensor::TensorData<T>>>,
-    input_b_ref: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_a_ref: Weak<RefCell<TensorData<T>>>,
+    input_b_ref: Weak<RefCell<TensorData<T>>>,
     _phantom: PhantomData<T>,
 }
 
@@ -62,17 +63,17 @@ where
     T: Mul<Output = T> + AddAssign + Copy + Clone + 'static,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
-        let grad_a_local = upstream_grad * &self.input_b_val;
-        let grad_b_local = upstream_grad * &self.input_a_val; 
+        let grad_a = upstream_grad * &self.input_b_val;
+        let grad_b = upstream_grad * &self.input_a_val; 
 
         // Accumulate gradient for Input A
         if let Some(input_a_rc) = self.input_a_ref.upgrade() {
             let mut input_a_td = input_a_rc.borrow_mut();
             if input_a_td.requires_grad {
-                if let Some(existing_grad_a) = input_a_td.grad.as_mut() {
-                    *existing_grad_a += &grad_a_local;
+                if let Some(ref mut grad) = input_a_td.grad {
+                    *grad += &grad_a;
                 } else {
-                    input_a_td.grad = Some(grad_a_local);
+                    input_a_td.grad = Some(grad_a);
                 }
             }
         } else {
@@ -83,10 +84,10 @@ where
         if let Some(input_b_rc) = self.input_b_ref.upgrade() {
             let mut input_b_td = input_b_rc.borrow_mut();
             if input_b_td.requires_grad {
-                if let Some(existing_grad_b) = input_b_td.grad.as_mut() {
-                    *existing_grad_b += &grad_b_local;
+                if let Some(ref mut grad) = input_b_td.grad {
+                    *grad += &grad_b;
                 } else {
-                    input_b_td.grad = Some(grad_b_local);
+                    input_b_td.grad = Some(grad_b);
                 }
             }
         } else {
@@ -94,7 +95,7 @@ where
         }
     }
 
-    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
+    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
         vec![self.input_a_ref.clone(), self.input_b_ref.clone()]
     }
 }

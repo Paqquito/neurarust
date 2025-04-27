@@ -1,9 +1,10 @@
 // Ce module contiendra les opérations d'algèbre linéaire comme matmul.
 
 use crate::tensor::Tensor;
-use num_traits::Zero;
-use std::ops::{Add, Mul};
 use crate::autograd::BackwardOp;
+use crate::tensor_data::TensorData; // Use correct path
+use num_traits::Zero;
+use std::ops::{Add, Mul, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
@@ -11,24 +12,24 @@ use std::cell::RefCell;
 struct MatmulBackward<T> {
     input_a: Tensor<T>, // Need clones of inputs for matmul gradient
     input_b: Tensor<T>,
-    input_a_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
-    input_b_grad: Weak<RefCell<crate::tensor::TensorData<T>>>,
+    input_a_ref: Weak<RefCell<TensorData<T>>>, // Use imported TensorData
+    input_b_ref: Weak<RefCell<TensorData<T>>>, // Use imported TensorData
     _phantom: PhantomData<T>,
 }
 
 impl<T> BackwardOp<T> for MatmulBackward<T> 
 where
-    T: 'static, // Add any other bounds needed by backward logic later
+    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static,
 {
-    fn backward(&self, _upstream_grad: &Tensor<T>) {
+    fn backward(&self, upstream_grad: &Tensor<T>) {
         println!("MatmulBackward: backward called (gradient accumulation pending)");
         // TODO: Implement gradient accumulation
         // Requires tensor transpose, matmul, and gradient accumulation logic
     }
 
-    fn inputs(&self) -> Vec<Weak<RefCell<crate::tensor::TensorData<T>>>> {
+    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
         // Return the weak references to the inputs used for gradient propagation
-        vec![self.input_a_grad.clone(), self.input_b_grad.clone()]
+        vec![self.input_a_ref.clone(), self.input_b_ref.clone()]
     }
 }
 
@@ -91,11 +92,12 @@ impl<T> Tensor<T> {
             let grad_fn = MatmulBackward {
                 input_a: self.clone(), // Clone inputs needed for backward
                 input_b: other.clone(),
-                input_a_grad: self.get_weak_ref(),
-                input_b_grad: other.get_weak_ref(),
+                input_a_ref: self.get_weak_ref(),
+                input_b_ref: other.get_weak_ref(),
                 _phantom: PhantomData,
             };
-            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
+            // Comment out this line for now as T might not satisfy all bounds required by BackwardOp at this point
+            // result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn)); 
         }
         // TODO: Set grad_fn if requires_grad
         result
