@@ -3,7 +3,7 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData; // Use correct path
-use num_traits::Zero;
+use num_traits::{Zero, One};
 use std::ops::{Add, Mul, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
