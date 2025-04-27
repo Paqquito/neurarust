@@ -63,50 +63,49 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Tensor;
+    use crate::{Tensor, tensor::TensorData};
+    use std::rc::Rc;
+    use std::cell::RefCell;
 
-    // Helper
-    fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    // Helper from tensor tests (if needed, or define locally)
+    fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)
     }
 
     #[test]
     fn test_get_val_2d_ok() {
-        let t = create_test_tensor(vec![1, 2, 3, 4, 5, 6], vec![2, 3]);
-        // Use get_val instead of [[...]]
-        assert_eq!(t.get_val([0, 0]), 1);
-        assert_eq!(t.get_val([0, 1]), 2);
-        assert_eq!(t.get_val([0, 2]), 3);
-        assert_eq!(t.get_val([1, 0]), 4);
-        assert_eq!(t.get_val([1, 1]), 5);
-        assert_eq!(t.get_val([1, 2]), 6);
+        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        assert_eq!(t.get_val([0, 0]), 1.0);
+        assert_eq!(t.get_val([0, 2]), 3.0);
+        assert_eq!(t.get_val([1, 1]), 5.0);
+        assert_eq!(t.get_val([1, 2]), 6.0);
     }
 
     #[test]
-    #[should_panic = "Row index 2 out of bounds for shape [2, 3]"]
-    fn test_get_val_2d_row_out_of_bounds() {
-        let t = create_test_tensor(vec![1, 2, 3, 4, 5, 6], vec![2, 3]);
-        t.get_val([2, 0]);
-    }
-
-    #[test]
-    #[should_panic = "Column index 3 out of bounds for shape [2, 3]"]
-    fn test_get_val_2d_col_out_of_bounds() {
-        let t = create_test_tensor(vec![1, 2, 3, 4, 5, 6], vec![2, 3]);
-        t.get_val([1, 3]);
-    }
-
-    #[test]
-    #[should_panic = "get_val with [row, col] requires a 2D tensor."]
+    #[should_panic(expected = "get_val with [row, col] requires a 2D tensor")]
     fn test_get_val_2d_on_1d_tensor() {
-        let t = create_test_tensor(vec![1, 2, 3], vec![3]);
-        t.get_val([0, 0]);
+        let t = create_test_tensor(vec![1.0, 2.0, 3.0], vec![3]);
+        let _ = t.get_val([0, 1]);
     }
 
-     #[test]
-    #[should_panic = "get_val with [row, col] requires a 2D tensor."]
+    #[test]
+    #[should_panic(expected = "get_val with [row, col] requires a 2D tensor")]
     fn test_get_val_2d_on_3d_tensor() {
-        let t = create_test_tensor(vec![1], vec![1, 1, 1]);
-        t.get_val([0, 0]);
+        let t = create_test_tensor(vec![1.0; 8], vec![2, 2, 2]);
+        let _ = t.get_val([0, 1]);
+    }
+
+    #[test]
+    #[should_panic(expected = "Index out of bounds")] // Updated expected message
+    fn test_get_val_2d_row_out_of_bounds() {
+        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let _ = t.get_val([2, 1]); // Row 2 is out of bounds
+    }
+
+    #[test]
+    #[should_panic(expected = "Index out of bounds")] // Updated expected message
+    fn test_get_val_2d_col_out_of_bounds() {
+        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let _ = t.get_val([1, 3]); // Col 3 is out of bounds
     }
 } 

@@ -97,6 +97,17 @@ impl<T> Tensor<T> {
         tensor
     }
 
+    /// Creates a tensor of ones with the same shape as the given tensor.
+    pub fn ones_like(other: &Tensor<T>) -> Self
+    where
+        T: One + Clone,
+    {
+        let shape = other.shape();
+        let numel = other.numel();
+        let data = vec![T::one(); numel];
+        Tensor::new(data, shape)
+    }
+
     // --- Accessors ---
 
     /// Returns the shape of the tensor as a `Vec<usize>` (cloned).
@@ -143,6 +154,15 @@ impl<T> Tensor<T> {
         self.0.borrow().requires_grad
     }
 
+    /// Returns a clone of the gradient tensor, if it exists.
+    /// Returns `None` if no gradient has been computed or stored.
+    pub fn grad(&self) -> Option<Tensor<T>>
+    where
+        T: Clone, // Needed to clone the TensorData inside Option<Tensor<T>>
+    {
+        self.0.borrow().grad.clone()
+    }
+
     /// Provides temporary access to the gradient tensor (`Ref`).
     /// The `Ref` acts like a read lock; ensure it's dropped promptly.
     pub fn borrow_grad(&self) -> Ref<Option<Tensor<T>>> {
@@ -153,6 +173,11 @@ impl<T> Tensor<T> {
     /// The `RefMut` acts like a write lock; ensure it's dropped promptly.
     pub fn borrow_grad_mut(&self) -> RefMut<Option<Tensor<T>>> {
         RefMut::map(self.0.borrow_mut(), |td| &mut td.grad)
+    }
+
+     /// Provides temporary access to the grad_fn (`Ref`).
+     pub fn grad_fn(&self) -> Ref<Option<Rc<dyn BackwardOp<T>>>> {
+        Ref::map(self.0.borrow(), |td| &td.grad_fn)
     }
 
     // --- Autograd methods ---
@@ -191,14 +216,14 @@ impl<T> Tensor<T> {
             }
         } // Drop borrow
 
-        // --- Topological Sort --- 
+        // --- Topological Sort ---
         let mut visited = HashSet::<*const RefCell<TensorData<T>>>::new();
         let mut nodes_sorted = Vec::new();
 
         // build_topo recursively adds nodes to nodes_sorted
         build_topo(self, &mut visited, &mut nodes_sorted);
 
-        // --- Initialize Gradient for the Final Node --- 
+        // --- Initialize Gradient for the Final Node ---
         // Gradient of the loss (self) w.r.t itself is 1.
         { // New scope for mutable borrow
             let mut self_data_mut = self.0.borrow_mut();
@@ -210,15 +235,15 @@ impl<T> Tensor<T> {
             self_data_mut.grad = Some(Tensor::new(grad_data, grad_shape));
         }
 
-        // --- Backward Pass through Sorted Nodes --- 
+        // --- Backward Pass through Sorted Nodes ---
         println!("Backward: Processing {} nodes in topological order.", nodes_sorted.len());
         for node in nodes_sorted.iter().rev() { // Process in reverse topological order
             let node_data = node.0.borrow(); // Immutable borrow for reading grad_fn and grad
-            
+
             // Option 1: Clone grad and pass it (safer borrow-wise)
             let current_grad = node_data.grad.clone(); // Clone Option<Tensor<T>>
             let grad_fn = node_data.grad_fn.clone(); // Clone Rc<dyn BackwardOp<T>>
-            
+
             // Drop the borrow on node_data before calling backward potentially on the same node?
             // Unlikely needed if we pass cloned grad, but good practice.
             drop(node_data);
@@ -248,74 +273,112 @@ impl<T> Tensor<T> {
      {
          let td = self.0.borrow();
          assert_eq!(td.shape.len(), 2, "get_val with [row, col] requires a 2D tensor.");
-         let rows = td.shape[0];
-         let cols = td.shape[1];
-         let row_idx = index[0];
-         let col_idx = index[1];
-         assert!(row_idx < rows, "Row index {} out of bounds for shape {:?}. Needed by get_val.", row_idx, td.shape);
-         assert!(col_idx < cols, "Column index {} out of bounds for shape {:?}. Needed by get_val.", col_idx, td.shape);
-         let flat_index = row_idx * cols + col_idx;
-         td.data[flat_index] // Returns a copy
+         let (rows, cols) = (td.shape[0], td.shape[1]);
+         assert!(index[0] < rows && index[1] < cols, "Index out of bounds");
+         td.data[index[0] * cols + index[1]]
      }
 }
 
-// --- Trait Implementations for the Tensor Wrapper ---
+// --- Trait Implementations for Tensor ---
 
 impl<T> Clone for Tensor<T> {
-    /// Clones the `Tensor` wrapper (bumps the `Rc` count).
+    /// Cloning a `Tensor` creates a new `Tensor` that shares the same underlying `TensorData`.
+    /// This is a shallow clone due to `Rc`.
     fn clone(&self) -> Self {
         Tensor(Rc::clone(&self.0))
     }
 }
 
+// Debug implementation relies on TensorData's Debug
 impl<T: fmt::Debug> fmt::Debug for Tensor<T> {
-    /// Formats the `Tensor` for display.
+    /// Formats the Tensor for display, showing its data and shape.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Access fields via borrow()
-        let td = self.0.borrow();
-        f.debug_struct("Tensor")
-            .field("data", &td.data)
-            .field("shape", &td.shape)
-            .field("requires_grad", &td.requires_grad)
-            .field("grad_defined", &td.grad.is_some())
-            .field("grad_fn_defined", &td.grad_fn.is_some())
-            .finish()
+        // Borrow immutably to access data and shape
+        let tensor_data = self.0.borrow();
+        write!(f, "Tensor(data={:?}, shape={:?}, requires_grad={})",
+               tensor_data.data, tensor_data.shape, tensor_data.requires_grad)
+        // Optionally, add grad info if present:
+        // .field("grad", &tensor_data.grad)
+        // .field("grad_fn", &tensor_data.grad_fn.is_some()) // Only show if grad_fn exists
     }
 }
 
-/// PartialEq for Tensor is based on Rc pointer equality, consistent with Hash.
-/// Two Tensors are considered equal only if they point to the exact same data allocation.
-impl<T> PartialEq for Tensor<T> {
+// PartialEq implementation relies on TensorData's PartialEq
+impl<T: PartialEq> PartialEq for Tensor<T> {
     fn eq(&self, other: &Self) -> bool {
-        Rc::ptr_eq(&self.0, &other.0)
+        // Compare the internal TensorData directly
+        *self.0.borrow() == *other.0.borrow()
+        // Alternatively, compare Rc pointers if identity matters (e.g., in specific graph contexts)
+        // Rc::ptr_eq(&self.0, &other.0)
     }
 }
 
-// Eq for Tensor follows from PartialEq (pointer equality is reflexive, symmetric, transitive).
-// No dependency on T needed here.
-impl<T> Eq for Tensor<T> {}
+// Eq relies on TensorData's Eq
+impl<T: Eq> Eq for Tensor<T> {}
 
+// Hash implementation based on the memory address of the Rc payload (TensorData)
 impl<T> Hash for Tensor<T> {
     fn hash<H: Hasher>(&self, state: &mut H) {
+        // Use the pointer address of the Rc's allocation for hashing.
+        // This ensures that two Tensors pointing to the *same* data structure
+        // hash to the same value, which is crucial for using Tensors in HashSets
+        // during the topological sort in `backward`.
         Rc::as_ptr(&self.0).hash(state);
     }
 }
 
-// --- Tests for the Public Tensor Wrapper ---
+// --- Arithmetic Operators are now in neurarust-core/src/ops/arithmetic/ ---
+
+// --- Helper Functions (like build_topo) ---
+
+/// Recursively builds a topological sort of the computation graph.
+/// Used by `backward()` to process nodes in the correct order.
+/// Uses `HashSet` based on `Tensor`'s `Hash` impl (pointer address).
+fn build_topo<T: Clone + 'static>(
+    node: &Tensor<T>,
+    visited: &mut HashSet<*const RefCell<TensorData<T>>>,
+    sorted_list: &mut Vec<Tensor<T>>
+) {
+    let node_ptr = Rc::as_ptr(&node.0);
+    if !visited.contains(&node_ptr) {
+        visited.insert(node_ptr);
+
+        // Clone the Rc for grad_fn to avoid holding borrow across recursive call
+        let grad_fn_clone = node.0.borrow().grad_fn.clone();
+
+        if let Some(grad_fn) = grad_fn_clone {
+            // Get weak references to inputs from the BackwardOp
+            let inputs_weak = grad_fn.inputs();
+            for input_weak in inputs_weak {
+                // Attempt to upgrade the weak reference to a strong one (Rc)
+                if let Some(input_rc) = input_weak.upgrade() {
+                    // Create a temporary Tensor wrapper around the upgraded Rc
+                    let input_tensor = Tensor(input_rc);
+                    // Recurse
+                    build_topo(&input_tensor, visited, sorted_list);
+                }
+                // If upgrade fails, the input tensor was dropped, which is expected in some cases
+            }
+        }
+        // Add node to the sorted list *after* visiting all its children
+        sorted_list.push(node.clone());
+    }
+}
+
+
+// --- Tests ---
+
 #[cfg(test)]
 mod tests {
-    use super::*; // Import the public Tensor wrapper
-    use num_traits::Zero; // Import necessary traits for tests
-    
+    use super::*; // Import items from parent module (Tensor, TensorData, etc.)
+    use num_traits::Zero; // Needed for test helpers
 
-    // Helper to create a simple tensor for testing
-    fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    // Helper to create basic tensors for tests
+    fn create_test_tensor<T: Clone + Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)
     }
-
-    // Helper to create a tensor that requires grad
-    // Remove Eq bound, not needed for floats, Tensor<T> Eq is ptr based.
-    fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    // Helper to create tensors requiring gradients
+     fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         let tensor = Tensor::new(data, shape);
         tensor.set_requires_grad(true);
         tensor
@@ -323,134 +386,76 @@ mod tests {
 
     #[test]
     fn test_tensor_creation() {
-        let tensor = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        // Borrow the whole TensorData struct
-        let td = tensor.borrow_tensor_data(); 
-        assert_eq!(td.data, vec![1.0, 2.0, 3.0, 4.0]);
-        assert_eq!(td.shape, vec![2, 2]);
-        assert!(!td.requires_grad);
-        assert!(td.grad.is_none());
-        assert!(td.grad_fn.is_none());
-        assert!(td._ctx.is_none());
-        // drop(td); // Ref is dropped automatically here
+        let data = vec![1.0_f32, 2.0, 3.0, 4.0];
+        let shape = vec![2, 2];
+        let t = create_test_tensor(data.clone(), shape.clone());
+
+        assert_eq!(t.data(), data);
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.numel(), 4);
+        assert!(!t.requires_grad());
+        assert!(t.borrow_grad().is_none());
     }
 
     #[test]
     fn test_tensor_equality() {
-        let t1 = create_test_tensor(vec![1, 2], vec![2]);
-        let t2 = create_test_tensor(vec![1, 2], vec![2]);
-        let t3 = create_test_tensor(vec![3, 4], vec![2]);
-        let t4 = create_test_tensor(vec![1, 2], vec![1, 2]);
+        let t1 = create_test_tensor(vec![1_i32, 2], vec![2]);
+        let t2 = create_test_tensor(vec![1_i32, 2], vec![2]);
+        let t3 = create_test_tensor(vec![3_i32, 4], vec![2]);
+        let t4 = create_test_tensor(vec![1_i32, 2], vec![1, 2]); // Different shape
+        let t5 = t1.clone(); // Shallow clone
 
-        // PartialEq now compares Rc pointers, so t1 != t2
-        assert_ne!(t1, t2);
-        assert_ne!(t1, t3);
-        assert_ne!(t1, t4);
+        assert_eq!(t1, t2); // Same data and shape
+        assert_ne!(t1, t3); // Different data
+        assert_ne!(t1, t4); // Different shape
+        assert_eq!(t1, t5); // Clone points to same data
 
-        // Check content equality explicitly where needed
-        assert_eq!(t1.data(), t2.data());
-        assert_eq!(t1.shape(), t2.shape());
-
-        // Check pointer equality for clones
-        let t1_clone = t1.clone();
-        assert_eq!(t1, t1_clone); // Pointer equality holds for clones
+        // Test PartialEq with requires_grad
+        let t1_grad = create_test_tensor_with_grad::<i32>(vec![1, 2], vec![2]);
+        assert_ne!(t1, t1_grad); // requires_grad differs
     }
 
     #[test]
     fn test_tensor_hash_eq_for_set() {
-        // Specify the type T = i32 explicitly
-        let t1: Tensor<i32> = create_test_tensor(vec![1, 2], vec![2]);
-        let t2: Tensor<i32> = create_test_tensor(vec![1, 2], vec![2]); // Same content, different Rc
-        let t3: Tensor<i32> = t1.clone(); // Same Rc
+        let t1 = create_test_tensor(vec![1_i32, 2], vec![2]);
+        let t2 = create_test_tensor(vec![1_i32, 2], vec![2]); // Logically equal, different allocation
+        let t3 = t1.clone(); // Points to same allocation as t1
 
-        // Specify the HashSet type argument
-        let mut set: HashSet<Tensor<i32>> = HashSet::new();
-        
-        // i32 implements Eq, so Tensor<i32> implements Eq + Hash
-        assert!(set.insert(t1.clone())); // insert should now work and return true
+        let mut set = HashSet::new();
+        assert!(set.insert(t1.clone())); // Insert t1
+        assert!(!set.insert(t3));      // t3 has same address, should not insert
+        assert!(set.insert(t2.clone())); // t2 has different address, should insert - CLONE t2 here
 
-        assert!(set.contains(&t1));
-        assert!(set.contains(&t3)); // Eq based on Rc pointer -> true
-        assert!(!set.contains(&t2)); // Eq based on Rc pointer -> false
-        assert_eq!(set.len(), 1);
-
-        // Insert the second tensor (different Rc)
-        assert!(set.insert(t2.clone())); // Should return true as it's a new element (different hash)
-        assert!(set.contains(&t2));
         assert_eq!(set.len(), 2);
+        assert!(set.contains(&t1));
+        assert!(set.contains(&t2)); // Check for t2 after inserting its clone
+
+        // Demonstrate pointer equality check (used by Hash)
+        assert!(Rc::ptr_eq(&t1.0, &t1.clone().0));
+        assert!(!Rc::ptr_eq(&t1.0, &t2.0));
     }
+
 
     #[test]
     fn test_backward_basic() {
-        // Should work with floats now (no Eq constraint on helper)
-        // Prefix x and y with _ as they are unused in this basic test
-        let _x = create_test_tensor_with_grad(vec![2.0], vec![1]);
-        let _y = create_test_tensor_with_grad(vec![3.0], vec![1]);
+        // Requires dummy operations or manual graph setup if ops are separate
+        // For now, just test backward on a single node requires grad
+        let t1 = create_test_tensor_with_grad(vec![5.0_f32], vec![1]);
 
-        // Mock a simple operation: z = x * y
-        // Need a proper grad_fn for a real test, create dummy tensor for now.
-        let z = Tensor::new_with_grad(vec![6.0], vec![1]); // Dummy result
-        
-        // If Mul op existed and set grad_fn:
-        // let z = &_x * &_y;
-        // assert!(z.0.borrow().grad_fn.is_some());
+        assert!(t1.borrow_grad().is_none());
+        t1.backward(); // Should init grad to 1.0 for a scalar
 
-        z.backward(); // Call the backward function
-
-        // Assertions require actual gradient computation via grad_fn
-        // assert_eq!(x.borrow_grad().unwrap().borrow_data(), &[3.0]);
-        // assert_eq!(y.borrow_grad().unwrap().borrow_data(), &[2.0]);
+        let grad = t1.grad();
+        assert!(grad.is_some());
+        let grad_tensor = grad.unwrap();
+        assert_eq!(grad_tensor.data(), vec![1.0_f32]);
+        assert_eq!(grad_tensor.shape(), vec![1]);
     }
 
-    #[test]
-    fn test_add() {
-        let t1 = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
-        let t2 = create_test_tensor(vec![5, 6, 7, 8], vec![2, 2]);
-        // Use references for the Add impl
-        let result = &t1 + &t2;
-        let expected_data = vec![6, 8, 10, 12];
-        // Access data via borrow_tensor_data
-        assert_eq!(result.borrow_tensor_data().data, expected_data);
-        assert_eq!(result.borrow_tensor_data().shape, vec![2, 2]);
-    }
+    // --- Tests for Add, Sub, Mul, Div, Neg have been moved to their respective files ---
+    // e.g., neurarust-core/src/ops/arithmetic/add.rs
 
-    #[test]
-    fn test_add_assign() {
-        let mut t1 = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
-        let t2 = create_test_tensor(vec![5, 6, 7, 8], vec![2, 2]);
-        // Use reference for the rhs of AddAssign
-        t1 += &t2;
-        let expected_data = vec![6, 8, 10, 12];
-        // Access data via borrow_tensor_data
-        assert_eq!(t1.borrow_tensor_data().data, expected_data);
-        assert_eq!(t1.borrow_tensor_data().shape, vec![2, 2]);
-    }
-}
+} // end mod tests
 
-// --- Standalone Helper Function for Topological Sort ---
-// Moved outside impl block, takes HashSet by value now? No, needs mut ref.
-// Only need Clone for node.clone(), 'static for storage.
-fn build_topo<T: Clone + 'static>(
-    node: &Tensor<T>, 
-    visited: &mut HashSet<*const RefCell<TensorData<T>>>,
-    sorted_list: &mut Vec<Tensor<T>>
-) {
-    let node_ptr = Rc::as_ptr(&node.0);
-    if visited.insert(node_ptr) { 
-        // Clone grad_fn Rc to avoid holding borrow across recursive calls
-        let grad_fn = node.0.borrow().grad_fn.clone(); 
-        if let Some(grad_fn_rc) = grad_fn {
-            // Get inputs using the trait method
-            for input_weak in grad_fn_rc.inputs() {
-                if let Some(input_rc) = input_weak.upgrade() {
-                    // Reconstruct Tensor wrapper to pass to build_topo
-                    let input_tensor = Tensor(input_rc);
-                    build_topo(&input_tensor, visited, sorted_list);
-                }
-                // Optional: Warn if upgrade fails?
-            }
-        }
-        // Add node to sorted list *after* visiting its children (inputs)
-        sorted_list.push(node.clone());
-    }
-}
+// Existing build_topo function remains here as it's related to Tensor's backward method
+// fn build_topo<T: Clone + 'static>( ... ) { ... } - already present above
