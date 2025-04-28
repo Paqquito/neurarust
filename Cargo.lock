@@ -16,6 +16,14 @@ dependencies = [
 ]
 
 [[package]]
+name = "neurarust-optim"
+version = "0.1.0"
+dependencies = [
+ "neurarust-core",
+ "num-traits",
+]
+
+[[package]]
 name = "num-traits"
 version = "0.2.19"
 source = "registry+https://github.com/rust-lang/crates.io-index"

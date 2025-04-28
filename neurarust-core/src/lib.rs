@@ -8,7 +8,7 @@ pub mod tensor_data;
 
 // Declare new top-level modules
 pub mod nn;
-pub mod optim;
+// pub mod optim; // REMOVED: Optimizers moved to neurarust-optim crate
 pub mod utils;
 
 // Declare new sub-modules within ops

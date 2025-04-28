@@ -1,0 +1,8 @@
+[package]
+name = "neurarust-optim"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+neurarust-core = { path = "../neurarust-core" }
+num-traits = "0.2"
