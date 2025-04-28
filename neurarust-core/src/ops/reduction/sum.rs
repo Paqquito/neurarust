@@ -8,6 +8,7 @@ use std::rc::{Rc, Weak};
 use std::marker::PhantomData; // Add PhantomData import
 use std::cell::RefCell;
 use std::collections::HashSet; // Added for shape calculation helper
+use crate::tensor::utils::calculate_strides; // Mise à jour de l'import
 
 // --- Structures (BackwardOp defined before use) ---
 
@@ -44,20 +45,6 @@ fn calculate_reduced_shape(input_shape: &[usize], axes: &[usize], keep_dims: boo
     } else {
         reduced_shape
     }
-}
-
-// Helper function to calculate strides for a given shape
-// TODO: Consider moving this to a more general tensor utils module
-fn calculate_strides(shape: &[usize]) -> Vec<usize> {
-    let rank = shape.len();
-    let mut strides = vec![0; rank];
-    if rank > 0 {
-        strides[rank - 1] = 1;
-        for i in (0..rank - 1).rev() {
-            strides[i] = strides[i + 1] * shape[i + 1];
-        }
-    }
-    strides
 }
 
 impl<T> Tensor<T> {

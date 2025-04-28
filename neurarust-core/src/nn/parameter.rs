@@ -37,7 +37,7 @@ impl<T: fmt::Debug> fmt::Debug for Parameter<T> {
     }
 }
 
-impl<T> Clone for Parameter<T> {
+impl<T> Clone for Parameter<T> where T: Clone {
     /// Cloning a Parameter clones the underlying Tensor (shallow clone via Rc).
     fn clone(&self) -> Self {
         Parameter(self.0.clone())

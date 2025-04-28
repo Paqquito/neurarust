@@ -7,6 +7,60 @@ use std::ops::{Add, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
+use std::fmt::Debug;
+use num_traits::{Zero, One};
+
+// Helper pour réduire (sommer) le gradient pour correspondre à la forme originale
+fn reduce_gradient<T>(grad: &Tensor<T>, target_shape: &[usize]) -> Tensor<T>
+where
+    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + std::iter::Sum,
+{
+    let grad_shape = grad.shape();
+    if grad_shape == target_shape {
+        return grad.clone(); // Cas simple: pas de réduction
+    }
+
+    let rank_diff = grad_shape.len().saturating_sub(target_shape.len());
+    let mut axes_to_sum = Vec::new();
+
+    // 1. Identifier les dimensions ajoutées par le broadcast (à gauche)
+    for i in 0..rank_diff {
+        axes_to_sum.push(i);
+    }
+
+    // 2. Identifier les dimensions de taille 1 dans target_shape qui ont été broadcastées
+    for i in 0..target_shape.len() {
+        let grad_dim_index = rank_diff + i;
+        if grad_dim_index < grad_shape.len() && target_shape[i] == 1 && grad_shape[grad_dim_index] != 1 {
+             // Vérifier que l'axe n'est pas déjà inclus (ne devrait pas arriver)
+             if !axes_to_sum.contains(&grad_dim_index) {
+                axes_to_sum.push(grad_dim_index);
+             }
+        }
+    }
+
+    // 3. Cas spécial: si target est scalaire ([]), tous les axes du grad doivent être sommés
+    if target_shape.is_empty() && !grad_shape.is_empty() {
+        // Remplacer axes_to_sum par tous les axes du gradient
+        axes_to_sum = (0..grad_shape.len()).collect();
+    }
+
+    // Effectuer la sommation si nécessaire
+    if !axes_to_sum.is_empty() {
+        // Trier les axes pour éviter les problèmes potentiels dans sum_axes ? (Normalement géré)
+        // axes_to_sum.sort_unstable();
+        grad.sum_axes(&axes_to_sum, true) // Appel à sum_axes
+    } else {
+        // Si les formes diffèrent mais aucun axe n'a été identifié pour la somme,
+        // c'est une situation inattendue (peut-être une erreur dans broadcast_shapes?)
+        // Ou le cas où grad=[1,1,..] et target=[] n'a pas été bien géré avant?
+        eprintln!(
+            "Warning: reduce_gradient logic anomaly. Shapes {:?} and {:?} differ, but no axes to sum found.",
+            grad_shape, target_shape
+        );
+        grad.clone() // Retourne le gradient original comme fallback sûr
+    }
+}
 
 // --- Forward Operation --- 
 
