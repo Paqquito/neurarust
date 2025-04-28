@@ -1,7 +1,9 @@
 [package]
 name = "neurarust-core"
 version = "0.1.0"
-edition = "2024"
+edition = "2021"
 
 [dependencies]
 num-traits = "0.2"
+rand = "0.8"
+# neurarust-optim = { path = "../neurarust-optim" } # Removed to break cycle
