@@ -8,7 +8,11 @@ use std::ops::{Add, Mul, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
+use std::fmt::Debug;
+use std::cmp::PartialEq;
+use std::collections::HashMap;
 
+#[derive(Debug)]
 struct MatmulBackward<T> {
     input_a: Tensor<T>, // Need clones of inputs for matmul gradient
     input_b: Tensor<T>,
@@ -19,13 +23,18 @@ struct MatmulBackward<T> {
 
 impl<T> BackwardOp<T> for MatmulBackward<T> 
 where
-    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static + One + Zero + Add<Output=T>,
+    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static + One + Zero + Add<Output=T> + Debug + PartialEq,
 {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
         // grad_A = upstream_grad @ B.T
         // grad_B = A.T @ upstream_grad
-        let grad_clone = upstream_grad.clone(); // Clone upstream_grad to avoid borrow issues
-        grad_clone.set_requires_grad(false); // Ensure the clone doesn't require grad
+
+        // Cloner et remodeler si scalaire [1] -> [1, 1] pour matmul
+        let grad_clone = if upstream_grad.shape() == [1] {
+            upstream_grad.clone().reshape(vec![1, 1])
+        } else {
+            upstream_grad.clone()
+        };
         
         // Calculate gradient for input A
         if let Some(input_a_rc) = self.input_a_ref.upgrade() {
@@ -34,7 +43,6 @@ where
                 let input_b_transposed = self.input_b.transpose();
                 // Use the clone in calculations
                 let grad_a = grad_clone.matmul(&input_b_transposed);
-                grad_a.set_requires_grad(false); // Ensure gradient tensor does not require grad
                 
                 // Accumulate gradient for A
                 if let Some(existing_grad) = input_a_td.grad.as_mut() {
@@ -52,7 +60,6 @@ where
                  let input_a_transposed = self.input_a.transpose();
                  // Use the clone in calculations
                  let grad_b = input_a_transposed.matmul(&grad_clone);
-                 grad_b.set_requires_grad(false); // Ensure gradient tensor does not require grad
                  
                  // Accumulate gradient for B
                  if let Some(existing_grad) = input_b_td.grad.as_mut() {
@@ -84,7 +91,7 @@ impl<T> Tensor<T> {
     /// - Panics if the inner dimensions (`K`) do not match.
     pub fn matmul(&self, other: &Tensor<T>) -> Tensor<T>
     where
-        T: Copy + Mul<Output=T> + AddAssign + Zero + Clone + 'static + One + Add<Output=T>,
+        T: Copy + Mul<Output=T> + AddAssign + Zero + Clone + 'static + One + Add<Output=T> + Debug + PartialEq,
     {
         let a_td = self.borrow_tensor_data();
         let b_td = other.borrow_tensor_data();
@@ -128,7 +135,7 @@ impl<T> Tensor<T> {
                 _phantom: PhantomData,
             };
              // Now we can assign grad_fn as T satisfies the bounds
-             result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn)); 
+             result.data.borrow_mut().grad_fn = Some(Rc::new(grad_fn)); 
         }
         result
     }
@@ -155,7 +162,7 @@ mod tests {
         // Expected: [[1*5+2*7, 1*6+2*8], [3*5+4*7, 3*6+4*8]] = [[19, 22], [43, 50]]
         let expected_data = vec![19.0, 22.0, 43.0, 50.0];
         let result = a.matmul(&b);
-        assert_eq!(result.data(), expected_data);
+        assert_eq!(result.data().to_vec(), expected_data);
         assert_eq!(result.shape(), vec![2, 2]);
     }
     
@@ -166,7 +173,7 @@ mod tests {
         // Expected: [[1*7+2*9+3*11, 1*8+2*10+3*12], [4*7+5*9+6*11, 4*8+5*10+6*12]] = [[58, 64], [139, 154]]
         let expected_data = vec![58.0, 64.0, 139.0, 154.0];
         let result = a.matmul(&b);
-        assert_eq!(result.data(), expected_data);
+        assert_eq!(result.data().to_vec(), expected_data);
         assert_eq!(result.shape(), vec![2, 2]);
     }
 
@@ -226,11 +233,11 @@ mod tests {
         
         // c = a @ b = [[1*3 + 2*4]] = [[11.0]] -> Shape(1, 1)
         let c = a.matmul(&b);
-        assert_eq!(c.data(), vec![11.0]);
+        assert_eq!(c.data().to_vec(), vec![11.0]);
         assert_eq!(c.shape(), vec![1, 1]);
         assert!(c.requires_grad());
 
-        c.backward(); // Initial grad dC/dC = [[1.0]]
+        c.backward(None); // Initial grad dC/dC = [[1.0]]
 
         // Expected gradients:
         // grad_A = dC/dA = upstream_grad @ B.T 
@@ -244,11 +251,11 @@ mod tests {
         let expected_grad_b = vec![1.0_f32, 2.0];
 
         let grad_a = a.grad().expect("Grad for A missing");
-        assert_eq!(grad_a.data(), expected_grad_a);
+        assert_eq!(grad_a.data().to_vec(), expected_grad_a);
         assert_eq!(grad_a.shape(), vec![1, 2]);
 
         let grad_b = b.grad().expect("Grad for B missing");
-        assert_eq!(grad_b.data(), expected_grad_b);
+        assert_eq!(grad_b.data().to_vec(), expected_grad_b);
         assert_eq!(grad_b.shape(), vec![2, 1]);
     }
     
@@ -262,7 +269,7 @@ mod tests {
          // To make backward work on non-scalar, we need to provide upstream grad
          // Or sum the result to get a scalar loss
          let loss = c.sum(); // loss = 19+22+43+50 = 134
-         loss.backward();
+         loss.backward(None);
          
          // Expected gradients (dL/dc = [[1, 1], [1, 1]] from sum):
          // grad_A = dL/dc @ B.T = [[1, 1], [1, 1]] @ [[5, 7], [6, 8]] = [[11, 15], [11, 15]]
@@ -271,11 +278,11 @@ mod tests {
          let expected_grad_b = vec![4.0_f32, 4.0, 6.0, 6.0];
          
         let grad_a = a.grad().expect("Grad for A missing");
-        assert_eq!(grad_a.data(), expected_grad_a);
+        assert_eq!(grad_a.data().to_vec(), expected_grad_a);
         assert_eq!(grad_a.shape(), vec![2, 2]);
 
         let grad_b = b.grad().expect("Grad for B missing");
-        assert_eq!(grad_b.data(), expected_grad_b);
+        assert_eq!(grad_b.data().to_vec(), expected_grad_b);
         assert_eq!(grad_b.shape(), vec![2, 2]);
     }
 } 

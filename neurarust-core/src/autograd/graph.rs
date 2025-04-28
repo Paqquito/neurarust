@@ -13,12 +13,13 @@ pub(crate) fn build_topo<T: Clone + 'static>(
     visited: &mut HashSet<*const RefCell<TensorData<T>>>,
     sorted_list: &mut Vec<Tensor<T>>
 ) {
-    let node_ptr = Rc::as_ptr(&node.0);
+    // Accéder directement au champ `data` (Rc) pour obtenir le pointeur
+    let node_ptr = Rc::as_ptr(&node.data);
     if !visited.contains(&node_ptr) {
         visited.insert(node_ptr);
 
         // Clone the Rc for grad_fn to avoid holding borrow across recursive call
-        let grad_fn_clone = node.0.borrow().grad_fn.clone();
+        let grad_fn_clone = node.borrow_tensor_data().grad_fn.clone();
 
         if let Some(grad_fn) = grad_fn_clone {
             // Get weak references to inputs from the BackwardOp
@@ -26,8 +27,8 @@ pub(crate) fn build_topo<T: Clone + 'static>(
             for input_weak in inputs_weak {
                 // Attempt to upgrade the weak reference to a strong one (Rc)
                 if let Some(input_rc) = input_weak.upgrade() {
-                    // Create a temporary Tensor wrapper around the upgraded Rc
-                    let input_tensor = Tensor(input_rc);
+                    // Créer un Tensor en utilisant le Rc<RefCell<TensorData<T>>>
+                    let input_tensor = Tensor { data: input_rc };
                     // Recurse
                     build_topo(&input_tensor, visited, sorted_list);
                 }

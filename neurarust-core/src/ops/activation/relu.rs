@@ -7,6 +7,11 @@ use std::cmp::PartialOrd; // Import from std::cmp
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
+use std::fmt::Debug;
+use std::default::Default;
+use std::ops::Neg;
+use std::iter::Sum;
+use std::collections::HashMap;
 
 // --- Forward Operation --- 
 
@@ -15,7 +20,7 @@ impl<T> Tensor<T> {
     /// ReLU(x) = max(0, x)
     pub fn relu(&self) -> Tensor<T>
     where
-        T: Zero + PartialOrd + Copy + Clone + 'static + AddAssign + One + Mul<Output=T>,
+        T: Zero + PartialOrd + Copy + Clone + 'static + AddAssign + One + Mul<Output=T> + Debug + Default + Sum + Neg<Output=T>,
     {
         let input_td = self.borrow_tensor_data();
         
@@ -35,7 +40,7 @@ impl<T> Tensor<T> {
                 input: self.clone(), // Store original input for gradient calculation
                 _phantom: PhantomData,
             };
-            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
+            result.data.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         result
     }
@@ -43,48 +48,50 @@ impl<T> Tensor<T> {
 
 // --- Backward Operation --- 
 
+#[derive(Debug)]
 struct ReluBackward<T> {
-    input: Tensor<T>, // Store the input tensor to compute the mask (input > 0)
+    input: Tensor<T>, // Renommé depuis input_tensor, suppression de l'ancien champ `input`
     _phantom: PhantomData<T>,
 }
 
 impl<T> BackwardOp<T> for ReluBackward<T>
 where
-    // Needs Zero/PartialOrd for mask, One for mask value, Mul for applying mask, AddAssign for accum
-    T: Zero + PartialOrd + One + Mul<Output=T> + AddAssign + Copy + Clone + 'static,
+    T: PartialOrd + Zero + Clone + Copy + Mul<Output = T> + Debug + AddAssign + One + Sum + 'static + Default + Neg<Output=T>,
 {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
-        // Calculate the mask *before* borrowing the input mutably
-        let mask = {
-            let input_data_ref = self.input.borrow_tensor_data(); // Immutable borrow for mask calculation
-            let mask_data: Vec<T> = input_data_ref.data.iter().map(|&x| {
-                if x > T::zero() { T::one() } else { T::zero() }
-            }).collect();
-            let mask_tensor = Tensor::new(mask_data, input_data_ref.shape.clone());
-            // input_data_ref is dropped here
-            mask_tensor 
-        };
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) { // Ajout du paramètre gradients
+        if let Some(input_rc) = self.input.get_weak_ref().upgrade() {
+            if input_rc.borrow().requires_grad {
+                // grad = upstream_grad * (input > 0)
+                let input_data = self.input.data(); // Use the stored input tensor
+                let mask_data: Vec<T> = input_data.iter().map(|&x| if x > T::zero() { T::one() } else { T::zero() }).collect();
+                let mask_tensor = Tensor::new(mask_data, self.input.shape());
+                
+                let local_gradient = upstream_grad * &mask_tensor; // Multiplication element-wise
 
-        // Calculate local gradient: upstream_grad * mask
-        let local_grad = upstream_grad * &mask;
-        
-        // Now, borrow the input mutably to accumulate the gradient
-        if let Some(input_rc) = self.input.get_weak_ref().upgrade() { 
-            let mut input_td = input_rc.borrow_mut(); // Mutable borrow for accumulation
-            if input_td.requires_grad {
-                if let Some(ref mut grad) = input_td.grad {
-                    *grad += &local_grad;
-                } else {
-                    input_td.grad = Some(local_grad);
-                }
+                accumulate_gradient(gradients, &self.input.get_weak_ref(), local_gradient);
             }
-            // input_td (RefMut) is dropped here
         }
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
-        // Return weak ref to the original input tensor stored in self.input
         vec![self.input.get_weak_ref()]
+    }
+}
+
+// --- Helper Function (copied from add.rs) ---
+fn accumulate_gradient<T>(
+    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
+    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
+    local_gradient: Tensor<T>,
+)
+where
+    T: AddAssign + Clone + Debug + Zero + Copy + 'static,
+{
+    if let Some(input_rc) = input_weak_ref.upgrade() {
+        let input_ptr = Rc::as_ptr(&input_rc);
+        gradients.entry(input_ptr)
+            .and_modify(|existing_grad| { *existing_grad += &local_gradient; })
+            .or_insert(local_gradient);
     }
 }
 
@@ -113,7 +120,7 @@ mod tests {
         let result = t.relu();
         
         let expected_data = vec![0.0_f32, 0.0, 0.0, 1.0, 2.0];
-        assert_eq!(result.data(), expected_data);
+        assert_eq!(result.data().to_vec(), expected_data);
         assert_eq!(result.shape(), shape);
         assert!(!result.requires_grad());
     }
@@ -140,7 +147,7 @@ mod tests {
         let loss = result.sum(); 
 
         assert!(t1.grad().is_none());
-        loss.backward(); // Upstream grad is implicitly 1.0 for sum, then flows back
+        loss.backward(None); // Upstream grad is implicitly 1.0 for sum, then flows back
 
         let grad_t1 = t1.grad();
         assert!(grad_t1.is_some());
@@ -148,7 +155,7 @@ mod tests {
         
         // Expected grad: upstream(1.0) * mask([0, 0, 0, 1, 1]) = [0.0, 0.0, 0.0, 1.0, 1.0]
         let expected_grad_data = vec![0.0_f32, 0.0, 0.0, 1.0, 1.0];
-        assert_eq!(grad_t1_tensor.data(), expected_grad_data);
+        assert_eq!(grad_t1_tensor.data().to_vec(), expected_grad_data);
         assert_eq!(grad_t1_tensor.shape(), vec![5]);
     }
     
@@ -163,13 +170,13 @@ mod tests {
         let loss = z.sum();  // loss = 6.0
 
         assert!(x.grad().is_none());
-        loss.backward();
+        loss.backward(None);
 
         // Gradients:
         // dLoss/dz = [1, 1, 1] (from sum)
         // dLoss/dy = dLoss/dz * d(relu)/dy = [1, 1, 1] * [0, 1, 1] = [0, 1, 1]
         // dLoss/dx = dLoss/dy * dy/dx = [0, 1, 1] * [2, 2, 2] = [0, 2, 2]
         let expected_grad_x = vec![0.0_f32, 2.0, 2.0];
-        assert_eq!(x.grad().unwrap().data(), expected_grad_x);
+        assert_eq!(x.grad().unwrap().data().to_vec(), expected_grad_x);
     }
 } 

@@ -2,21 +2,17 @@ use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use std::cell::RefCell;
 use std::rc::Weak;
+use std::collections::HashMap;
 
 pub mod graph;
 
-/// Trait representing an operation that can perform backpropagation.
-/// Each operation (Add, Mul, Matmul, etc.) will have a corresponding struct
-/// implementing this trait, storing the necessary context (inputs, shapes, etc.).
-pub trait BackwardOp<T> {
-    /// Performs the backward pass for this operation.
-    ///
-    /// Takes the gradient flowing from the *output* of this operation (`upstream_grad`)
-    /// and computes/accumulates the gradients with respect to the *inputs* of this operation.
-    fn backward(&self, upstream_grad: &Tensor<T>);
+/// Trait for operations that support backward pass (gradient calculation).
+pub trait BackwardOp<T>: std::fmt::Debug {
+    /// Performs the backward pass, calculating gradients for the inputs.
+    /// Takes the upstream gradient and a mutable reference to the gradient map.
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>);
 
-    /// Returns weak references to the input tensors' data required for backpropagation.
-    /// This allows traversing the computation graph.
+    /// Returns weak references to the input tensors.
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>>;
 }
 

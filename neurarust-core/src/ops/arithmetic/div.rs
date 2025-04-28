@@ -9,6 +9,7 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 use num_traits::{Zero, One};
 use std::iter::Sum;
+use std::collections::HashMap;
 
 // --- Forward Operation --- 
 
@@ -61,7 +62,7 @@ where
                 input_b_val: other.clone(),
                 _phantom: PhantomData,
             };
-            result.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
+            result.borrow_tensor_data_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         result
     }
@@ -69,6 +70,7 @@ where
 
 // --- Backward Operation --- 
 
+#[derive(Debug)]
 struct DivBackward<T> {
     input_a_shape: Vec<usize>,
     input_b_shape: Vec<usize>,
@@ -80,63 +82,50 @@ struct DivBackward<T> {
     _phantom: PhantomData<T>,
 }
 
+// Copier helper
+fn accumulate_gradient<T>(
+    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
+    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
+    local_gradient: Tensor<T>,
+)
+where
+    T: AddAssign + Clone + Debug + Zero + Copy + 'static,
+{
+    if let Some(input_rc) = input_weak_ref.upgrade() {
+        let input_ptr = Rc::as_ptr(&input_rc);
+        gradients.entry(input_ptr)
+            .and_modify(|existing_grad| { *existing_grad += &local_gradient; })
+            .or_insert(local_gradient);
+    }
+}
+
 impl<T> BackwardOp<T> for DivBackward<T>
 where
-    // Restore full bounds needed for reduce_gradient
     T: Div<Output = T> + Mul<Output = T> + Neg<Output = T> + AddAssign + Copy + Clone + 'static + Default + Debug + Zero + One + Sum,
 {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
-        let grad_clone = upstream_grad.clone();
-        grad_clone.set_requires_grad(false);
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
+        let needs_grad_a = self.input_a_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
+        let needs_grad_b = self.input_b_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
 
-        // Restore reduce_gradient calls 
-        // NOTE: Still assumes Mul/Div ops handle broadcasting internally, which they don't yet.
-        // Placeholder comment remains valid.
-        // TODO: Update this backward pass once Mul/Div support broadcasting.
-
-        // Calculate grad_a = upstream_grad / B
-        let grad_a_reduced = &grad_clone / &self.input_b_val; 
-        let grad_a = reduce_gradient(&grad_a_reduced, &self.input_a_shape); // Restore reduce
-        
-        // Calculate grad_b = upstream_grad * (-A / B^2)
-        let b_squared = &self.input_b_val * &self.input_b_val;
-        let a_div_b_squared = &self.input_a_val / &b_squared; 
-        let neg_a_div_b_squared = -&a_div_b_squared; 
-        let grad_b_reduced = &grad_clone * &neg_a_div_b_squared; 
-        let grad_b = reduce_gradient(&grad_b_reduced, &self.input_b_shape); // Restore reduce
-
-        // Accumulate gradients
-        if let Some(input_a_rc) = self.input_a_ref.upgrade() {
-            let mut input_a_td = input_a_rc.borrow_mut();
-            if input_a_td.requires_grad {
-                if let Some(existing_grad_tensor) = input_a_td.grad.as_mut() {
-                    let mut existing_data = existing_grad_tensor.borrow_tensor_data_mut();
-                    let new_grad_data = grad_a.borrow_tensor_data();
-                    assert_eq!(existing_data.data.len(), new_grad_data.data.len());
-                    for (existing, new) in existing_data.data.iter_mut().zip(new_grad_data.data.iter()) {
-                        *existing += *new;
-                    }
-                } else {
-                    // Use Tensor::new for initial grad
-                    input_a_td.grad = Some(Tensor::new(grad_a.data(), grad_a.shape()));
-                }
+        if needs_grad_a || needs_grad_b {
+            let grad_clone = upstream_grad.clone();
+            
+            if needs_grad_a {
+                // Calcul grad_a = upstream_grad / B
+                let grad_a_reduced = &grad_clone / &self.input_b_val; 
+                let grad_a = reduce_gradient(&grad_a_reduced, &self.input_a_shape); 
+                accumulate_gradient(gradients, &self.input_a_ref, grad_a);
             }
-        }
-        if let Some(input_b_rc) = self.input_b_ref.upgrade() {
-             let mut input_b_td = input_b_rc.borrow_mut();
-             if input_b_td.requires_grad {
-                 if let Some(existing_grad_tensor) = input_b_td.grad.as_mut() {
-                    let mut existing_data = existing_grad_tensor.borrow_tensor_data_mut();
-                    let new_grad_data = grad_b.borrow_tensor_data();
-                    assert_eq!(existing_data.data.len(), new_grad_data.data.len());
-                    for (existing, new) in existing_data.data.iter_mut().zip(new_grad_data.data.iter()) {
-                        *existing += *new;
-                    }
-                 } else {
-                    // Use Tensor::new for initial grad
-                    input_b_td.grad = Some(Tensor::new(grad_b.data(), grad_b.shape()));
-                 }
-             }
+            
+            if needs_grad_b {
+                // Calcul grad_b = upstream_grad * (-A / B^2)
+                let b_squared = &self.input_b_val * &self.input_b_val;
+                let a_div_b_squared = &self.input_a_val / &b_squared; 
+                let neg_a_div_b_squared = -&a_div_b_squared; 
+                let grad_b_reduced = &grad_clone * &neg_a_div_b_squared; 
+                let grad_b = reduce_gradient(&grad_b_reduced, &self.input_b_shape);
+                accumulate_gradient(gradients, &self.input_b_ref, grad_b);
+            }
         }
     }
 
@@ -154,7 +143,8 @@ mod tests {
     use std::ops::{Div, Mul, Neg, AddAssign};
     use std::fmt::Debug;
     use std::iter::Sum;
-    use crate::autograd::BackwardOp;
+    use std::collections::HashMap;
+    use std::rc::Rc;
 
     // Add necessary bounds to helpers
     fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Div<Output = T> + Mul<Output=T> + Neg<Output=T> + Default + Sum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
@@ -174,7 +164,7 @@ mod tests {
         let expected_shape = vec![2, 2];
         let result = &t1 / &t2;
 
-        assert_eq!(result.data(), expected_data, "Data mismatch");
+        assert_eq!(result.data().to_vec(), expected_data, "Data mismatch");
         assert_eq!(result.shape(), expected_shape, "Shape mismatch");
         assert!(!result.requires_grad());
     }
@@ -217,18 +207,30 @@ mod tests {
         let c = &a / &b; // c = 3.0
 
         assert!(c.requires_grad());
-        assert!(c.grad_fn().is_some());
+        let grad_fn_opt = c.borrow_tensor_data().grad_fn.clone();
+        assert!(grad_fn_opt.is_some());
+        let grad_fn = grad_fn_opt.unwrap();
 
-        c.backward(); // Initial gradient (dC/dC) = 1.0
+        let mut gradients = HashMap::new();
+        // Simuler l'appel depuis Tensor::backward
+        let initial_upstream_grad = Tensor::new(vec![1.0_f32], vec![1]);
+        gradients.insert(Rc::as_ptr(&c.data), initial_upstream_grad);
+        
+        // Cloner le gradient avant de l'utiliser et de passer `gradients` en mutable
+        let upstream_grad_clone = gradients.get(&Rc::as_ptr(&c.data)).unwrap().clone();
+        grad_fn.backward(&upstream_grad_clone, &mut gradients);
 
-        // Expected gradients:
-        // grad_a = dC/dA = 1/B = 1/2 = 0.5
-        // grad_b = dC/dB = -A/B^2 = -6 / (2*2) = -6 / 4 = -1.5
+        // Vérifier les gradients dans le HashMap
+        let grad_a_res = gradients.get(&Rc::as_ptr(&a.data)).expect("Grad A missing");
+        let grad_b_res = gradients.get(&Rc::as_ptr(&b.data)).expect("Grad B missing");
+
         let expected_grad_a = vec![0.5_f32];
         let expected_grad_b = vec![-1.5_f32];
 
-        assert_eq!(a.grad().unwrap().data(), expected_grad_a, "Gradient for A mismatch");
-        assert_eq!(b.grad().unwrap().data(), expected_grad_b, "Gradient for B mismatch");
+        assert_eq!(grad_a_res.data().to_vec(), expected_grad_a, "Gradient for A mismatch");
+        assert_eq!(grad_a_res.shape(), vec![1]);
+        assert_eq!(grad_b_res.data().to_vec(), expected_grad_b, "Gradient for B mismatch");
+        assert_eq!(grad_b_res.shape(), vec![1]);
     }
 
     // NEW BROADCASTING TESTS (Forward only for now)
@@ -239,7 +241,7 @@ mod tests {
         let expected_data = vec![1.0, 2.0, 3.0, 4.0];
         let expected_shape = vec![2, 2];
         let result = &t1 / &s;
-        assert_eq!(result.data(), expected_data);
+        assert_eq!(result.data().to_vec(), expected_data);
         assert_eq!(result.shape(), expected_shape);
 
         // s / t1
@@ -247,7 +249,7 @@ mod tests {
         let t2 = create_test_tensor(vec![10.0_f32, 20.0, 50.0, 100.0], vec![2, 2]);
         let expected_data_rev = vec![10.0, 5.0, 2.0, 1.0];
         let result_rev = &s2 / &t2;
-        assert_eq!(result_rev.data(), expected_data_rev);
+        assert_eq!(result_rev.data().to_vec(), expected_data_rev);
         assert_eq!(result_rev.shape(), expected_shape);
     }
 
@@ -258,7 +260,7 @@ mod tests {
         let expected_data = vec![1, 2, 3, 4, 5, 6];
         let expected_shape = vec![2, 3];
         let result = &t1 / &v;
-        assert_eq!(result.data(), expected_data);
+        assert_eq!(result.data().to_vec(), expected_data);
         assert_eq!(result.shape(), expected_shape);
     }
 

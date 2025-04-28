@@ -10,6 +10,7 @@ use std::marker::PhantomData;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use std::iter::Sum as IterSum; // Added IterSum import
+use std::collections::HashMap;
 
 // Placeholder for random initialization
 fn simple_uniform_init<T>(rows: usize, cols: usize) -> Vec<T> 
@@ -72,6 +73,7 @@ where
 
 // --- Backward Operation for Linear Layer --- 
 
+#[derive(Debug)] // Ajout de derive(Debug)
 struct LinearBackward<T> {
     input: Tensor<T>,
     weight: Parameter<T>,
@@ -87,9 +89,14 @@ where
     T: Add<Output = T> + Mul<Output = T> + AddAssign + Neg<Output = T> + Sub<Output = T> + 
        Zero + One + Copy + Clone + 'static + Debug + PartialEq + IterSum,
 {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
-        let grad_clone = upstream_grad.clone();
-        grad_clone.set_requires_grad(false);
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
+        // Cloner et remodeler si scalaire [1] -> [1, 1] pour matmul
+        let grad_clone = if upstream_grad.shape() == [1] {
+            upstream_grad.clone().reshape(vec![1, 1])
+        } else {
+            upstream_grad.clone()
+        };
+        // grad_clone.set_requires_grad(false); // Déjà supprimé
 
         // --- 1. Calculate all local gradients FIRST ---
         
@@ -246,8 +253,8 @@ where
              
              // Cas 2: Output et Bias ont exactement la même forme (e.g., input était 1D, output est [N])
              } else if output_shape == bias_shape {
-                  // Deref Parameter to get Tensor reference for Add trait
-                  &output + &bias_param.0 
+                  // Déréférencer Parameter vers &Tensor<T> pour l'addition
+                  &output + &*bias_param 
              } else {
                  panic!("Cannot broadcast bias shape {:?} to output shape {:?}", bias_shape, output_shape);
              }
@@ -258,8 +265,7 @@ where
         // Set up backward pass if needed
         let requires_grad = input.requires_grad() || self.weight.requires_grad() || self.bias.as_ref().map_or(false, |b| b.requires_grad());
         if requires_grad {
-            final_output.set_requires_grad(true);
-            let grad_fn = LinearBackward {
+            final_output.data.borrow_mut().grad_fn = Some(Rc::new(LinearBackward {
                 input: input.clone(), // Clone input for backward
                 weight: self.weight.clone(), // Clone weight parameter
                 bias: self.bias.clone(), // Clone bias parameter
@@ -267,8 +273,7 @@ where
                 weight_ref: self.weight.get_weak_ref(),
                 bias_ref: self.bias.as_ref().map(|p| p.get_weak_ref()),
                 _phantom: PhantomData,
-            };
-            final_output.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
+            }));
         }
 
         final_output
@@ -348,7 +353,7 @@ mod tests {
         let expected_output_shape = vec![1, 2];
         
         check_tensor(&output, &expected_output_shape, true); // Requires grad because weight does
-        assert_eq!(output.data(), expected_output_data);
+        assert_eq!(output.data().to_vec(), expected_output_data);
     }
     
     #[test]
@@ -365,7 +370,7 @@ mod tests {
         let expected_output_shape = vec![1, 2];
         
         check_tensor(&output, &expected_output_shape, true); // Requires grad from params
-        assert_eq!(output.data(), expected_output_data);
+        assert_eq!(output.data().to_vec(), expected_output_data);
     }
     
     #[test]
@@ -388,7 +393,7 @@ mod tests {
         let expected_output_shape = vec![2, 2];
         
         check_tensor(&output, &expected_output_shape, true);
-        assert_eq!(output.data(), expected_output_data);
+        assert_eq!(output.data().to_vec(), expected_output_data);
     }
     
     #[test]
@@ -405,7 +410,7 @@ mod tests {
         assert!((output.data()[0] - 110.1).abs() < 1e-6, "Output data mismatch");
         assert!(output.grad_fn().is_some());
 
-        output.backward(); 
+        output.backward(None); 
 
         let grad_input = input.grad().expect("Input gradient should exist now");
         // Gradient tensors themselves usually don't require grad
@@ -444,7 +449,7 @@ mod tests {
 
         // Use a simple sum as the pseudo-loss for testing backward pass
         let loss = output.sum(); // Sum all elements of the output
-        loss.backward(); 
+        loss.backward(None); 
 
         assert!(input.grad().is_some(), "Input gradient should exist now");
         let grad_input = input.grad().unwrap();

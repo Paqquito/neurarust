@@ -10,8 +10,7 @@ use std::marker::PhantomData;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use std::iter::Sum as IterSum;
-use crate::ops::arithmetic::sub;
-use crate::ops::arithmetic::div;
+use std::collections::HashMap;
 
 /// Specifies the reduction to apply to the output:
 /// 'none' | 'mean' | 'sum'
@@ -78,7 +77,6 @@ impl MSELoss {
         };
         
         if requires_grad {
-            loss_val_tensor.set_requires_grad(true);
             // Setup MSELossBackward call
             let grad_fn = MSELossBackward {
                 input_ref: input.get_weak_ref(),
@@ -88,7 +86,7 @@ impl MSELoss {
                 num_elements: n,
                 _phantom: PhantomData::<T>,
             };
-            loss_val_tensor.0.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
+            loss_val_tensor.data.borrow_mut().grad_fn = Some(Rc::new(grad_fn));
         } 
         
         loss_val_tensor
@@ -97,6 +95,7 @@ impl MSELoss {
 
 // --- Backward Operation ---
 
+#[derive(Debug)]
 struct MSELossBackward<T> {
     diff: Tensor<T>, // Store difference (input - target) from forward pass
     input_ref: Weak<RefCell<TensorData<T>>>, // Ref to input tensor data
@@ -105,59 +104,66 @@ struct MSELossBackward<T> {
     _phantom: PhantomData<T>,
 }
 
+// --- Helper Function (similar to other ops) ---
+fn accumulate_gradient<T>(
+    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
+    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
+    local_gradient: Tensor<T>,
+)
+where
+    T: AddAssign + Clone + Debug + Zero + Copy + 'static,
+{
+    if let Some(input_rc) = input_weak_ref.upgrade() {
+        let input_ptr = Rc::as_ptr(&input_rc);
+        gradients.entry(input_ptr)
+            .and_modify(|existing_grad| { *existing_grad += &local_gradient; })
+            .or_insert(local_gradient);
+    }
+}
+
 impl<T> BackwardOp<T> for MSELossBackward<T>
 where
     T: Debug + Copy + Clone + Zero + One + FromPrimitive + PartialEq + 
        Sub<Output = T> + Mul<Output = T> + Div<Output = T> +
-       Add<Output = T> + AddAssign + IterSum + 'static + Neg<Output=T>,
+       Add<Output = T> + AddAssign + IterSum + 'static + Neg<Output=T> + Default,
 {
-    fn backward(&self, upstream_grad: &Tensor<T>) {
-        let grad_clone = upstream_grad.clone();
-        grad_clone.set_requires_grad(false);
-        assert_eq!(grad_clone.numel(), 1, "Upstream grad for Loss must be scalar");
-        let upstream_scalar = grad_clone.data()[0];
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
+        assert_eq!(upstream_grad.numel(), 1, "Upstream grad for Loss must be scalar");
+        let upstream_scalar = upstream_grad.data()[0];
 
         if let Some(input_rc) = self.input_ref.upgrade() {
-            let mut input_td = input_rc.borrow_mut();
-            if input_td.requires_grad {
+            let needs_grad = input_rc.borrow().requires_grad;
+            if needs_grad { 
+                drop(input_rc); 
+
                 let two = T::from_f32(2.0).expect("Could not convert 2.0 to tensor type T");
                 let scalar_factor = two * upstream_scalar;
                 let diff_data = self.diff.data();
-                let diff_shape = self.diff.shape(); // Get shape for final tensor
+                let diff_shape = self.diff.shape();
                 
-                // Calculate final gradient data based on reduction
                 let final_grad_data: Vec<T> = match self.reduction {
                     Reduction::Sum => {
-                         // grad = scalar_factor * diff
                          diff_data.iter()
                                  .map(|&d| scalar_factor * d)
                                  .collect()
                     },
                     Reduction::Mean => {
-                        // grad = scalar_factor * diff / N
                         let n_t = T::from_usize(self.num_elements).expect("Could not convert numel to tensor type T");
                         diff_data.iter()
-                                 .map(|&d| (scalar_factor * d) / n_t) // Divide each element by N
+                                 .map(|&d| (scalar_factor * d) / n_t)
                                  .collect()
                     },
                     Reduction::None => unreachable!(), 
                 };
                 
                 let final_local_grad = Tensor::new(final_grad_data, diff_shape);
-                final_local_grad.set_requires_grad(false);
 
-                // Accumulate gradient
-                if let Some(existing_grad) = input_td.grad.as_mut() {
-                    *existing_grad += &final_local_grad;
-                } else {
-                    input_td.grad = Some(final_local_grad);
-                }
+                accumulate_gradient(gradients, &self.input_ref, final_local_grad);
             }
         }
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
-        // Only input requires grad for loss function
         vec![self.input_ref.clone()]
     }
 }
@@ -252,7 +258,7 @@ mod tests {
         let result = loss.forward(&input, &target); // loss = 0.25
         assert!(result.requires_grad());
         
-        result.backward(); // upstream grad = 1.0
+        result.backward(None); // upstream grad = 1.0
 
         // Expected grad = 2 * diff / N = 2 * [-0.5, -0.5, -0.5, -0.5] / 4
         // = [-1.0, -1.0, -1.0, -1.0] / 4 = [-0.25, -0.25, -0.25, -0.25]
@@ -270,7 +276,7 @@ mod tests {
         let result = loss.forward(&input, &target); // loss = 1.0
         assert!(result.requires_grad());
         
-        result.backward(); // upstream grad = 1.0
+        result.backward(None); // upstream grad = 1.0
 
         // Expected grad = 2 * diff = 2 * [-0.5, -0.5, -0.5, -0.5]
         // = [-1.0, -1.0, -1.0, -1.0]

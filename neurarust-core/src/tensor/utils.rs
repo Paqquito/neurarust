@@ -1,11 +1,9 @@
 use std::cmp::max;
 use crate::tensor::Tensor;
-use std::ops::{AddAssign, Add, Neg};
+use std::ops::{AddAssign, Add};
 use num_traits::{Zero, One};
-use std::iter::Sum;
+use std::iter::Sum as IterSum;
 use std::fmt::Debug;
-use std::cell::RefCell;
-use std::rc::Weak;
 
 /// Calculates the strides for a given shape.
 /// Strides represent the number of elements to skip in the flattened data array
@@ -111,11 +109,17 @@ pub fn coord_to_index_broadcasted(target_coord: &[usize], original_shape: &[usiz
 // Used in backward passes of broadcastable binary ops.
 pub fn reduce_gradient<T>(grad: &Tensor<T>, target_shape: &[usize]) -> Tensor<T>
 where
-    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + Sum<T>,
+    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + IterSum,
 {
     let grad_shape = grad.shape();
     if grad_shape == target_shape {
         return grad.clone(); // Simple case: no reduction needed
+    }
+
+    // Handle reduction to scalar explicitly
+    if target_shape.is_empty() {
+        // Sum over all axes, do not keep dims, to get a scalar output with shape []
+        return grad.sum_axes(&(0..grad_shape.len()).collect::<Vec<_>>(), false);
     }
 
     let rank_diff = grad_shape.len().saturating_sub(target_shape.len());
@@ -135,18 +139,17 @@ where
              }
         }
     }
-
-    // 3. Special case: if target is scalar ([]), sum all gradient axes
-    if target_shape.is_empty() && !grad_shape.is_empty() {
-        axes_to_sum = (0..grad_shape.len()).collect();
-    }
+    
+    // 3. Removed special case for scalar target shape, handled above.
+    // if target_shape.is_empty() && !grad_shape.is_empty() { ... }
 
     // Perform summation if needed
     if !axes_to_sum.is_empty() {
-        // Use the Tensor's sum_axes method (requires T: Sum)
-        grad.sum_axes(&axes_to_sum, true) // Keep dims = true!
+        // Keep dims = true for intermediate reductions, 
+        // ensures result has same rank as grad for further processing.
+        grad.sum_axes(&axes_to_sum, true) 
     } else {
-        // Should not happen if shapes differ and target is not scalar, indicates potential logic error elsewhere?
+        // If shapes differ but no axes found (and target wasn't scalar), something is wrong.
         eprintln!(
             "Warning: reduce_gradient logic anomaly. Shapes {:?} and {:?} differ, but no axes to sum found.",
             grad_shape, target_shape
