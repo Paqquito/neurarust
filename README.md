@@ -1,66 +1,68 @@
 # NeuraRust 🦀🧠
 
-**Objectif** : Créer un framework de deep learning performant, sûr et ergonomique en Rust, inspiré par PyTorch mais exploitant les avantages uniques de Rust.
+**Goal**: Create a performant, safe, and ergonomic deep learning framework in Rust, inspired by PyTorch but leveraging Rust's unique advantages.
 
 [![Rust](https://github.com/Paqquito/NeuraRust/actions/workflows/rust.yml/badge.svg)](https://github.com/Paqquito/NeuraRust/actions/workflows/rust.yml)
 
 ---
 
-## ✨ Fonctionnalités Principales (basées sur Objectifs.md)
+## ✨ Core Features (Based on Goals.md)
 
-NeuraRust vise à fournir une expérience similaire à PyTorch tout en tirant parti de la puissance de Rust :
+NeuraRust aims to provide a PyTorch-like experience while harnessing the power of Rust:
 
-*   **Tenseurs (`neurarust-core::Tensor`)**: Une structure `Tensor` multi-dimensionnelle performante avec gestion explicite de la mémoire et sécurité garantie par Rust.
-*   **Différentiation Automatique (`neurarust-core::Autograd`)**: Moteur d'autodifférentiation (dynamique) pour calculer les gradients automatiquement via `.backward()`.
-*   **Modules de Réseaux Neuronaux (`neurarust-nn`)** *(Futur)*: Blocs de construction (couches linéaires, convolutives, etc.) et fonctions d'activation/perte.
-*   **Optimiseurs (`neurarust-optim`)** *(Futur)*: Algorithmes d'optimisation standards (SGD, Adam...). 
-*   **Gestion des Données (`neurarust-data`)** *(Futur)*: Outils pour charger et prétraiter les données (`Dataset`, `DataLoader`).
-*   **Support Accélérateurs** *(Futur)*: Intégration GPU (CUDA, etc.) pour des calculs rapides.
-*   **Interopérabilité & Déploiement** *(Futur)*: Export ONNX, bindings Python (PyO3), compilation WASM et binaire natif.
+*   **Tensors (`neurarust-core::Tensor`)**: A performant multi-dimensional `Tensor` structure with explicit memory management and Rust-guaranteed safety. Includes broadcasting capabilities (initially for Add).
+*   **Automatic Differentiation (`neurarust-core::Autograd`)**: Dynamic autograd engine to automatically compute gradients via `.backward()`. Currently supports basic operations including Add with broadcasting.
+*   **Neural Network Modules (`neurarust-nn`)** *(Future)*: Building blocks (Linear, Conv layers, etc.) and activation/loss functions.
+*   **Optimizers (`neurarust-optim`)** *(Partially Implemented)*: Standard optimization algorithms (SGD implemented, Adam...). 
+*   **Data Handling (`neurarust-data`)** *(Future)*: Tools for loading and preprocessing data (`Dataset`, `DataLoader`).
+*   **Accelerator Support** *(Future)*: GPU integration (CUDA, etc.) for fast computations.
+*   **Interoperability & Deployment** *(Future)*: ONNX export, Python bindings (PyO3), WASM and native binary compilation.
 
-## 🎯 Avantages Clés de Rust
+## 🎯 Key Rust Advantages
 
-*   **Performance :** Vitesse native proche du C/C++, contrôle fin de la mémoire.
-*   **Sécurité :** Garantie d'absence de data races et de nombreuses erreurs mémoire grâce au compilateur.
-*   **Concurrence :** Parallélisme "sans crainte" pour l'accélération multi-cœurs (ex: data loading, autograd).
-*   **Déploiement :** Compilation vers WASM, binaires natifs légers et autonomes.
+*   **Performance:** Native speed close to C/C++, fine-grained memory control.
+*   **Safety:** Guaranteed absence of data races and many memory errors thanks to the compiler.
+*   **Concurrency:** "Fearless" parallelism for multi-core acceleration (e.g., data loading, autograd).
+*   **Deployment:** Compilation to WASM, lightweight and standalone native binaries.
 
-## 🚧 État Actuel (Selon la Roadmap)
+## 🚧 Current Status (According to Roadmap)
 
-Le projet est actuellement dans les **premières phases (Phase 0 & 1)** :
+The project is currently in **early development (Phase 0 & 1)**:
 
-*   ✅ **Phase 0 : Fondations et Tenseur de Base (CPU)**
-    *   Structure du projet (workspace Cargo).
-    *   Implémentation initiale de `Tensor` (données, shape).
-    *   Opérations CPU fondamentales (arithmétique élément par élément).
-    *   Tests unitaires pour `Tensor` et opérations de base.
-*   ⏳ **Phase 1 : Autograd et Blocs de Construction NN**
-    *   Bases du moteur Autograd (structure `BackwardOp`, graphe de calcul via `Rc<RefCell>`, `.backward()` initiée).
-    *   *Prochaines étapes : Compléter la passe backward, définir les modules `nn`.* 
+*   ✅ **Phase 0: Foundations & Basic CPU Tensor [Completed]**
+    *   Project structure (Cargo workspace, CI).
+    *   Initial `Tensor` implementation (data, shape, Rc<RefCell>).
+    *   Fundamental CPU operations (element-wise arithmetic).
+    *   Broadcasting utilities and integration into Add (forward/backward).
+    *   Unit tests for `Tensor`, basic ops, and broadcasting.
+*   🚧 **Phase 1: Autograd & NN Building Blocks [In Progress]**
+    *   Basic Autograd engine foundations (`BackwardOp` trait, dynamic graph).
+    *   Backward pass implemented for Add with broadcasting.
+    *   *Next steps: Implement broadcasting for other ops (Sub, Mul, Div), implement more core Tensor ops (MatMul, reductions...), start basic `nn` modules (Linear, losses).* 
 
-Voir [`Objectifs.md`](Objectifs.md) pour la roadmap complète.
+See [`Goals.md`](Goals.md) for the complete roadmap.
 
-## 🚀 Commencer
+## 🚀 Getting Started
 
-1.  **Prérequis :** Assurez-vous d'avoir [Rust installé](https://www.rust-lang.org/tools/install).
-2.  **Cloner le dépôt :**
+1.  **Prerequisites:** Ensure you have [Rust installed](https://www.rust-lang.org/tools/install).
+2.  **Clone the repository:**
     ```bash
-    git clone https://github.com/Paqquito/NeuraRust.git # Mettre l'URL correcte
+    git clone https://github.com/Paqquito/NeuraRust.git # TODO: Use correct URL
     cd NeuraRust
     ```
-3.  **Compiler :**
+3.  **Build:**
     ```bash
     cargo build
     ```
-4.  **Exécuter les tests :**
+4.  **Run tests:**
     ```bash
     cargo test
     ```
 
-## 🤝 Contribution
+## 🤝 Contributing
 
-Les contributions sont les bienvenues ! Veuillez consulter [`CONTRIBUTING.md`](CONTRIBUTING.md) pour les directives.
+Contributions are welcome! Please see [`CONTRIBUTING.md`](CONTRIBUTING.md) (to be created) for guidelines.
 
-## 📜 Licence
+## 📜 License
 
-Ce projet est sous licence [MIT](LICENSE). 
+This project is licensed under the [MIT License](LICENSE). 
