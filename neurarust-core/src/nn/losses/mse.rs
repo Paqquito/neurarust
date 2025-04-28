@@ -104,23 +104,6 @@ struct MSELossBackward<T> {
     _phantom: PhantomData<T>,
 }
 
-// --- Helper Function (similar to other ops) ---
-fn accumulate_gradient<T>(
-    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
-    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
-    local_gradient: Tensor<T>,
-)
-where
-    T: AddAssign + Clone + Debug + Zero + Copy + 'static,
-{
-    if let Some(input_rc) = input_weak_ref.upgrade() {
-        let input_ptr = Rc::as_ptr(&input_rc);
-        gradients.entry(input_ptr)
-            .and_modify(|existing_grad| { *existing_grad += &local_gradient; })
-            .or_insert(local_gradient);
-    }
-}
-
 impl<T> BackwardOp<T> for MSELossBackward<T>
 where
     T: Debug + Copy + Clone + Zero + One + FromPrimitive + PartialEq + 
@@ -158,7 +141,7 @@ where
                 
                 let final_local_grad = Tensor::new(final_grad_data, diff_shape);
 
-                accumulate_gradient(gradients, &self.input_ref, final_local_grad);
+                crate::autograd::accumulate_gradient(gradients, &self.input_ref, final_local_grad);
             }
         }
     }

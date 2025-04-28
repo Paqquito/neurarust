@@ -50,7 +50,7 @@ impl<T> Tensor<T> {
 
 #[derive(Debug)]
 struct ReluBackward<T> {
-    input: Tensor<T>, // Renommé depuis input_tensor, suppression de l'ancien champ `input`
+    input: Tensor<T>,
     _phantom: PhantomData<T>,
 }
 
@@ -58,40 +58,24 @@ impl<T> BackwardOp<T> for ReluBackward<T>
 where
     T: PartialOrd + Zero + Clone + Copy + Mul<Output = T> + Debug + AddAssign + One + Sum + 'static + Default + Neg<Output=T>,
 {
-    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) { // Ajout du paramètre gradients
+    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
         if let Some(input_rc) = self.input.get_weak_ref().upgrade() {
             if input_rc.borrow().requires_grad {
                 // grad = upstream_grad * (input > 0)
-                let input_data = self.input.data(); // Use the stored input tensor
+                let input_data = self.input.data();
                 let mask_data: Vec<T> = input_data.iter().map(|&x| if x > T::zero() { T::one() } else { T::zero() }).collect();
                 let mask_tensor = Tensor::new(mask_data, self.input.shape());
                 
-                let local_gradient = upstream_grad * &mask_tensor; // Multiplication element-wise
+                let local_gradient = upstream_grad * &mask_tensor;
 
-                accumulate_gradient(gradients, &self.input.get_weak_ref(), local_gradient);
+                // Use the centralized version
+                crate::autograd::accumulate_gradient(gradients, &self.input.get_weak_ref(), local_gradient);
             }
         }
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
         vec![self.input.get_weak_ref()]
-    }
-}
-
-// --- Helper Function (copied from add.rs) ---
-fn accumulate_gradient<T>(
-    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
-    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
-    local_gradient: Tensor<T>,
-)
-where
-    T: AddAssign + Clone + Debug + Zero + Copy + 'static,
-{
-    if let Some(input_rc) = input_weak_ref.upgrade() {
-        let input_ptr = Rc::as_ptr(&input_rc);
-        gradients.entry(input_ptr)
-            .and_modify(|existing_grad| { *existing_grad += &local_gradient; })
-            .or_insert(local_gradient);
     }
 }
 

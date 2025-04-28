@@ -9,7 +9,6 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
- // Ajout de l'import Sum
 
 // --- Forward Operation --- 
 
@@ -71,45 +70,27 @@ impl<T> Tensor<T> {
     }
 }
 
-// --- Helper Function (copied from add.rs) ---
-fn accumulate_gradient<T>(
-    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
-    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
-    local_gradient: Tensor<T>,
-)
-where
-    T: AddAssign + Clone + Debug + Zero + Copy + 'static,
-{
-    if let Some(input_rc) = input_weak_ref.upgrade() {
-        let input_ptr = Rc::as_ptr(&input_rc);
-        gradients.entry(input_ptr)
-            .and_modify(|existing_grad| { *existing_grad += &local_gradient; })
-            .or_insert(local_gradient);
-    }
-}
-
 // --- Backward Operation --- 
 
 #[derive(Debug)]
 struct TransposeBackward<T> {
     input_ref: Weak<RefCell<TensorData<T>>>,
-    original_shape: Vec<usize>, // Stocker la forme originale pour vérifier
+    original_shape: Vec<usize>,
     _phantom: PhantomData<T>,
 }
 
 // --- Backward Implementation ---
 impl<T> BackwardOp<T> for TransposeBackward<T> 
 where
-    T: Copy + Clone + Debug + 'static + AddAssign + Zero + One + PartialEq, // Retrait de Sum
+    T: Copy + Clone + Debug + 'static + AddAssign + Zero + One + PartialEq,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) { 
         if let Some(input_rc) = self.input_ref.upgrade() {
             if input_rc.borrow().requires_grad {
-                // Gradient of transpose is transpose of gradient
-                let grad_a = upstream_grad.transpose(); // Transposer le gradient amont
-                // Vérifier que la forme est correcte (optionnel mais bon pour le debug)
+                let grad_a = upstream_grad.transpose();
                 assert_eq!(grad_a.shape(), self.original_shape, "Transpose backward shape mismatch");
-                accumulate_gradient(gradients, &self.input_ref, grad_a); 
+                // Use the centralized version
+                crate::autograd::accumulate_gradient(gradients, &self.input_ref, grad_a); 
             }
         }
     }

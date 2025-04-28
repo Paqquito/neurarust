@@ -104,32 +104,10 @@ struct AddBackward<T> {
     _phantom: PhantomData<T>,
 }
 
-// Fonction helper pour accumuler dans le HashMap de gradients
-fn accumulate_gradient<T>(
-    gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>,
-    input_weak_ref: &Weak<RefCell<TensorData<T>>>,
-    local_gradient: Tensor<T>,
-)
-where
-    T: AddAssign + Clone + Debug + Zero + Copy + 'static, // Ajouter bounds nécessaires
-{
-    if let Some(input_rc) = input_weak_ref.upgrade() {
-        let input_ptr = Rc::as_ptr(&input_rc);
-        gradients.entry(input_ptr)
-            .and_modify(|existing_grad| {
-                // Assurer la compatibilité des shapes avant l'addition
-                assert_eq!(existing_grad.shape(), local_gradient.shape(), "Gradient shape mismatch during accumulation");
-                *existing_grad += &local_gradient;
-            })
-            .or_insert(local_gradient);
-    }
-}
-
 impl<T> BackwardOp<T> for AddBackward<T>
 where
     T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + Sum<T>,
 {
-    // Modifier la signature pour accepter le HashMap
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
         // Vérifier si les entrées nécessitent un gradient
         let needs_grad_a = self.input_a.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
@@ -137,16 +115,16 @@ where
 
         // Calculer les gradients seulement si nécessaire
         if needs_grad_a || needs_grad_b {
-            let grad_clone = upstream_grad.clone(); // Cloner une seule fois si utilisé par les deux
+            let grad_clone = upstream_grad.clone();
             
             if needs_grad_a {
                 let grad_a = reduce_gradient(&grad_clone, &self.input_a_shape);
-                accumulate_gradient(gradients, &self.input_a, grad_a);
+                crate::autograd::accumulate_gradient(gradients, &self.input_a, grad_a);
             }
     
             if needs_grad_b {
                 let grad_b = reduce_gradient(&grad_clone, &self.input_b_shape); 
-                accumulate_gradient(gradients, &self.input_b, grad_b);
+                crate::autograd::accumulate_gradient(gradients, &self.input_b, grad_b);
             }
         }
     }
