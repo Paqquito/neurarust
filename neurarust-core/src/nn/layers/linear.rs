@@ -73,133 +73,85 @@ where
 
 // --- Backward Operation for Linear Layer --- 
 
-#[derive(Debug)] // Ajout de derive(Debug)
+#[derive(Debug)]
 struct LinearBackward<T> {
-    input: Tensor<T>,
-    weight: Parameter<T>,
-    bias: Option<Parameter<T>>,
+    input: Tensor<T>, // Clone of input tensor from forward pass
+    weight: Parameter<T>, // Clone of weight parameter from forward pass
+    bias: Option<Parameter<T>>, // Keep clone of bias parameter (optional)
+    
+    // Weak references to original tensors/parameters for grad accumulation
     input_ref: Weak<RefCell<TensorData<T>>>,
     weight_ref: Weak<RefCell<TensorData<T>>>,
-    bias_ref: Option<Weak<RefCell<TensorData<T>>>>,
+    bias_ref: Option<Weak<RefCell<TensorData<T>>>>, // Option because bias is optional
     _phantom: PhantomData<T>,
 }
 
 impl<T> BackwardOp<T> for LinearBackward<T>
 where
     T: Add<Output = T> + Mul<Output = T> + AddAssign + Neg<Output = T> + Sub<Output = T> + 
-       Zero + One + Copy + Clone + 'static + Debug + PartialEq + IterSum,
+       Zero + One + Copy + Clone + 'static + Debug + PartialEq + IterSum + Default,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
-        // Cloner et remodeler si scalaire [1] -> [1, 1] pour matmul
-        let grad_clone = if upstream_grad.shape() == [1] {
-            upstream_grad.clone().reshape(vec![1, 1])
-        } else {
-            upstream_grad.clone()
-        };
-        // grad_clone.set_requires_grad(false); // Déjà supprimé
-
-        // --- 1. Calculate all local gradients FIRST ---
+        // println!("\n--- DEBUG LinearBackward --- Upstream shape: {:?}", upstream_grad.shape());
         
-        // Calculate grad_input (if needed)
-        let maybe_grad_input = if self.input_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad) {
-            let grad_input = grad_clone.matmul(&self.weight);
+        // 1. Gradient w.r.t. Layer Input (dL/dInput = dL/dOutput @ W)
+        let needs_grad_input = self.input_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
+        // println!("[Input Grad] Needs grad? {}", needs_grad_input);
+        if needs_grad_input {
+            let weight_tensor = self.weight.deref();
+            // println!("[Input Grad] Calc: upstream({:?}) @ W({:?})", upstream_grad.shape(), weight_tensor.shape());
+            let grad_input = upstream_grad.matmul(weight_tensor); 
             grad_input.set_requires_grad(false);
-            Some(grad_input)
-        } else {
-            None
-        };
-        
-        // Calculate grad_weight (always needed for parameter)
-        let input_transposed = self.input.transpose();
-        let grad_weight_t = input_transposed.matmul(&grad_clone);
-        let grad_weight = grad_weight_t.transpose(); 
-        grad_weight.set_requires_grad(false);
-
-        // Calculate grad_bias (if bias exists)
-        let maybe_grad_bias = if let Some(ref bias_param) = self.bias {
-             // Check requires_grad on bias parameter itself
-             if bias_param.requires_grad() { // Assumes Parameter has requires_grad()
-                 let upstream_rank = grad_clone.shape().len();
-                 let bias_rank = bias_param.shape().len();
-                 
-                 let grad_bias = if upstream_rank > bias_rank {
-                     let axes_to_sum: Vec<usize> = (0..(upstream_rank - bias_rank)).collect();
-                     grad_clone.sum_axes(&axes_to_sum, false)
-                 } else {
-                     grad_clone.clone() // Clone needed if grad_clone is used later
-                 };
-                 grad_bias.set_requires_grad(false); 
-                 Some(grad_bias)
-            } else {
-                 None
-            }
-        } else {
-            None
-        };
-
-        // --- 2. Accumulate gradients (take mutable borrows sequentially) ---
-        
-        // Accumulate grad_input
-        if let Some(grad_input) = maybe_grad_input {
-            if let Some(input_rc) = self.input_ref.upgrade() {
-                let mut input_td = input_rc.borrow_mut();
-                if input_td.requires_grad {
-                    if let Some(existing_grad_tensor) = input_td.grad.as_mut() {
-                        // Accumulate data directly
-                        let mut existing_grad_data = existing_grad_tensor.borrow_tensor_data_mut();
-                        let grad_input_data = grad_input.borrow_tensor_data();
-                        assert_eq!(existing_grad_data.data.len(), grad_input_data.data.len());
-                        for (existing, new) in existing_grad_data.data.iter_mut().zip(grad_input_data.data.iter()) {
-                            *existing += *new;
-                        }
-                    } else {
-                        input_td.grad = Some(grad_input);
-                    }
-                }
-            }
+            // println!("[Input Grad] Result shape: {:?}", grad_input.shape());
+            crate::autograd::accumulate_gradient(gradients, &self.input_ref, grad_input);
+            // println!("[Input Grad] Accumulated.");
         }
 
-        // Accumulate grad_weight
-        if let Some(weight_rc) = self.weight_ref.upgrade() {
-             let mut weight_td = weight_rc.borrow_mut();
-              // Weight always requires grad if we are in backward
-             if let Some(existing_grad_tensor) = weight_td.grad.as_mut() {
-                 // Accumulate data directly
-                 let mut existing_grad_data = existing_grad_tensor.borrow_tensor_data_mut();
-                 let grad_weight_data = grad_weight.borrow_tensor_data();
-                 assert_eq!(existing_grad_data.data.len(), grad_weight_data.data.len());
-                 for (existing, new) in existing_grad_data.data.iter_mut().zip(grad_weight_data.data.iter()) {
-                     *existing += *new;
-                 }
-             } else {
-                 weight_td.grad = Some(grad_weight);
-             }
-         }
+        // 2. Gradient w.r.t. Weight (dL/dW = (dL/dOutput)^T @ input)
+        let needs_grad_weight = self.weight_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
+        // println!("[Weight Grad] Needs grad? {}", needs_grad_weight);
+        // Calculate gradient regardless, accumulation depends on requires_grad.
+        // if needs_grad_weight { // Don't skip calculation based on needs_grad
+            // println!("[Weight Grad] Calc: upstream.T({:?}) @ input({:?})", upstream_grad.shape(), self.input.shape());
+            let grad_wrt_output_t = upstream_grad.transpose();
+            // println!("[Weight Grad] upstream.T shape: {:?}", grad_wrt_output_t.shape());
+            let grad_weight = grad_wrt_output_t.matmul(&self.input);
+            grad_weight.set_requires_grad(false);
+            // println!("[Weight Grad] Result shape: {:?}", grad_weight.shape());
+            crate::autograd::accumulate_gradient(gradients, &self.weight_ref, grad_weight);
+            // println!("[Weight Grad] Accumulated.");
+        // }
 
-        // Accumulate grad_bias
-        if let Some(grad_bias) = maybe_grad_bias {
-            // Make sure bias_ref exists before unwrapping
-            if let Some(bias_ref_weak) = self.bias_ref.as_ref() {
-                 if let Some(bias_rc) = bias_ref_weak.upgrade() {
-                    let mut bias_td = bias_rc.borrow_mut(); 
-                    // Bias requires grad (checked when creating grad_bias)
-                    if let Some(existing_grad_tensor) = bias_td.grad.as_mut() {
-                         // Accumulate data directly
-                        let mut existing_grad_data = existing_grad_tensor.borrow_tensor_data_mut();
-                        let grad_bias_data = grad_bias.borrow_tensor_data();
-                         assert_eq!(existing_grad_data.data.len(), grad_bias_data.data.len());
-                        for (existing, new) in existing_grad_data.data.iter_mut().zip(grad_bias_data.data.iter()) {
-                            *existing += *new;
-                        }
-                    } else {
-                        bias_td.grad = Some(grad_bias);
-                    }
-                }
+        // 3. Gradient w.r.t. Bias (dL/db = sum(dL/dOutput, axis=0)) 
+        if let Some(ref bias_weak_ref) = self.bias_ref {
+            let needs_grad_bias = bias_weak_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
+            // println!("[Bias Grad] Needs grad? {}", needs_grad_bias);
+            if needs_grad_bias {
+                let upstream_rank = upstream_grad.shape().len();
+                // println!("[Bias Grad] Calc from upstream({:?})", upstream_grad.shape());
+                let grad_bias = if upstream_rank > 1 {
+                    let axes_to_sum: Vec<usize> = (0..upstream_rank - 1).collect();
+                    let summed_grad = upstream_grad.sum_axes(&axes_to_sum, false);
+                    summed_grad.set_requires_grad(false);
+                    // println!("[Bias Grad] Result shape (summed): {:?}", summed_grad.shape());
+                    summed_grad
+                } else {
+                     let cloned_grad = upstream_grad.clone();
+                     cloned_grad.set_requires_grad(false);
+                     // println!("[Bias Grad] Result shape (cloned): {:?}", cloned_grad.shape());
+                     cloned_grad
+                }; 
+                 crate::autograd::accumulate_gradient(gradients, bias_weak_ref, grad_bias);
+                 // println!("[Bias Grad] Accumulated.");
             }
+        } else {
+            // println!("[Bias Grad] No bias in this layer.");
         }
+        // println!("--- DEBUG LinearBackward END ---");
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
+        // Return weak refs to all potential gradient sources: input, weight, bias
         let mut inputs = Vec::with_capacity(3);
         inputs.push(self.input_ref.clone());
         inputs.push(self.weight_ref.clone());
@@ -410,24 +362,35 @@ mod tests {
         assert!((output.data()[0] - 110.1).abs() < 1e-6, "Output data mismatch");
         assert!(output.grad_fn().is_some());
 
-        output.backward(None); 
+        // Create scalar loss
+        let loss = output.sum();
 
-        let grad_input = input.grad().expect("Input gradient should exist now");
-        // Gradient tensors themselves usually don't require grad
-        check_tensor(&grad_input, &[1, 2], false); // CORRECTED: requires_grad should be false
+        // println!("\nDEBUG test_linear_backward_simple: Running backward on loss...");
+        loss.backward(None);
+        // println!("DEBUG test_linear_backward_simple: Backward finished.");
+
+        // println!("DEBUG test_linear_backward_simple: Checking input grad...");
+        let grad_input_opt = input.grad();
+        assert!(grad_input_opt.is_some(), "Input gradient missing");
+        let grad_input = grad_input_opt.unwrap();
+        check_tensor(&grad_input, &[1, 2], false); // Grads don't require grad
         assert!((grad_input.data()[0] - 3.0).abs() < 1e-6, "Input grad[0] mismatch");
         assert!((grad_input.data()[1] - 4.0).abs() < 1e-6, "Input grad[1] mismatch");
         
-        let grad_weight = linear.weight.grad().unwrap();
-        // Gradient tensors themselves usually don't require grad
-        check_tensor(&grad_weight, &[1, 2], false); // CORRECTED: requires_grad should be false
+        // println!("DEBUG test_linear_backward_simple: Checking weight grad...");
+        let grad_weight_opt = linear.weight.grad();
+        assert!(grad_weight_opt.is_some(), "Weight gradient missing");
+        let grad_weight = grad_weight_opt.unwrap();
+        check_tensor(&grad_weight, &[1, 2], false); // Grads don't require grad
         assert!((grad_weight.data()[0] - 10.0).abs() < 1e-6, "Weight grad[0] mismatch");
         assert!((grad_weight.data()[1] - 20.0).abs() < 1e-6, "Weight grad[1] mismatch");
 
+        // println!("DEBUG test_linear_backward_simple: Checking bias grad...");
         let bias_param = linear.bias.as_ref().unwrap();
-        let grad_bias = bias_param.grad().unwrap();
-        // Gradient tensors themselves usually don't require grad
-        check_tensor(&grad_bias, &[1], false); // CORRECTED: requires_grad should be false
+        let grad_bias_opt = bias_param.grad();
+        assert!(grad_bias_opt.is_some(), "Bias gradient missing");
+        let grad_bias = grad_bias_opt.unwrap();
+        check_tensor(&grad_bias, &[1], false); // Grads don't require grad
         assert!((grad_bias.data()[0] - 1.0).abs() < 1e-6, "Bias grad mismatch");
     }
 
@@ -447,31 +410,34 @@ mod tests {
         assert_eq!(output.shape(), &[2, 4]);
         assert!(output.requires_grad());
 
-        // Use a simple sum as the pseudo-loss for testing backward pass
-        let loss = output.sum(); // Sum all elements of the output
-        loss.backward(None); 
+        let loss = output.sum();
+        // println!("\nDEBUG test_linear_backward_batch: Running backward...");
+        loss.backward(None);
+        // println!("DEBUG test_linear_backward_batch: Backward finished.");
 
-        assert!(input.grad().is_some(), "Input gradient should exist now");
-        let grad_input = input.grad().unwrap();
-        assert_eq!(grad_input.shape(), &[2, 3]);
-        assert_eq!(grad_input.requires_grad(), false); // Gradient shouldn't require grad
+        // println!("DEBUG test_linear_backward_batch: Checking input grad...");
+        let grad_input_opt = input.grad();
+        assert!(grad_input_opt.is_some(), "Input gradient missing");
+        let grad_input = grad_input_opt.unwrap();
+        check_tensor(&grad_input, &[2, 3], false);
 
-        assert!(linear.weight.grad().is_some());
-        let grad_weight = linear.weight.grad().unwrap();
-        assert_eq!(grad_weight.shape(), &[4, 3]);
-        assert_eq!(grad_weight.requires_grad(), false); // Gradient shouldn't require grad
+        // println!("DEBUG test_linear_backward_batch: Checking weight grad...");
+        let grad_weight_opt = linear.weight.grad();
+        assert!(grad_weight_opt.is_some(), "Weight gradient missing");
+        let grad_weight = grad_weight_opt.unwrap();
+        check_tensor(&grad_weight, &[4, 3], false);
         
-        assert!(linear.bias.is_some());
+        // println!("DEBUG test_linear_backward_batch: Checking bias grad...");
         let bias_param = linear.bias.as_ref().unwrap();
-        assert!(bias_param.grad().is_some());
-        let grad_bias = bias_param.grad().unwrap();
-        // The gradient of the bias should sum the gradients across the batch dimension.
-        // If output was [2, 4], upstream grad (from sum()) is scalar 1.0 broadcasted.
-        // Bias gradient should be upstream_grad summed over axis 0 -> [1.0, 1.0, 1.0, 1.0] * 2 ? 
-        // Let's check the shape for now. It MUST be [4].
-        assert_eq!(grad_bias.shape(), &[4]); // Bias shape is [out_features]
-        assert_eq!(grad_bias.requires_grad(), false); // Gradient shouldn't require grad
-        // TODO: Add precise value check for grad_bias if sum operation is confirmed
+        let grad_bias_opt = bias_param.grad();
+        assert!(grad_bias_opt.is_some(), "Bias gradient missing");
+        let grad_bias = grad_bias_opt.unwrap();
+        check_tensor(&grad_bias, &[4], false);
+        // dLoss/dBias = Sum(dLoss/dOutput, axis=0)
+        // dLoss/dOutput is 1.0 for every element because loss = output.sum()
+        // So grad_bias should be [batch_size, batch_size, ..., batch_size]
+        // Here batch_size is 2. So expected grad is [2.0, 2.0, 2.0, 2.0]
+        assert_eq!(grad_bias.data().to_vec(), vec![2.0_f32, 2.0, 2.0, 2.0], "Bias grad data mismatch");
     }
 }
  
