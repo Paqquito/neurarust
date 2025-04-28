@@ -268,8 +268,8 @@ mod tests {
      // Cleaned up ops
      // Keep Zero/One needed for Linear::new and potential ops
     use std::fmt::Debug; // Keep Debug
-    use num_traits::{Zero, One}; // For test helpers
-    use std::ops::AddAssign;    // For test helpers
+     // For test helpers
+        // For test helpers
     
     // Helper to check tensor properties
     fn check_tensor<T: PartialEq + Debug>(tensor: &Tensor<T>, expected_shape: &[usize], requires_grad: bool) {
