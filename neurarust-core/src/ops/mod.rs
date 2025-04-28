@@ -6,6 +6,7 @@ pub mod linalg;
 pub mod activation;
 pub mod reduction;
 pub mod loss;
+pub mod indexing;
 
 // Potentially re-export specific operations if needed
 // pub use arithmetic::add::add; 

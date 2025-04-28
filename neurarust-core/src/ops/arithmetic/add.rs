@@ -71,10 +71,10 @@ where
 }
 
 /// Implements in-place element-wise addition (`+=`) for Tensor += &Tensor.
-/// NOTE: Currently does NOT support broadcasting.
+/// NOTE: Does not support broadcasting.
 impl<'a, T> AddAssign<&'a Tensor<T>> for Tensor<T>
 where
-    T: AddAssign + Copy + Clone, // Added Clone bound as Tensor requires it
+    T: AddAssign + Copy + Clone, // Copy needed to read from `other`
 {
     fn add_assign(&mut self, other: &'a Tensor<T>) {
         let self_shape = self.shape();
@@ -86,10 +86,7 @@ where
 
         self_td_mut.data.iter_mut()
             .zip(other_td.data.iter())
-            .for_each(|(a, &b)| *a += b);
-        
-        // Note: AddAssign usually doesn't affect requires_grad or grad_fn of self,
-        // as gradients shouldn't typically be modified in-place.
+            .for_each(|(a, &b)| *a += b); // Requires T: AddAssign + Copy
     }
 }
 
@@ -182,20 +179,19 @@ mod tests {
         let mut t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
         let t2 = create_test_tensor(vec![5_i32, 6, 7, 8], vec![2, 2]);
         let expected_data = vec![6_i32, 8, 10, 12];
-        let expected_shape = vec![2, 2];
+        
+        t1 += &t2; // Use AddAssign
 
-        t1 += &t2; 
-
-        assert_eq!(t1.data().to_vec(), expected_data);
-        assert_eq!(t1.shape(), expected_shape, "Shape mismatch");
+        assert_eq!(t1.data().to_vec(), expected_data, "Data mismatch after AddAssign");
+        assert_eq!(t1.shape(), vec![2, 2], "Shape mismatch after AddAssign");
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "Tensor shapes must match for AddAssign")]
     fn test_add_assign_shape_mismatch() {
         let mut t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
-        let t2 = create_test_tensor(vec![5_i32, 6], vec![1, 2]);
-        t1 += &t2; 
+        let t_wrong_shape = create_test_tensor(vec![5_i32, 6, 7], vec![3]);
+        t1 += &t_wrong_shape; // Should panic
     }
 
     #[test]

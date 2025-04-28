@@ -11,6 +11,7 @@ use num_traits::{Zero, One, Pow, FromPrimitive};
 use crate::tensor_data::TensorData;
 use crate::autograd::{BackwardOp, graph::build_topo};
 use std::collections::{HashSet, HashMap};
+use crate::ops::indexing::TensorSlice;
 // Supprimer HashSet (non utilisé directement dans ce fichier)
 // use std::collections::HashSet;
 
@@ -123,6 +124,38 @@ impl<T> Tensor<T> {
             _ctx: None,
         };
         Tensor { data: Rc::new(RefCell::new(new_tensor_data)) }
+    }
+
+    /// Performs slicing/indexing on the tensor.
+    /// 
+    /// Returns a new tensor containing the selected elements.
+    /// This operation supports autograd.
+    ///
+    /// # Arguments
+    /// * `slices` - A slice of `TensorSlice` enum variants specifying the selection 
+    ///   for each dimension. The length of `slices` must match the number of 
+    ///   dimensions of the tensor.
+    ///
+    /// # Panics
+    /// Panics if the number of slices does not match the tensor dimensions, 
+    /// or if indices/ranges are out of bounds.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+    /// // Get the first row
+    /// let row0 = tensor.slice(&[TensorSlice::Index(0), TensorSlice::Full]); 
+    /// // Get the element at [1, 1]
+    /// let elem11 = tensor.slice(&[TensorSlice::Index(1), TensorSlice::Index(1)]);
+    /// // Get the sub-matrix with rows 0..1 and columns 1..3
+    /// let sub = tensor.slice(&[TensorSlice::Range(0..1), TensorSlice::Range(1..3)]);
+    /// ```
+    pub fn slice(&self, slices: &[TensorSlice]) -> Tensor<T>
+    where
+        T: Clone + Debug + Default + Zero + AddAssign + 'static,
+    {
+        // Implementation will delegate to a function in ops::indexing
+        crate::ops::indexing::slice_op(self, slices)
     }
 
     // --- Autograd related methods ---

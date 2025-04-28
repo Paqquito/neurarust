@@ -1,7 +1,7 @@
 // Déclare les modules principaux de la crate
 pub mod autograd;
 // pub mod creation;
-// pub mod indexing;
+// pub mod indexing; // REMOVED: Declared within ops module now
 pub mod ops;
 pub mod tensor;
 pub mod tensor_data;
