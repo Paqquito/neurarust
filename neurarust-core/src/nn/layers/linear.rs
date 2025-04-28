@@ -75,14 +75,11 @@ where
 
 #[derive(Debug)]
 struct LinearBackward<T> {
-    input: Tensor<T>, // Clone of input tensor from forward pass
-    weight: Parameter<T>, // Clone of weight parameter from forward pass
-    bias: Option<Parameter<T>>, // Keep clone of bias parameter (optional)
-    
-    // Weak references to original tensors/parameters for grad accumulation
+    input: Tensor<T>,
+    weight: Parameter<T>,
     input_ref: Weak<RefCell<TensorData<T>>>,
     weight_ref: Weak<RefCell<TensorData<T>>>,
-    bias_ref: Option<Weak<RefCell<TensorData<T>>>>, // Option because bias is optional
+    bias_ref: Option<Weak<RefCell<TensorData<T>>>>,
     _phantom: PhantomData<T>,
 }
 
@@ -108,19 +105,13 @@ where
         }
 
         // 2. Gradient w.r.t. Weight (dL/dW = (dL/dOutput)^T @ input)
-        let needs_grad_weight = self.weight_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
-        // println!("[Weight Grad] Needs grad? {}", needs_grad_weight);
-        // Calculate gradient regardless, accumulation depends on requires_grad.
-        // if needs_grad_weight { // Don't skip calculation based on needs_grad
-            // println!("[Weight Grad] Calc: upstream.T({:?}) @ input({:?})", upstream_grad.shape(), self.input.shape());
-            let grad_wrt_output_t = upstream_grad.transpose();
-            // println!("[Weight Grad] upstream.T shape: {:?}", grad_wrt_output_t.shape());
-            let grad_weight = grad_wrt_output_t.matmul(&self.input);
-            grad_weight.set_requires_grad(false);
-            // println!("[Weight Grad] Result shape: {:?}", grad_weight.shape());
-            crate::autograd::accumulate_gradient(gradients, &self.weight_ref, grad_weight);
-            // println!("[Weight Grad] Accumulated.");
-        // }
+        let grad_wrt_output_t = upstream_grad.transpose();
+        // println!("[Weight Grad] upstream.T shape: {:?}", grad_wrt_output_t.shape());
+        let grad_weight = grad_wrt_output_t.matmul(&self.input);
+        grad_weight.set_requires_grad(false);
+        // println!("[Weight Grad] Result shape: {:?}", grad_weight.shape());
+        crate::autograd::accumulate_gradient(gradients, &self.weight_ref, grad_weight);
+        // println!("[Weight Grad] Accumulated.");
 
         // 3. Gradient w.r.t. Bias (dL/db = sum(dL/dOutput, axis=0)) 
         if let Some(ref bias_weak_ref) = self.bias_ref {
@@ -220,7 +211,6 @@ where
             final_output.data.borrow_mut().grad_fn = Some(Rc::new(LinearBackward {
                 input: input.clone(), // Clone input for backward
                 weight: self.weight.clone(), // Clone weight parameter
-                bias: self.bias.clone(), // Clone bias parameter
                 input_ref: input.get_weak_ref(),
                 weight_ref: self.weight.get_weak_ref(),
                 bias_ref: self.bias.as_ref().map(|p| p.get_weak_ref()),
