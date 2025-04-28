@@ -2,10 +2,11 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-use std::ops::{AddAssign};
+use std::ops::{AddAssign, Sub, Mul, Neg};
 use std::rc::{Rc, Weak};
+use std::iter::Sum as IterSum;
 
-use num_traits::{Zero, One};
+use num_traits::{Zero, One, Pow, FromPrimitive};
 
 use crate::tensor_data::TensorData;
 use crate::autograd::{BackwardOp, graph::build_topo};
@@ -80,6 +81,13 @@ impl<T> Tensor<T> {
     /// Returns a slice view of the tensor's data.
     pub fn data(&self) -> Ref<[T]> {
         Ref::map(self.data.borrow(), |td| td.data.as_slice())
+    }
+
+    /// Returns a mutable slice view of the tensor's data.
+    /// Allows in-place modification of tensor values.
+    /// Panics if the data is already borrowed mutably elsewhere.
+    pub fn data_mut(&self) -> RefMut<[T]> {
+        RefMut::map(self.data.borrow_mut(), |td| td.data.as_mut_slice())
     }
 
     /// Provides mutable access to the underlying TensorData.
@@ -223,7 +231,7 @@ impl<T> Tensor<T> {
                  td.grad = Some(final_grad);
             }
         }
-        // --- Old recursive call (to be removed) ---
+        // --- Old recursive call (removed) ---
         // self._backward_recursive(&final_grad);
     }
 
@@ -232,9 +240,38 @@ impl<T> Tensor<T> {
         self.data.borrow().grad_fn.clone()
     }
 
+    /// Sets the gradient function for this tensor.
+    /// Used internally by operations during the forward pass to build the graph.
+    pub fn set_grad_fn(&self, grad_fn: Option<Rc<dyn BackwardOp<T>>>) where T: 'static {
+        // Should only be set on non-leaf tensors
+        // We might add assertions here later if needed.
+        self.data.borrow_mut().grad_fn = grad_fn;
+    }
+
     /// Returns a weak reference to the tensor data.
-    pub(crate) fn get_weak_ref(&self) -> Weak<RefCell<TensorData<T>>> {
+    /// Useful for autograd graph construction without creating cycles.
+    pub fn get_weak_ref(&self) -> Weak<RefCell<TensorData<T>>> {
         Rc::downgrade(&self.data)
+    }
+
+    /// Returns a stable identifier (pointer address) for the underlying data allocation.
+    /// Useful as a key in HashMaps when the Tensor itself might be passed via different Rcs.
+    pub fn id(&self) -> *const () {
+        Rc::as_ptr(&self.data) as *const ()
+    }
+
+    /// Creates a scalar tensor (0-dimensional) containing a single value.
+    pub fn scalar(value: T) -> Self where T: Clone {
+        Tensor::new(vec![value], vec![])
+    }
+
+    /// Computes the element-wise square root of the tensor.
+    pub fn sqrt(&self) -> Tensor<T>
+    where
+        T: Pow<T, Output = T> + FromPrimitive + Mul<Output=T> + AddAssign + Copy + Clone + Debug + 'static + One + Zero + Sub<Output=T> + Neg<Output=T> + IterSum + Default,
+    {
+        let half = T::from_f64(0.5).expect("Cannot represent 0.5 in tensor type T for sqrt");
+        self.pow(half)
     }
 } // End of the large impl<T> Tensor<T> block
 

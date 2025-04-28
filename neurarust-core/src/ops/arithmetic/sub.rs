@@ -2,7 +2,7 @@ use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord, coord_to_index_broadcasted, reduce_gradient};
-use std::ops::{Sub, Neg, AddAssign, Add};
+use std::ops::{Sub, Neg, AddAssign, Add, SubAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
@@ -60,6 +60,26 @@ where
             result.borrow_tensor_data_mut().grad_fn = Some(Rc::new(grad_fn));
         }
         result
+    }
+}
+
+/// Implements in-place element-wise subtraction (`-=`) for Tensor -= &Tensor.
+/// NOTE: Currently does NOT support broadcasting.
+impl<'a, T> SubAssign<&'a Tensor<T>> for Tensor<T>
+where
+    T: SubAssign + Copy + Clone,
+{
+    fn sub_assign(&mut self, other: &'a Tensor<T>) {
+        let self_shape = self.shape();
+        let other_shape = other.shape();
+        assert_eq!(self_shape, other_shape, "Tensor shapes must match for SubAssign.");
+
+        let mut self_td_mut = self.borrow_tensor_data_mut();
+        let other_td = other.borrow_tensor_data();
+
+        self_td_mut.data.iter_mut()
+            .zip(other_td.data.iter())
+            .for_each(|(a, &b)| *a -= b); // Requires T: SubAssign
     }
 }
 
