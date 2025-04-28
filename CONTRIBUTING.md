@@ -6,7 +6,7 @@ Merci de votre intérêt pour NeuraRust ! Nous apprécions toutes les contributi
 
 ### 🐞 Signaler des Bugs
 
-*   **Vérifiez les Issues Existantes :** Avant de soumettre un nouveau bug, veuillez rechercher dans les [issues GitHub](https://github.com/Paqquito/NeuraRust/issues) pour voir s'il n'a pas déjà été signalé.
+*   **Vérifiez les Issues Existantes :** Avant de soumettre un nouveau bug, veuillez rechercher dans les [issues GitHub](https://github.com/Paqquito/neurarust/issues) pour voir s'il n'a pas déjà été signalé.
 *   **Créez une Issue Claire :** Si le bug n'est pas déjà signalé, créez une nouvelle issue.
     *   Utilisez un titre clair et descriptif.
     *   Décrivez précisément les étapes pour reproduire le bug.
@@ -16,13 +16,13 @@ Merci de votre intérêt pour NeuraRust ! Nous apprécions toutes les contributi
 
 ### ✨ Proposer des Améliorations ou de Nouvelles Fonctionnalités
 
-*   **Discutez d'abord :** Pour les changements majeurs ou les nouvelles fonctionnalités importantes, il est préférable d'ouvrir une issue [GitHub](https://github.com/Paqquito/NeuraRust/issues) pour discuter de l'idée avant de commencer à travailler dessus. Cela permet de s'assurer que la proposition s'aligne avec les objectifs du projet.
+*   **Discutez d'abord :** Pour les changements majeurs ou les nouvelles fonctionnalités importantes, il est préférable d'ouvrir une issue [GitHub](https://github.com/Paqquito/neurarust/issues) pour discuter de l'idée avant de commencer à travailler dessus. Cela permet de s'assurer que la proposition s'aligne avec les objectifs du projet.
 *   **Soyez Clair et Concis :** Décrivez clairement la fonctionnalité ou l'amélioration proposée et pourquoi elle serait bénéfique pour NeuraRust.
 
 ### 📝 Contribuer au Code ou à la Documentation (Pull Requests)
 
-1.  **Forkez le Dépôt :** Créez un fork du dépôt [NeuraRust](https://github.com/Paqquito/NeuraRust) sur votre compte GitHub.
-2.  **Clonez votre Fork :** Clonez votre fork localement : `git clone https://github.com/Paqquito/NeuraRust.git`
+1.  **Forkez le Dépôt :** Créez un fork du dépôt [NeuraRust](https://github.com/Paqquito/neurarust) sur votre compte GitHub.
+2.  **Clonez votre Fork :** Clonez votre fork localement : `git clone https://github.com/Paqquito/neurarust.git`
 3.  **Créez une Branche :** Créez une branche descriptive pour vos modifications : `git checkout -b ma-super-fonctionnalite`
 4.  **Codez !** Faites vos modifications. 
     *   Suivez le style de code existant (utilisez `cargo fmt` pour formater).

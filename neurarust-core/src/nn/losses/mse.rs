@@ -10,6 +10,8 @@ use std::marker::PhantomData;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use std::iter::Sum as IterSum;
+use crate::ops::arithmetic::sub;
+use crate::ops::arithmetic::div;
 
 /// Specifies the reduction to apply to the output:
 /// 'none' | 'mean' | 'sum'
@@ -50,14 +52,14 @@ impl MSELoss {
     pub fn forward<T>(&self, input: &Tensor<T>, target: &Tensor<T>) -> Tensor<T> 
     where
         T: Debug + Copy + Clone + Zero + One + FromPrimitive + PartialEq + 
-           Sub<Output = T> + Mul<Output = T> + Div<Output = T> + 
+           Sub<Output = T> + Mul<Output = T> + Div<Output = T> +
            Add<Output = T> + AddAssign + IterSum + 'static + 
-           Neg<Output = T>,
+           Neg<Output = T> + Default,
     {
         assert_eq!(input.shape(), target.shape(), "Input and target shapes must match for MSELoss");
         
-        let diff = input - target; 
-        let sq_diff = &diff * &diff; 
+        let diff = input - target;
+        let sq_diff = &diff * &diff;
         
         let requires_grad = input.requires_grad();
         let n = input.numel(); 
@@ -65,10 +67,12 @@ impl MSELoss {
         let loss_val_tensor = match self.reduction {
             Reduction::Sum => sq_diff.sum(),
             Reduction::Mean => { 
-                let sum_val = sq_diff.sum(); 
-                let n_t = T::from_usize(n).expect("Could not convert numel to tensor type T");
-                let n_tensor = Tensor::new(vec![n_t], vec![1]);
-                &sum_val / &n_tensor 
+                 // Restore Mean reduction
+                 let sum_val = sq_diff.sum(); 
+                 let n_t = T::from_usize(n).expect("Could not convert numel to tensor type T");
+                 let n_tensor = Tensor::new(vec![n_t], vec![1]);
+                 let result: Tensor<T> = &sum_val / &n_tensor; // Should work now
+                 result
             },
             Reduction::None => unreachable!(), 
         };
@@ -104,7 +108,7 @@ struct MSELossBackward<T> {
 impl<T> BackwardOp<T> for MSELossBackward<T>
 where
     T: Debug + Copy + Clone + Zero + One + FromPrimitive + PartialEq + 
-       Sub<Output = T> + Mul<Output = T> + Div<Output = T> + 
+       Sub<Output = T> + Mul<Output = T> + Div<Output = T> +
        Add<Output = T> + AddAssign + IterSum + 'static + Neg<Output=T>,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {

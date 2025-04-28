@@ -1,4 +1,11 @@
 use std::cmp::max;
+use crate::tensor::Tensor;
+use std::ops::{AddAssign, Add, Neg};
+use num_traits::{Zero, One};
+use std::iter::Sum;
+use std::fmt::Debug;
+use std::cell::RefCell;
+use std::rc::Weak;
 
 /// Calculates the strides for a given shape.
 /// Strides represent the number of elements to skip in the flattened data array
@@ -56,6 +63,96 @@ pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usiz
         }
     }
     Ok(result_shape)
+}
+
+// Helper to convert a linear index to multi-dimensional coordinates
+// TODO: Handle strides/shape containing 0 more robustly?
+pub fn index_to_coord(index: usize, strides: &[usize], shape: &[usize]) -> Vec<usize> {
+    if shape.is_empty() { return vec![]; }
+    let rank = shape.len();
+    let mut coord = vec![0; rank];
+    let mut current_index = index;
+    for i in 0..rank {
+        if strides[i] == 0 { 
+             if shape[i] > 0 { 
+                // Avoid division by zero if stride is 0 but dim is not
+                // This happens in shapes like [2,0,3] where stride[0] is 0
+                // If index > 0, this coordinate must be 0 anyway?
+                coord[i] = 0; 
+             } else {
+                 // If shape[i] is 0, coord must be 0
+                 coord[i] = 0;
+             }
+        } else {
+            coord[i] = current_index / strides[i];
+            current_index %= strides[i];
+        }
+    }
+    coord
+}
+
+// Helper to get the original data index from broadcasted coordinates
+pub fn coord_to_index_broadcasted(target_coord: &[usize], original_shape: &[usize], original_strides: &[usize]) -> usize {
+    if original_shape.is_empty() { return 0; } // Scalar
+    let rank_diff = target_coord.len().saturating_sub(original_shape.len());
+    let mut index = 0;
+    for i in 0..original_shape.len() {
+        let coord_idx = rank_diff + i;
+        let dim_size = original_shape[i];
+        let stride = original_strides[i];
+        // If the original dimension was 1, use coord 0, otherwise use the target coord
+        let effective_coord = if dim_size == 1 { 0 } else { target_coord[coord_idx] };
+        index += effective_coord * stride;
+    }
+    index
+}
+
+// Helper to reduce (sum) the gradient to match the original input shape before broadcasting
+// Used in backward passes of broadcastable binary ops.
+pub fn reduce_gradient<T>(grad: &Tensor<T>, target_shape: &[usize]) -> Tensor<T>
+where
+    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + Sum<T>,
+{
+    let grad_shape = grad.shape();
+    if grad_shape == target_shape {
+        return grad.clone(); // Simple case: no reduction needed
+    }
+
+    let rank_diff = grad_shape.len().saturating_sub(target_shape.len());
+    let mut axes_to_sum = Vec::new();
+
+    // 1. Identify dimensions added by broadcasting (prepended 1s)
+    for i in 0..rank_diff {
+        axes_to_sum.push(i);
+    }
+
+    // 2. Identify dimensions that were 1 in the target shape but >1 in the grad shape
+    for i in 0..target_shape.len() {
+        let grad_dim_index = rank_diff + i;
+        if grad_dim_index < grad_shape.len() && target_shape[i] == 1 && grad_shape[grad_dim_index] != 1 {
+             if !axes_to_sum.contains(&grad_dim_index) {
+                axes_to_sum.push(grad_dim_index);
+             }
+        }
+    }
+
+    // 3. Special case: if target is scalar ([]), sum all gradient axes
+    if target_shape.is_empty() && !grad_shape.is_empty() {
+        axes_to_sum = (0..grad_shape.len()).collect();
+    }
+
+    // Perform summation if needed
+    if !axes_to_sum.is_empty() {
+        // Use the Tensor's sum_axes method (requires T: Sum)
+        grad.sum_axes(&axes_to_sum, true) // Keep dims = true!
+    } else {
+        // Should not happen if shapes differ and target is not scalar, indicates potential logic error elsewhere?
+        eprintln!(
+            "Warning: reduce_gradient logic anomaly. Shapes {:?} and {:?} differ, but no axes to sum found.",
+            grad_shape, target_shape
+        );
+        grad.clone() // Return original gradient as a safe fallback
+    }
 }
 
 #[cfg(test)]

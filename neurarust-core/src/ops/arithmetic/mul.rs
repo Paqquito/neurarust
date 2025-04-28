@@ -63,6 +63,9 @@ where
     T: Mul<Output = T> + AddAssign + Copy + Clone + 'static,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
+        // NOTE: This backward pass does not yet support broadcasting.
+        // grad_a and grad_b are calculated assuming shapes match.
+        // reduce_gradient would be needed here once broadcasting is added to Mul forward.
         let grad_a = upstream_grad * &self.input_b_val;
         let grad_b = upstream_grad * &self.input_a_val; 
 
@@ -70,29 +73,37 @@ where
         if let Some(input_a_rc) = self.input_a_ref.upgrade() {
             let mut input_a_td = input_a_rc.borrow_mut();
             if input_a_td.requires_grad {
-                if let Some(ref mut grad) = input_a_td.grad {
-                    *grad += &grad_a;
+                if let Some(existing_grad_tensor) = input_a_td.grad.as_mut() {
+                    let mut existing_data = existing_grad_tensor.borrow_tensor_data_mut();
+                    let new_grad_data = grad_a.borrow_tensor_data();
+                    assert_eq!(existing_data.data.len(), new_grad_data.data.len());
+                    for (existing, new) in existing_data.data.iter_mut().zip(new_grad_data.data.iter()) {
+                        *existing += *new;
+                    }
                 } else {
-                    input_a_td.grad = Some(grad_a);
+                    // Use Tensor::new for initial grad
+                    input_a_td.grad = Some(Tensor::new(grad_a.data(), grad_a.shape()));
                 }
             }
-        } else {
-             eprintln!("Warning: Weak ref upgrade failed for input A in MulBackward.");
-        }
+        } 
 
         // Accumulate gradient for Input B
         if let Some(input_b_rc) = self.input_b_ref.upgrade() {
             let mut input_b_td = input_b_rc.borrow_mut();
             if input_b_td.requires_grad {
-                if let Some(ref mut grad) = input_b_td.grad {
-                    *grad += &grad_b;
+                if let Some(existing_grad_tensor) = input_b_td.grad.as_mut() {
+                   let mut existing_data = existing_grad_tensor.borrow_tensor_data_mut();
+                   let new_grad_data = grad_b.borrow_tensor_data();
+                   assert_eq!(existing_data.data.len(), new_grad_data.data.len());
+                   for (existing, new) in existing_data.data.iter_mut().zip(new_grad_data.data.iter()) {
+                       *existing += *new;
+                   }
                 } else {
-                    input_b_td.grad = Some(grad_b);
+                    // Use Tensor::new for initial grad
+                    input_b_td.grad = Some(Tensor::new(grad_b.data(), grad_b.shape()));
                 }
             }
-        } else {
-             eprintln!("Warning: Weak ref upgrade failed for input B in MulBackward.");
-        }
+        } 
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {

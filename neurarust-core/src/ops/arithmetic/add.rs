@@ -3,99 +3,62 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
+use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord, coord_to_index_broadcasted, reduce_gradient};
 use std::ops::{Add, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
 use std::cell::RefCell;
 use std::fmt::Debug;
 use num_traits::{Zero, One};
-
-// Helper pour réduire (sommer) le gradient pour correspondre à la forme originale
-fn reduce_gradient<T>(grad: &Tensor<T>, target_shape: &[usize]) -> Tensor<T>
-where
-    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + std::iter::Sum,
-{
-    let grad_shape = grad.shape();
-    if grad_shape == target_shape {
-        return grad.clone(); // Cas simple: pas de réduction
-    }
-
-    let rank_diff = grad_shape.len().saturating_sub(target_shape.len());
-    let mut axes_to_sum = Vec::new();
-
-    // 1. Identifier les dimensions ajoutées par le broadcast (à gauche)
-    for i in 0..rank_diff {
-        axes_to_sum.push(i);
-    }
-
-    // 2. Identifier les dimensions de taille 1 dans target_shape qui ont été broadcastées
-    for i in 0..target_shape.len() {
-        let grad_dim_index = rank_diff + i;
-        if grad_dim_index < grad_shape.len() && target_shape[i] == 1 && grad_shape[grad_dim_index] != 1 {
-             // Vérifier que l'axe n'est pas déjà inclus (ne devrait pas arriver)
-             if !axes_to_sum.contains(&grad_dim_index) {
-                axes_to_sum.push(grad_dim_index);
-             }
-        }
-    }
-
-    // 3. Cas spécial: si target est scalaire ([]), tous les axes du grad doivent être sommés
-    if target_shape.is_empty() && !grad_shape.is_empty() {
-        // Remplacer axes_to_sum par tous les axes du gradient
-        axes_to_sum = (0..grad_shape.len()).collect();
-    }
-
-    // Effectuer la sommation si nécessaire
-    if !axes_to_sum.is_empty() {
-        // Trier les axes pour éviter les problèmes potentiels dans sum_axes ? (Normalement géré)
-        // axes_to_sum.sort_unstable();
-        grad.sum_axes(&axes_to_sum, true) // Appel à sum_axes
-    } else {
-        // Si les formes diffèrent mais aucun axe n'a été identifié pour la somme,
-        // c'est une situation inattendue (peut-être une erreur dans broadcast_shapes?)
-        // Ou le cas où grad=[1,1,..] et target=[] n'a pas été bien géré avant?
-        eprintln!(
-            "Warning: reduce_gradient logic anomaly. Shapes {:?} and {:?} differ, but no axes to sum found.",
-            grad_shape, target_shape
-        );
-        grad.clone() // Retourne le gradient original comme fallback sûr
-    }
-}
+use std::iter::Sum;
 
 // --- Forward Operation --- 
 
-/// Implements element-wise addition for two Tensors.
+/// Implements element-wise addition for two Tensors with broadcasting.
 ///
 /// Performs `&tensor1 + &tensor2`.
 /// The shapes of the two tensors must be identical.
 /// Requires the element type `T` to implement `Add<Output = T>`, `AddAssign` (for grad), `Copy` and `Clone`.
 impl<'a, 'b, T> Add<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Add<Output = T> + AddAssign + Copy + Clone + 'static,
+    T: Add<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static,
 {
     type Output = Tensor<T>;
 
     fn add(self, other: &'b Tensor<T>) -> Self::Output {
         let self_shape = self.shape();
         let other_shape = other.shape();
-        assert_eq!(self_shape, other_shape, "Tensor shapes must match for element-wise addition.");
+        
+        let result_shape = broadcast_shapes(&self_shape, &other_shape)
+            .expect(&format!("Shapes {:?} and {:?} cannot be broadcasted for addition.", self_shape, other_shape));
 
         let self_td = self.borrow_tensor_data(); 
         let other_td = other.borrow_tensor_data();
+        
+        // Utiliser compute_broadcasted_op générique ? Pour l'instant, refaire la logique ici.
+        let numel_result = result_shape.iter().product();
+        let mut result_data = Vec::with_capacity(numel_result);
+        let strides_a = calculate_strides(&self_shape);
+        let strides_b = calculate_strides(&other_shape);
+        let result_strides = calculate_strides(&result_shape);
 
-        let result_data: Vec<T> = self_td.data.iter()
-            .zip(other_td.data.iter())
-            .map(|(&a, &b)| a + b)
-            .collect();
+        for i in 0..numel_result {
+            let multi_index = index_to_coord(i, &result_strides, &result_shape);
+            let index_a = coord_to_index_broadcasted(&multi_index, &self_shape, &strides_a);
+            let index_b = coord_to_index_broadcasted(&multi_index, &other_shape, &strides_b);
+            result_data.push(self_td.data[index_a] + other_td.data[index_b]); // Utiliser les données directement
+        }
 
         drop(self_td);
         drop(other_td);
 
         let requires_grad = self.requires_grad() || other.requires_grad();
-        let result = Tensor::new(result_data, self_shape);
+        let result = Tensor::new(result_data, result_shape);
         if requires_grad {
             result.set_requires_grad(true);
             let grad_fn = AddBackward {
+                input_a_shape: self_shape.clone(), // Correction: Ajouter les shapes manquantes
+                input_b_shape: other_shape.clone(),
                 input_a: self.get_weak_ref(),
                 input_b: other.get_weak_ref(),
                 _phantom: PhantomData,
@@ -106,10 +69,11 @@ where
     }
 }
 
-/// Implements in-place element-wise addition (`+=`).
+/// Implements in-place element-wise addition (`+=`) for Tensor += &Tensor.
+/// NOTE: Currently does NOT support broadcasting.
 impl<'a, T> AddAssign<&'a Tensor<T>> for Tensor<T>
 where
-    T: AddAssign + Copy,
+    T: AddAssign + Copy + Clone, // Added Clone bound as Tensor requires it
 {
     fn add_assign(&mut self, other: &'a Tensor<T>) {
         let self_shape = self.shape();
@@ -122,12 +86,17 @@ where
         self_td_mut.data.iter_mut()
             .zip(other_td.data.iter())
             .for_each(|(a, &b)| *a += b);
+        
+        // Note: AddAssign usually doesn't affect requires_grad or grad_fn of self,
+        // as gradients shouldn't typically be modified in-place.
     }
 }
 
 // --- Backward Operation --- 
 
 struct AddBackward<T> {
+    input_a_shape: Vec<usize>, 
+    input_b_shape: Vec<usize>,
     input_a: Weak<RefCell<TensorData<T>>>,
     input_b: Weak<RefCell<TensorData<T>>>,
     _phantom: PhantomData<T>,
@@ -135,47 +104,51 @@ struct AddBackward<T> {
 
 impl<T> BackwardOp<T> for AddBackward<T>
 where
-    T: AddAssign + Copy + Clone + 'static,
+    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + Sum<T>,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
-        // Ensure the upstream grad tensor itself does not require grad
-        // (Already handled by cloning below)
-        let grad_clone = upstream_grad.clone(); // Clone upstream_grad to avoid borrow issues
+        let grad_clone = upstream_grad.clone();
         grad_clone.set_requires_grad(false);
 
         // Accumulate gradient for Input A
         if let Some(input_a_rc) = self.input_a.upgrade() {
             let mut input_a_td = input_a_rc.borrow_mut();
             if input_a_td.requires_grad {
-                if let Some(existing_grad_a) = input_a_td.grad.as_mut() {
-                    // Use AddAssign directly on the existing gradient tensor
-                    *existing_grad_a += &grad_clone;
+                let grad_a = reduce_gradient(&grad_clone, &self.input_a_shape);
+                // Debug prints can be removed now
+                if let Some(existing_grad_tensor) = input_a_td.grad.as_mut() {
+                    let mut existing_data = existing_grad_tensor.borrow_tensor_data_mut();
+                    let new_grad_data = grad_a.borrow_tensor_data();
+                    assert_eq!(existing_data.data.len(), new_grad_data.data.len());
+                    for (existing, new) in existing_data.data.iter_mut().zip(new_grad_data.data.iter()) {
+                        *existing += *new;
+                    }
                 } else {
-                    // Create a new gradient tensor (Tensor::new sets requires_grad=false)
-                    // Clone data/shape from the clone, not the original ref
-                    input_a_td.grad = Some(Tensor::new(grad_clone.data(), grad_clone.shape()));
+                    // Create a new Tensor to ensure distinct data storage
+                    input_a_td.grad = Some(Tensor::new(grad_a.data(), grad_a.shape()));
                 }
             }
-        } else {
-            eprintln!("Warning: Weak ref upgrade failed for input A in AddBackward.");
-        }
+        } 
 
         // Accumulate gradient for Input B
         if let Some(input_b_rc) = self.input_b.upgrade() {
             let mut input_b_td = input_b_rc.borrow_mut();
             if input_b_td.requires_grad {
-                if let Some(existing_grad_b) = input_b_td.grad.as_mut() {
-                    // Use AddAssign directly on the existing gradient tensor
-                    *existing_grad_b += &grad_clone;
+                let grad_b = reduce_gradient(&grad_clone, &self.input_b_shape);
+                // Debug prints can be removed now
+                if let Some(existing_grad_tensor) = input_b_td.grad.as_mut() {
+                    let mut existing_data = existing_grad_tensor.borrow_tensor_data_mut();
+                    let new_grad_data = grad_b.borrow_tensor_data();
+                    assert_eq!(existing_data.data.len(), new_grad_data.data.len());
+                    for (existing, new) in existing_data.data.iter_mut().zip(new_grad_data.data.iter()) {
+                        *existing += *new; 
+                    }
                 } else {
-                    // Create a new gradient tensor (Tensor::new sets requires_grad=false)
-                    // Clone data/shape from the clone, not the original ref
-                    input_b_td.grad = Some(Tensor::new(grad_clone.data(), grad_clone.shape()));
+                    // Create a new Tensor to ensure distinct data storage
+                    input_b_td.grad = Some(Tensor::new(grad_b.data(), grad_b.shape()));
                 }
             }
-        } else {
-            eprintln!("Warning: Weak ref upgrade failed for input B in AddBackward.");
-        }
+        } 
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
@@ -188,13 +161,18 @@ where
 #[cfg(test)]
 mod tests {
     use crate::Tensor;
-    use num_traits::Zero; // Needed for helper
+    use num_traits::{Zero, One};
+    use crate::tensor::utils::broadcast_shapes;
+    use crate::autograd::BackwardOp;
+    use std::ops::{Add, AddAssign};
+    use std::fmt::Debug;
+    use std::iter::Sum;
 
-    // Helpers might need to be moved to a common test utils module later
-    fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    // Bounds mis à jour pour correspondre à l'impl Add
+    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape)
     }
-    fn create_test_tensor_with_grad<T: Clone + std::fmt::Debug + PartialEq + Zero>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+    fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         let tensor = Tensor::new(data, shape);
         tensor.set_requires_grad(true);
         tensor
@@ -214,11 +192,11 @@ mod tests {
     }
 
     #[test]
-    #[should_panic]
+    #[should_panic(expected = "cannot be broadcasted")]
     fn test_add_tensors_shape_mismatch() {
         let t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
-        let t2 = create_test_tensor(vec![5_i32, 6], vec![1, 2]);
-        let _result = &t1 + &t2;
+        let t_non_broadcast = create_test_tensor(vec![5, 6, 7, 8, 9, 10], vec![2, 3]);
+        let _result = &t1 + &t_non_broadcast;
     }
 
     #[test]

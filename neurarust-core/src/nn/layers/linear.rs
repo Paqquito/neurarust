@@ -36,8 +36,8 @@ pub struct Linear<T> {
 impl<T> Linear<T>
 where 
     T: Zero + One + Copy + Clone + 'static + Debug + PartialEq 
-       + AddAssign + Mul<Output=T> + Add<Output=T> // Ops needed for matmul/add
-       + Neg<Output=T> // Needed for Add bound for &Tensor + &Tensor
+       + AddAssign + Mul<Output=T> + Add<Output=T> 
+       + Neg<Output=T> + Sub<Output=T> + IterSum, // Added missing bounds (Sub, Sum, Add was already there)
 {
     /// Creates a new Linear layer.
     ///
@@ -73,12 +73,12 @@ where
 // --- Backward Operation for Linear Layer --- 
 
 struct LinearBackward<T> {
-    input: Tensor<T>, // Clone of the input tensor from the forward pass
-    weight: Parameter<T>, // Clone of the weight parameter
-    bias: Option<Parameter<T>>, // Clone of the bias parameter (if it exists)
-    input_ref: Weak<RefCell<TensorData<T>>>, // Weak reference to the input's data
-    weight_ref: Weak<RefCell<TensorData<T>>>, // Weak reference to the weight's data
-    bias_ref: Option<Weak<RefCell<TensorData<T>>>>, // Weak reference to the bias's data
+    input: Tensor<T>,
+    weight: Parameter<T>,
+    bias: Option<Parameter<T>>,
+    input_ref: Weak<RefCell<TensorData<T>>>,
+    weight_ref: Weak<RefCell<TensorData<T>>>,
+    bias_ref: Option<Weak<RefCell<TensorData<T>>>>,
     _phantom: PhantomData<T>,
 }
 
@@ -136,10 +136,18 @@ where
         if let Some(grad_input) = maybe_grad_input {
             if let Some(input_rc) = self.input_ref.upgrade() {
                 let mut input_td = input_rc.borrow_mut();
-                if let Some(existing_grad) = input_td.grad.as_mut() {
-                    *existing_grad += &grad_input;
-                } else {
-                    input_td.grad = Some(grad_input);
+                if input_td.requires_grad {
+                    if let Some(existing_grad_tensor) = input_td.grad.as_mut() {
+                        // Accumulate data directly
+                        let mut existing_grad_data = existing_grad_tensor.borrow_tensor_data_mut();
+                        let grad_input_data = grad_input.borrow_tensor_data();
+                        assert_eq!(existing_grad_data.data.len(), grad_input_data.data.len());
+                        for (existing, new) in existing_grad_data.data.iter_mut().zip(grad_input_data.data.iter()) {
+                            *existing += *new;
+                        }
+                    } else {
+                        input_td.grad = Some(grad_input);
+                    }
                 }
             }
         }
@@ -147,8 +155,15 @@ where
         // Accumulate grad_weight
         if let Some(weight_rc) = self.weight_ref.upgrade() {
              let mut weight_td = weight_rc.borrow_mut();
-             if let Some(existing_grad) = weight_td.grad.as_mut() {
-                 *existing_grad += &grad_weight;
+              // Weight always requires grad if we are in backward
+             if let Some(existing_grad_tensor) = weight_td.grad.as_mut() {
+                 // Accumulate data directly
+                 let mut existing_grad_data = existing_grad_tensor.borrow_tensor_data_mut();
+                 let grad_weight_data = grad_weight.borrow_tensor_data();
+                 assert_eq!(existing_grad_data.data.len(), grad_weight_data.data.len());
+                 for (existing, new) in existing_grad_data.data.iter_mut().zip(grad_weight_data.data.iter()) {
+                     *existing += *new;
+                 }
              } else {
                  weight_td.grad = Some(grad_weight);
              }
@@ -156,12 +171,22 @@ where
 
         // Accumulate grad_bias
         if let Some(grad_bias) = maybe_grad_bias {
-            if let Some(bias_rc) = self.bias_ref.as_ref().unwrap().upgrade() {
-                let mut bias_td = bias_rc.borrow_mut(); 
-                if let Some(existing_grad) = bias_td.grad.as_mut() {
-                    *existing_grad += &grad_bias; 
-                } else {
-                    bias_td.grad = Some(grad_bias);
+            // Make sure bias_ref exists before unwrapping
+            if let Some(bias_ref_weak) = self.bias_ref.as_ref() {
+                 if let Some(bias_rc) = bias_ref_weak.upgrade() {
+                    let mut bias_td = bias_rc.borrow_mut(); 
+                    // Bias requires grad (checked when creating grad_bias)
+                    if let Some(existing_grad_tensor) = bias_td.grad.as_mut() {
+                         // Accumulate data directly
+                        let mut existing_grad_data = existing_grad_tensor.borrow_tensor_data_mut();
+                        let grad_bias_data = grad_bias.borrow_tensor_data();
+                         assert_eq!(existing_grad_data.data.len(), grad_bias_data.data.len());
+                        for (existing, new) in existing_grad_data.data.iter_mut().zip(grad_bias_data.data.iter()) {
+                            *existing += *new;
+                        }
+                    } else {
+                        bias_td.grad = Some(grad_bias);
+                    }
                 }
             }
         }
@@ -184,9 +209,11 @@ where
     // Bounds needed for forward AND backward (matmul, transpose, add, sum, etc.)
     T: Zero + One + Copy + Clone + 'static + Debug + PartialEq 
        + Add<Output=T> + Mul<Output=T> + AddAssign 
-       + Neg<Output=T> + std::ops::Sub<Output=T> + std::iter::Sum,
+       + Neg<Output=T> + Sub<Output=T> + IterSum + Default, // Added Default
 {
-    fn forward(&self, input: &Tensor<T>) -> Tensor<T> {
+    fn forward(&self, input: &Tensor<T>) -> Tensor<T> 
+        where T: Add<Output=T>
+    {
         let input_shape = input.shape();
         assert!(input_shape.len() >= 1, "Input tensor must have at least one dimension.");
         assert_eq!(input_shape[input_shape.len() - 1], self.in_features, "Input feature dimension mismatch");
@@ -219,7 +246,8 @@ where
              
              // Cas 2: Output et Bias ont exactement la même forme (e.g., input était 1D, output est [N])
              } else if output_shape == bias_shape {
-                  &output + bias_param
+                  // Deref Parameter to get Tensor reference for Add trait
+                  &output + &bias_param.0 
              } else {
                  panic!("Cannot broadcast bias shape {:?} to output shape {:?}", bias_shape, output_shape);
              }

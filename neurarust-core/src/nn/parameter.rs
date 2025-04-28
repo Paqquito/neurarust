@@ -4,7 +4,7 @@ use std::ops::Deref;
 
 /// A wrapper around a Tensor indicating it is a learnable parameter of a Module.
 /// Parameters automatically have `requires_grad` set to `true`.
-pub struct Parameter<T>(Tensor<T>);
+pub struct Parameter<T>(pub(crate) Tensor<T>);
 
 impl<T> Parameter<T> {
     /// Creates a new Parameter from a Tensor.
