@@ -3,12 +3,13 @@ use crate::nn::module::Module;
 use crate::nn::parameter::Parameter;
 use std::fmt::{Debug};
 use num_traits::{Zero, One}; // Need Zero/One for data initialization and ops
-use std::ops::{Add, Mul, AddAssign, Neg, Deref}; // Ops for forward/backward - Added Deref back
+use std::ops::{Add, Mul, AddAssign, Neg, Deref, Sub}; // Ops for forward/backward - Added Deref back
 use std::rc::{Rc, Weak};
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
+use std::iter::Sum as IterSum; // Added IterSum import
 
 // Placeholder for random initialization
 fn simple_uniform_init<T>(rows: usize, cols: usize) -> Vec<T> 
@@ -83,25 +84,58 @@ struct LinearBackward<T> {
 
 impl<T> BackwardOp<T> for LinearBackward<T>
 where
-    // Combined bounds needed for forward and backward operations
-    T: Copy + Clone + 'static + Debug + PartialEq + AddAssign + Mul<Output = T> + Add<Output = T> + Zero + One + Neg<Output = T> + std::ops::Sub<Output = T> + std::iter::Sum,
+    T: Add<Output = T> + Mul<Output = T> + AddAssign + Neg<Output = T> + Sub<Output = T> + 
+       Zero + One + Copy + Clone + 'static + Debug + PartialEq + IterSum,
 {
     fn backward(&self, upstream_grad: &Tensor<T>) {
-        let grad_clone = upstream_grad.clone(); // Clone upstream_grad to avoid borrow issues
-        grad_clone.set_requires_grad(false); // Ensure the clone doesn't require grad
+        let grad_clone = upstream_grad.clone();
+        grad_clone.set_requires_grad(false);
 
-        // --- Gradient w.r.t. Input ---
-        // Formula: grad_input = upstream_grad @ weight
-        // Note: We use the original weight parameter (shape [out, in]), 
-        //       not the transposed one used in the forward pass.
-        //       The matmul(upstream[..., out], weight[out, in]) correctly yields grad_input[..., in].
-        if let Some(input_rc) = self.input_ref.upgrade() {
-            let mut input_td = input_rc.borrow_mut(); // Borrow mutably once
-            if input_td.requires_grad {
-                // Perform the matrix multiplication using the clone
-                let grad_input = grad_clone.matmul(&self.weight);
-                grad_input.set_requires_grad(false);
-                // Accumulate the gradient
+        // --- 1. Calculate all local gradients FIRST ---
+        
+        // Calculate grad_input (if needed)
+        let maybe_grad_input = if self.input_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad) {
+            let grad_input = grad_clone.matmul(&self.weight);
+            grad_input.set_requires_grad(false);
+            Some(grad_input)
+        } else {
+            None
+        };
+        
+        // Calculate grad_weight (always needed for parameter)
+        let input_transposed = self.input.transpose();
+        let grad_weight_t = input_transposed.matmul(&grad_clone);
+        let grad_weight = grad_weight_t.transpose(); 
+        grad_weight.set_requires_grad(false);
+
+        // Calculate grad_bias (if bias exists)
+        let maybe_grad_bias = if let Some(ref bias_param) = self.bias {
+             // Check requires_grad on bias parameter itself
+             if bias_param.requires_grad() { // Assumes Parameter has requires_grad()
+                 let upstream_rank = grad_clone.shape().len();
+                 let bias_rank = bias_param.shape().len();
+                 
+                 let grad_bias = if upstream_rank > bias_rank {
+                     let axes_to_sum: Vec<usize> = (0..(upstream_rank - bias_rank)).collect();
+                     grad_clone.sum_axes(&axes_to_sum, false)
+                 } else {
+                     grad_clone.clone() // Clone needed if grad_clone is used later
+                 };
+                 grad_bias.set_requires_grad(false); 
+                 Some(grad_bias)
+            } else {
+                 None
+            }
+        } else {
+            None
+        };
+
+        // --- 2. Accumulate gradients (take mutable borrows sequentially) ---
+        
+        // Accumulate grad_input
+        if let Some(grad_input) = maybe_grad_input {
+            if let Some(input_rc) = self.input_ref.upgrade() {
+                let mut input_td = input_rc.borrow_mut();
                 if let Some(existing_grad) = input_td.grad.as_mut() {
                     *existing_grad += &grad_input;
                 } else {
@@ -110,68 +144,20 @@ where
             }
         }
 
-        // --- Gradient w.r.t. Weight ---
-        // Formula: grad_W = (input.T @ upstream_grad).T 
-        // Shapes: input[B, ..., in], upstream[B, ..., out] -> grad_W[out, in]
+        // Accumulate grad_weight
         if let Some(weight_rc) = self.weight_ref.upgrade() {
-            let mut weight_td = weight_rc.borrow_mut(); // Borrow mutably once
-            // Weight parameter always requires grad if layer does
-            // Calculate input.T (shape [in, ..., B])
-            let input_transposed = self.input.transpose(); 
-            // Calculate input.T @ upstream_grad (shape [in, out]) using the clone
-            let grad_weight_t = input_transposed.matmul(&grad_clone);
-            // Transpose to get grad_W with the correct shape [out, in]
-            let grad_weight = grad_weight_t.transpose(); 
-            grad_weight.set_requires_grad(false);
-             
-            // Accumulate the gradient
-            if let Some(existing_grad) = weight_td.grad.as_mut() {
+             let mut weight_td = weight_rc.borrow_mut();
+             if let Some(existing_grad) = weight_td.grad.as_mut() {
                  *existing_grad += &grad_weight;
-            } else {
+             } else {
                  weight_td.grad = Some(grad_weight);
-            }
-        }
+             }
+         }
 
-        // --- Gradient w.r.t. Bias ---
-        // Formula: grad_bias = upstream_grad.sum(over_batch_dims)
-        // Shapes: upstream[B, ..., out], bias[out] -> grad_bias[out]
-        if let Some(ref bias_param) = self.bias {
-            let bias_shape = bias_param.shape();
-            let bias_rank = bias_shape.len(); 
-            let out_features = bias_shape[bias_rank - 1]; // Last dimension size
-
+        // Accumulate grad_bias
+        if let Some(grad_bias) = maybe_grad_bias {
             if let Some(bias_rc) = self.bias_ref.as_ref().unwrap().upgrade() {
                 let mut bias_td = bias_rc.borrow_mut(); 
-                if !bias_td.requires_grad { return; }
-                
-                let upstream_shape = grad_clone.shape();
-                let upstream_rank = upstream_shape.len();
-                let upstream_data = grad_clone.data();
-                
-                let grad_bias_data = if upstream_rank > bias_rank {
-                    // Calculate sum manually over batch dimensions
-                    let mut grad_bias_vec = vec![T::zero(); out_features];
-                    let batch_dims_size: usize = upstream_shape[..upstream_rank - bias_rank].iter().product();
-                    let feature_stride: usize = upstream_shape[upstream_rank - bias_rank..].iter().product::<usize>() / out_features; // Stride between features if rank > 2? Assume 1 for now
-                    assert!(feature_stride == 1, "Manual bias grad sum only supports simple cases for now"); // TEMPORARY CHECK
-                    
-                    for i in 0..batch_dims_size {
-                        for j in 0..out_features {
-                            // Index calculation needs refinement for rank > 2
-                            let upstream_idx = i * out_features + j;
-                            grad_bias_vec[j] += upstream_data[upstream_idx];
-                        }
-                    }
-                    grad_bias_vec
-                } else {
-                    // If upstream_grad rank is the same as bias rank, just clone data
-                    upstream_data
-                }; 
-
-                let grad_bias = Tensor::new(grad_bias_data, bias_shape);
-                grad_bias.set_requires_grad(false); // Ensure grad requires_grad=false
-                
-                // Accumulate the gradient
                 if let Some(existing_grad) = bias_td.grad.as_mut() {
                     *existing_grad += &grad_bias; 
                 } else {
