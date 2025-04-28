@@ -170,69 +170,128 @@ impl<T> Tensor<T> {
 
     /// Initiates the backward pass (autograd) starting from this tensor.
     /// Uses topological sort and external gradient storage.
+    /// 
+    /// This method computes the gradient of this tensor with respect to 
+    /// its ancestors in the computation graph that require gradients.
+    /// 
+    /// The backward pass proceeds as follows:
+    /// 1. Build a topological sort of the computation graph starting from this tensor.
+    /// 2. Initialize a HashMap to store gradients, keyed by the raw pointer 
+    ///    of the `Rc<RefCell<TensorData>>` for each tensor in the graph.
+    /// 3. Seed the gradient for this tensor (the starting point of the backward pass).
+    ///    If `upstream_grad` is provided, it's used; otherwise, if the tensor is 
+    ///    a scalar, a gradient of `1.0` is used. Panics if called on a non-scalar 
+    ///    tensor without an explicit `upstream_grad`.
+    /// 4. Iterate through the topologically sorted graph in reverse order.
+    /// 5. For each node, retrieve its accumulated gradient from the HashMap.
+    /// 6. If the node has a `grad_fn` (meaning it was produced by an operation),
+    ///    call the `backward` method of its `grad_fn`. The `grad_fn` will compute
+    ///    the local gradients with respect to its inputs and use the provided 
+    ///    HashMap to accumulate these gradients into the entries for its input tensors.
+    /// 7. After iterating through the graph, the HashMap contains the final gradients
+    ///    for all tensors that required gradients.
+    /// 8. Finally, copy the computed gradients from the HashMap into the `.grad` 
+    ///    field of the corresponding `TensorData` for compatibility with the `grad()` method.
+    ///
+    /// # Arguments
+    /// * `upstream_grad` - An optional tensor representing the gradient flowing into 
+    ///   this tensor from subsequent operations. Must have the same shape as this tensor.
+    ///   If `None`, assumes this is the final tensor in the computation and initiates
+    ///   the backward pass with a gradient of `1.0` (only valid for scalar tensors).
     pub fn backward(&self, upstream_grad: Option<&Tensor<T>>)
         where 
         T: Clone + Zero + One + Copy + Debug + 'static + AddAssign 
     {
         // --- 1. Build Topological Sort --- 
+        // `build_topo` performs a Depth First Search (DFS) starting from the current tensor (`self`)
+        // and populates `sorted_graph` with tensors in a reverse topological order
+        // (dependents appear before dependencies). `visited` prevents cycles and redundant visits.
         let mut visited = HashSet::new();
         let mut sorted_graph = Vec::new();
         build_topo(self, &mut visited, &mut sorted_graph);
 
         // --- 2. Initialize external gradient storage --- 
-        // Utiliser un pointeur vers le RefCell comme clé
+        // We use a HashMap to store gradients externally during the backward pass.
+        // This avoids potential borrowing issues if we tried to store gradients directly 
+        // within the TensorData while iterating.
+        // The key is the raw pointer to the `Rc<RefCell<TensorData>>`, providing a stable 
+        // identifier for each tensor node in the graph during this pass.
+        // Using `Rc::as_ptr` is generally safe here because the `Rc`s involved are kept 
+        // alive by the `sorted_graph` list and potentially other references during the pass.
         let mut gradients: HashMap<*const RefCell<TensorData<T>>, Tensor<T>> = HashMap::new();
 
         // --- 3. Set initial gradient for the final node --- 
+        // The backward pass starts with an initial gradient for the tensor `self`.
         let final_grad_val = match upstream_grad {
             Some(grad) => {
+                // If an upstream gradient is provided, use it.
                 assert_eq!(self.shape(), grad.shape(),
                            "Upstream gradient shape {:?} must match tensor shape {:?} for backward call",
                            grad.shape(), self.shape());
                 grad.clone()
             },
             None => {
+                // If no upstream gradient, assume it's the final loss (must be scalar).
                 assert_eq!(self.numel(), 1, "backward() without arguments can only be called on a scalar tensor.");
-                Tensor::new(vec![T::one()], vec![1]) 
+                // Default gradient for a scalar loss is 1.0.
+                Tensor::new(vec![T::one()], vec![]) // Use empty vec for scalar shape
             }
         };
-        // Stocker le gradient initial dans le HashMap
+        // Store the initial gradient in the HashMap, associated with `self`.
         gradients.insert(Rc::as_ptr(&self.data), final_grad_val);
 
         // --- 4. Propagate gradients backward through the sorted graph --- 
-        for node in sorted_graph.iter().rev() { // Iterate in reverse topological order
-            // Obtenir le pointeur vers le RefCell pour la clé du HashMap
+        // Iterate through the graph in reverse topological order (from output towards inputs).
+        for node in sorted_graph.iter().rev() { 
+            // Get the pointer to use as the key for the gradients HashMap.
             let node_ptr = Rc::as_ptr(&node.data);
 
-            // Get the gradient for the current node from the HashMap
-            // Cloner le gradient si trouvé pour le passer à backward
+            // Retrieve the gradient accumulated so far for the current node.
+            // Clone it because `grad_fn.backward` needs an immutable reference to the gradient,
+            // while the HashMap needs to be passed mutably for accumulation.
             let grad_to_propagate = match gradients.get(&node_ptr) {
                 Some(grad) => grad.clone(),
-                None => continue, // Pas de gradient pour ce nœud (e.g., ne requiert pas grad)
+                // If a node doesn't have a gradient yet (e.g., it didn't require grad, 
+                // or it's a leaf node that isn't `self`), we can skip it.
+                None => continue, 
             };
             
-            // Get the grad_fn associated with this node
+            // Get the operation (BackwardOp) that produced this node, if any.
             let grad_fn = node.grad_fn(); // Clones the Rc<dyn BackwardOp>
             
-            // If a grad_fn exists, call its backward method
+            // If this node was created by an operation (i.e., it has a grad_fn),
+            // call its backward method to compute and accumulate gradients for its inputs.
             if let Some(grad_fn_op) = grad_fn {
-                 // Passer le gradient et une référence mutable au HashMap pour accumulation
+                 // The `backward` method of the specific operation (e.g., AddBackward, MulBackward)
+                 // will calculate the local gradients with respect to its inputs and 
+                 // use the `gradients` HashMap to add these local gradients to the 
+                 // gradients accumulated so far for those inputs.
                  grad_fn_op.backward(&grad_to_propagate, &mut gradients);
             }
         }
 
-        // --- 5. (Optionnel) Copier les gradients finaux dans les tenseurs originaux --- 
-        // Pour correspondre à l'API précédente où .grad() renvoie le résultat
-        for node in sorted_graph {
-            let node_ptr = Rc::as_ptr(&node.data);
+        // --- 5. Copy final gradients into the TensorData --- 
+        // After the pass, the `gradients` HashMap holds the final computed gradients.
+        // We copy these back into the `.grad` field of each TensorData 
+        // for external access via the `tensor.grad()` method.
+        // Iterate through the raw pointers of visited nodes.
+        for node_ptr in visited { // node_ptr is *const RefCell<TensorData<T>>
+            // Use remove to take ownership of the gradient Tensor from the HashMap,
+            // using the node_ptr directly as the key.
             if let Some(final_grad) = gradients.remove(&node_ptr) {
-                 // Emprunter mutablament pour assigner le grad final
-                 let mut td = node.borrow_tensor_data_mut(); 
-                 td.grad = Some(final_grad);
+                 // UNSAFE: Dereference the raw pointer to access the RefCell.
+                 // This assumes the pointer is valid and the underlying Rc/RefCell 
+                 // still exists and is not mutably borrowed elsewhere (which should 
+                 // hold true if the backward pass logic is correct).
+                 unsafe {
+                     // (*node_ptr) dereferences the pointer to get the RefCell<TensorData<T>>.
+                     // .borrow_mut() then borrows the contents mutably. Panics if already borrowed mutably.
+                     let mut td = (*node_ptr).borrow_mut();
+                     // Assign the final gradient.
+                     td.grad = Some(final_grad);
+                 }
             }
         }
-        // --- Old recursive call (removed) ---
-        // self._backward_recursive(&final_grad);
     }
 
     /// Returns a clone of the gradient function Rc, if it exists.

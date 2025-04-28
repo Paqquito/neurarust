@@ -119,20 +119,32 @@ where
     T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T>,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
+        // Check if inputs require gradient calculation
         let needs_grad_a = self.input_a_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
         let needs_grad_b = self.input_b_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
 
         if needs_grad_a || needs_grad_b {
+            // Clone the upstream gradient as it might be needed for both inputs.
             let grad_clone = upstream_grad.clone();
             
             if needs_grad_a {
+                // Gradient w.r.t. input A is upstream_grad * input_B.
+                // Perform the element-wise multiplication. Note that this multiplication itself
+                // might involve broadcasting if upstream_grad and input_b_val have broadcastable shapes 
+                // (which happens if the original A and B were broadcasted for the forward Mul).
                 let grad_a_unreduced = &grad_clone * &self.input_b_val;
+                // Reduce the gradient shape if broadcasting occurred during the forward Mul.
+                // This sums the gradient over the dimensions that were originally broadcasted for input A.
                 let grad_a = reduce_gradient(&grad_a_unreduced, &self.input_a_shape);
                 accumulate_gradient(gradients, &self.input_a_ref, grad_a);
             }
             
             if needs_grad_b {
+                // Gradient w.r.t. input B is upstream_grad * input_A.
+                // Perform the element-wise multiplication, handling potential broadcasting.
                 let grad_b_unreduced = &grad_clone * &self.input_a_val;
+                // Reduce the gradient shape if broadcasting occurred during the forward Mul.
+                // This sums the gradient over the dimensions that were originally broadcasted for input B.
                 let grad_b = reduce_gradient(&grad_b_unreduced, &self.input_b_shape);
                 accumulate_gradient(gradients, &self.input_b_ref, grad_b);
             }

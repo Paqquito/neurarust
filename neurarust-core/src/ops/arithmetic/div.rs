@@ -104,26 +104,32 @@ where
     T: Div<Output = T> + Mul<Output = T> + Neg<Output = T> + AddAssign + Copy + Clone + 'static + Default + Debug + Zero + One + Sum,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
+        // Check if inputs require gradient calculation
         let needs_grad_a = self.input_a_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
         let needs_grad_b = self.input_b_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
 
         if needs_grad_a || needs_grad_b {
+            // Clone the upstream gradient as it might be needed for both inputs.
             let grad_clone = upstream_grad.clone();
             
             if needs_grad_a {
-                // Calcul grad_a = upstream_grad / B
-                let grad_a_reduced = &grad_clone / &self.input_b_val; 
-                let grad_a = reduce_gradient(&grad_a_reduced, &self.input_a_shape); 
+                // Gradient w.r.t. input A is upstream_grad / input_B.
+                // Perform element-wise division, handling potential broadcasting.
+                let grad_a_unreduced = &grad_clone / &self.input_b_val; 
+                // Reduce the gradient shape if broadcasting occurred during the forward Div.
+                let grad_a = reduce_gradient(&grad_a_unreduced, &self.input_a_shape); 
                 accumulate_gradient(gradients, &self.input_a_ref, grad_a);
             }
             
             if needs_grad_b {
-                // Calcul grad_b = upstream_grad * (-A / B^2)
-                let b_squared = &self.input_b_val * &self.input_b_val;
-                let a_div_b_squared = &self.input_a_val / &b_squared; 
-                let neg_a_div_b_squared = -&a_div_b_squared; 
-                let grad_b_reduced = &grad_clone * &neg_a_div_b_squared; 
-                let grad_b = reduce_gradient(&grad_b_reduced, &self.input_b_shape);
+                // Gradient w.r.t. input B is upstream_grad * (-input_A / input_B^2).
+                // Calculate intermediate terms, handling potential broadcasting.
+                let b_squared = &self.input_b_val * &self.input_b_val; // B^2
+                let a_div_b_squared = &self.input_a_val / &b_squared; // A / B^2
+                let neg_a_div_b_squared = -&a_div_b_squared;         // -A / B^2
+                let grad_b_unreduced = &grad_clone * &neg_a_div_b_squared; // upstream * (-A / B^2)
+                // Reduce the gradient shape if broadcasting occurred during the forward Div.
+                let grad_b = reduce_gradient(&grad_b_unreduced, &self.input_b_shape);
                 accumulate_gradient(gradients, &self.input_b_ref, grad_b);
             }
         }

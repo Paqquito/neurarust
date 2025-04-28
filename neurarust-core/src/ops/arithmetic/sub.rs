@@ -118,20 +118,29 @@ where
     T: Neg<Output = T> + AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + Sum<T>,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
+        // Check if inputs require gradient calculation
         let needs_grad_a = self.input_a.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
         let needs_grad_b = self.input_b.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
         
         if needs_grad_a || needs_grad_b {
+            // Clone the upstream gradient as it might be needed for both inputs.
             let grad_clone = upstream_grad.clone();
             
             if needs_grad_a {
+                // Gradient w.r.t. input A is simply the upstream gradient.
+                // However, we need to potentially reduce its shape if broadcasting occurred.
+                // `reduce_gradient` sums the gradient over the broadcasted dimensions
+                // to match the original shape of input A.
                 let grad_a = reduce_gradient(&grad_clone, &self.input_a_shape);
                 accumulate_gradient(gradients, &self.input_a, grad_a);
             }
     
             if needs_grad_b {
-                let grad_b_unneg = reduce_gradient(&grad_clone, &self.input_b_shape);
-                let grad_b = -&grad_b_unneg;
+                // Gradient w.r.t. input B is the negative of the upstream gradient.
+                // We also need to reduce its shape if input B was broadcasted.
+                let grad_b_unreduced = reduce_gradient(&grad_clone, &self.input_b_shape);
+                // Negate the reduced gradient.
+                let grad_b = -&grad_b_unreduced; 
                 accumulate_gradient(gradients, &self.input_b, grad_b);
             }
         }
