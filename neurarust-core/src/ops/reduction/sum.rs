@@ -91,7 +91,7 @@ impl<T> Tensor<T> {
         let mut output_data = vec![T::zero(); output_numel];
         
         // Calculate strides for input and output shapes
-        let input_strides = calculate_strides(&input_shape);
+        let _input_strides = calculate_strides(&input_shape);
         let output_strides = calculate_strides(&output_shape);
 
         // --- Reduction Logic ---
@@ -99,16 +99,16 @@ impl<T> Tensor<T> {
         for input_linear_idx in 0..input_td.numel() {
             // Calculate output coordinates based on input coordinates
             let mut current_output_coords = Vec::with_capacity(output_shape.len());
-            let mut output_coord_idx = 0;
+            let mut _output_coord_idx = 0;
             for input_axis in 0..rank {
                 if !axes_set.contains(&input_axis) {
                     // Dimension not reduced, copy coordinate
                     current_output_coords.push(current_input_coords[input_axis]);
-                    output_coord_idx += 1;
+                    _output_coord_idx += 1;
                 } else if keep_dims {
                     // Dimension reduced, but kept, coordinate is 0
                     current_output_coords.push(0);
-                    output_coord_idx += 1;
+                    _output_coord_idx += 1;
                 }
                 // If dimension is reduced and not kept, skip it
             }
@@ -199,17 +199,17 @@ where
                 for input_linear_idx in 0..input_numel {
                     // Calculate corresponding upstream coordinates
                     let mut current_upstream_coords = Vec::with_capacity(upstream_shape.len());
-                    let mut upstream_coord_idx = 0;
+                    let mut _upstream_coord_idx = 0;
                     for input_axis in 0..input_rank {
                         if !axes_set.contains(&input_axis) {
                             // Dimension was not reduced, copy coordinate
                             current_upstream_coords.push(current_input_coords[input_axis]);
-                            upstream_coord_idx += 1;
+                            _upstream_coord_idx += 1;
                         } else if self.keep_dims {
                             // Dimension was reduced but kept (size 1)
                             // The upstream coordinate for this dimension is always 0
                             current_upstream_coords.push(0);
-                             upstream_coord_idx += 1;
+                             _upstream_coord_idx += 1;
                         }
                         // If dimension reduced and not kept, skip (no corresponding upstream coord)
                     }
@@ -261,13 +261,11 @@ where
 
 #[cfg(test)]
 mod tests {
-    use crate::Tensor;
+    use super::*;
+    use crate::tensor::Tensor;
     use num_traits::{Zero, One};
     use std::ops::{AddAssign, Add};
-     
-    use super::calculate_reduced_shape; 
-     // Added import for test
-    use crate::autograd::BackwardOp; // Import the trait
+    use super::calculate_reduced_shape;
 
     // Helpers adjusted slightly if needed
     fn create_test_tensor<T: Clone + std::fmt::Debug + PartialEq + Zero + AddAssign + One + Copy + Add<Output=T> + std::iter::Sum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {

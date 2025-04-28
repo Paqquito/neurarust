@@ -8,7 +8,7 @@ pub mod graph;
 /// Trait representing an operation that can perform backpropagation.
 /// Each operation (Add, Mul, Matmul, etc.) will have a corresponding struct
 /// implementing this trait, storing the necessary context (inputs, shapes, etc.).
-pub(crate) trait BackwardOp<T> {
+pub trait BackwardOp<T> {
     /// Performs the backward pass for this operation.
     ///
     /// Takes the gradient flowing from the *output* of this operation (`upstream_grad`)

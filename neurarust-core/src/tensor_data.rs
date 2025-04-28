@@ -6,13 +6,13 @@ use crate::tensor::Tensor; // Need Tensor for grad field
 
 /// Holds the actual data and metadata for a tensor.
 /// Uses Rc<RefCell<...>> for shared ownership and interior mutability.
-pub(crate) struct TensorData<T> {
-    pub(crate) data: Vec<T>,
-    pub(crate) shape: Vec<usize>,
-    pub(crate) requires_grad: bool,
-    pub(crate) grad: Option<Tensor<T>>,
-    pub(crate) grad_fn: Option<Rc<dyn BackwardOp<T>>>,
-    pub(crate) _ctx: Option<Weak<dyn BackwardOp<T>>>, // Keep for backward?
+pub struct TensorData<T> {
+    pub data: Vec<T>,
+    pub shape: Vec<usize>,
+    pub requires_grad: bool,
+    pub grad: Option<Tensor<T>>,
+    pub grad_fn: Option<Rc<dyn BackwardOp<T>>>,
+    pub _ctx: Option<Weak<dyn BackwardOp<T>>>, // Keep for backward?
 }
 
 // Manual implementation of Debug
@@ -41,7 +41,7 @@ impl<T: Eq> Eq for TensorData<T> {}
 
 impl<T> TensorData<T> {
     // Helper to get number of elements, used internally
-    pub(crate) fn numel(&self) -> usize {
+    pub fn numel(&self) -> usize {
         self.data.len()
     }
 } 
