@@ -40,6 +40,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "neurarust-data"
+version = "0.1.0"
+dependencies = [
+ "neurarust-core",
+ "num-traits",
+ "rand",
+]
+
+[[package]]
 name = "neurarust-optim"
 version = "0.1.0"
 dependencies = [

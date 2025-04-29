@@ -83,7 +83,7 @@ mod tests {
     #[should_panic(expected = "Input and target vectors must have the same length")]
     fn test_vec_dataset_creation_panic() {
         let inputs = vec![Tensor::new(vec![1.0f32], vec![1])];
-        let targets = vec![];
+        let targets: Vec<Tensor<i32>> = vec![];
         let _dataset = VecDataset::new(inputs, targets);
     }
 

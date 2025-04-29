@@ -365,6 +365,37 @@ impl<T> Tensor<T> {
         let half = T::from_f64(0.5).expect("Cannot represent 0.5 in tensor type T for sqrt");
         self.pow(half)
     }
+
+    /// Stacks a sequence of tensors along a new dimension.
+    ///
+    /// All input tensors must have the same shape.
+    /// The new dimension is inserted at the position `dim`.
+    /// Supports autograd.
+    ///
+    /// # Arguments
+    /// * `tensors` - A slice of tensors to stack.
+    /// * `dim` - The dimension along which to stack (0 <= dim <= rank).
+    ///
+    /// # Returns
+    /// A `Result` containing the stacked tensor or an error string.
+    ///
+    /// # Example
+    /// ```ignore
+    /// let t1 = Tensor::new(vec![1, 2], vec![2]);
+    /// let t2 = Tensor::new(vec![3, 4], vec![2]);
+    /// // Stack along new dimension 0
+    /// let stacked0 = Tensor::stack(&[t1.clone(), t2.clone()], 0).unwrap(); 
+    /// // stacked0 shape: [2, 2], data: [1, 2, 3, 4]
+    /// // Stack along new dimension 1
+    /// let stacked1 = Tensor::stack(&[t1.clone(), t2.clone()], 1).unwrap();
+    /// // stacked1 shape: [2, 2], data: [1, 3, 2, 4] (depends on copy logic)
+    /// ```
+    pub fn stack(tensors: &[Tensor<T>], dim: usize) -> Result<Tensor<T>, String>
+    where
+        T: Clone + Debug + Default + Zero + One + AddAssign + 'static,
+    {
+        crate::ops::stack::stack_op(tensors, dim)
+    }
 } // End of the large impl<T> Tensor<T> block
 
 // --- Trait Implementations ---

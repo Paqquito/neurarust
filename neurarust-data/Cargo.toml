@@ -8,3 +8,4 @@ edition = "2021"
 [dependencies]
 neurarust-core = { path = "../neurarust-core" }
 rand = "0.8"
+num-traits = "0.2"

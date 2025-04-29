@@ -19,6 +19,8 @@ pub mod utils;
 
 // Ré-exporte le type Tensor pour qu'il soit accessible directement via `neurarust_core::Tensor`
 pub use tensor::Tensor;
+// Re-export traits required by public functions/structs
+pub use num_traits;
 
 // Le reste du code (structs, impls, anciens tests) a été déplacé
 // dans les modules correspondants.
