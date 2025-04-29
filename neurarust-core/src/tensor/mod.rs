@@ -369,7 +369,7 @@ impl<T> Tensor<T> {
     where
         T: Float + Debug + 'static + Clone + Zero + One + AddAssign + Default + Copy + Mul<Output = T>,
     {
-        crate::ops::math_elem::SqrtOp::forward(self)
+        crate::ops::math_elem::sqrt::SqrtOp::forward(self)
     }
 
     /// Stacks a sequence of tensors along a new dimension.
