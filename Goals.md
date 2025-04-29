@@ -109,36 +109,37 @@ Beyond PyTorch parity, we aim to fully leverage Rust to offer:
 
 This roadmap outlines the planned development stages for NeuraRust, aiming for extensive feature parity with PyTorch over time. Status markers: ✅ (Done), 🚧 (In Progress / Partially Done), ⏳ (To Do).
 
-**Phase 0: Foundations & Core Tensor [✅ Done, with Notes]**
+**Phase 0: Foundations & Core Tensor [✅ Done, pending Error Handling improvement]**
 *   🎯 **Goal:** Establish project structure, implement basic CPU `Tensor` with core functionalities.
 *   **0.1 Project Setup [✅ Done]**
     *   ✅ Workspace Setup: Defined workspace in root `Cargo.toml`, configured basic CI, added `rustfmt.toml` and standard `clippy` lints.
     *   ✅ Licensing: Added `LICENSE` file (MIT/Apache 2.0 chosen).
     *   ✅ Contribution Docs: Created `CONTRIBUTING.md` and `CODE_OF_CONDUCT.md`.
-*   **0.2 Core `Tensor` Struct (`neurarust-core`) [✅ Done, with Notes]**
+*   **0.2 Core `Tensor` Struct (`neurarust-core`) [✅ Done]**
     *   ✅ `Tensor` Struct Definition (`tensor::mod.rs`): Created the main user-facing `Tensor` struct.
     *   ✅ `TensorData` Struct Definition (`tensor_data.rs`): Internal struct holding core data.
     *   ✅ Data Storage: Implemented using `Rc<RefCell<Vec<T>>>` within `TensorData`.
         *   📝 *Note:* This choice enables basic sharing needed for dynamic autograd graph construction (multiple `Tensor`s can refer to the same `TensorData`). However, `RefCell` enforces runtime borrow checking and is *not thread-safe*, which **limits future parallelism** (e.g., using `rayon` for parallel CPU ops or multi-threaded data loading accessing tensors). Evolution towards thread-safe structures like `Arc<Mutex/RwLock>` or potentially specialized concurrent data structures will be necessary in later phases (especially Phase 4/6).
     *   ✅ Shape Representation: Implemented using `shape: Vec<usize>` field in `TensorData`.
-    *   🚧 **Strides Representation:** **Missing!** `TensorData` **currently lacks an explicit `strides: Vec<usize>` field.** Strides (the number of memory elements to skip to get to the next element along each dimension) are only calculated implicitly/on-the-fly for indexing. This is a **key deviation** from standard tensor libraries and **prevents efficient implementation of views** (like `slice`, `transpose`, `reshape` without copying data) and true support for non-contiguous tensors. **Action Required:** Add `strides: Vec<usize>` to `TensorData` and update all indexing logic and relevant operations to correctly use strides. This is a **critical prerequisite** for many features in Phase 1 (especially 1.4).
+    *   ✅ **Strides Representation:** **Implemented!** Added `strides: Vec<usize>` field to `TensorData`. `Tensor::new` now calculates contiguous strides by default. This resolves the **critical prerequisite** for views (Phase 1.4).
     *   ✅ Basic Creation Methods:
-        *   ✅ `Tensor::new(data: Vec<T>, shape: Vec<usize>)`: Acts like `from_vec`, consuming data.
+        *   ✅ `Tensor::new(data: Vec<T>, shape: Vec<usize>)`: Acts like `from_vec`, consuming data, calculates strides.
         *   ✅ `Tensor::zeros_like(&self)`: Creates a tensor of zeros with the same shape.
-        *   💡 *Improvement Suggestion:* Consider adding standalone creation functions like `neurarust::tensor::zeros(shape, dtype?, device?)`, `neurarust::tensor::ones(...)`, etc., for better ergonomics, similar to PyTorch.
+        *   ✅ **Standalone Creation Functions:** Implemented `neurarust::tensor::zeros(shape)`, `neurarust::tensor::ones(shape)`, `neurarust::tensor::full(shape, value)` for better ergonomics.
     *   ✅ Initial Data Type Support: Generic `<T>` used, primarily focused on `f32` via trait bounds like `Copy`, `Debug`, `PartialOrd`, `Add`, `Sub`, `Mul`, `Div`, `Neg`. Explicit `DType` enum and multi-type support are missing (Phase 1.4).
 *   **0.3 Basic CPU Operations (`neurarust-core::ops` - Forward Pass Only) [✅ Done]**
     *   ✅ Element-wise Arithmetic (`ops::arithmetic`): Forward pass implemented for `add`, `sub`, `mul`, `div`, `neg`. These handle basic tensor-tensor and tensor-scalar operations.
     *   ✅ Broadcasting Utilities (`tensor::utils`): Implemented `broadcast_shapes` helper and logic to determine compatible shapes for broadcasting.
     *   ✅ Add Operation with Broadcasting: Forward pass specifically handles broadcasting.
+    *   ✅ **Stride-Aware Indexing (Partial):** Added `TensorData::get_offset` method. Forward passes for `matmul`, `add`, and `mul` have been updated to use `get_offset` for data access, making them compatible with strides.
     *   ✅ Basic Backward Infrastructure: Defined `BackwardOp` trait and implemented `AddBackward` structure with a basic `backward` method signature and `reduce_gradient` utility (to handle gradient reduction for broadcasted ops), laying groundwork for Phase 1 Autograd.
 *   **0.4 Initial Testing [✅ Done]**
-    *   ✅ Basic Unit Tests: Added tests covering `Tensor` creation, shape validation, basic arithmetic operations (forward pass), and broadcasting utility functions.
-*   **0.5 Overall Status & Key Issues [✅ Done, with Actions]**
-    *   **Status:** Project structure and foundational `Tensor` struct are implemented. Basic element-wise operations work on CPU. Initial autograd infrastructure (`BackwardOp` trait) exists.
-    *   **Critical Issue:** The **lack of stored strides** in `TensorData` is the most significant deviation and blocker. It prevents efficient views and non-contiguous tensor support, essential for performance and API completeness. **Action:** Implement strides as a high priority (start of Phase 1).
-    *   💡 *Improvement Suggestion:* Enhance error handling. Many functions currently use `panic!` or `expect()` on errors (e.g., shape mismatches). Using `Result<T, E>` more consistently would lead to more robust code.
-    *   📝 *Note on Parallelism:* The `Rc<RefCell>` choice for data storage needs to be revisited before significant parallel computation (CPU or GPU) can be implemented effectively.
+    *   ✅ Basic Unit Tests: Added tests covering `Tensor` creation, shape validation, basic arithmetic operations (forward pass), broadcasting utility functions, and new creation functions.
+*   **0.5 Overall Status & Key Issues [✅ Done, pending Error Handling improvement]**
+    *   **Status:** Project structure and foundational `Tensor` struct are implemented with **explicit stride support**. Basic element-wise operations (`add`, `mul`) and `matmul` correctly use strides for data access on CPU. Initial autograd infrastructure (`BackwardOp` trait) exists. Standalone creation functions added.
+    *   ✅ **Critical Issue (Lack of strides): Resolved.**
+    *   ⏳ **Error Handling Improvement:** **Pending.** Many functions still use `panic!` or `expect()` on errors (e.g., shape mismatches, out-of-bounds indices). Suggestion to use `Result<T, E>` more consistently remains **to be addressed**. This could be tackled early in Phase 1 or as needed.
+    *   📝 *Note on Parallelism:* The `Rc<RefCell>` choice for data storage needs to be revisited before significant parallel computation (CPU or GPU) can be implemented effectively (Phase 4/6).
 
 **Phase 1: Robust Autograd & Expanded CPU Ops [🚧 In Progress]**
 *   🎯 **Goal:** Implement a functional and tested dynamic autograd system, significantly expand CPU tensor operations and Tensor API.
@@ -196,18 +197,19 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   🚧 In-place Operations (`add_`, `sub_`, `mul_`, etc.): Basic versions exist but they **do not integrate with autograd** (don't track gradients) and likely lack broadcasting support. Need significant rework to function correctly within the framework.
     *   ⏳ Basic `Device` concept: **Missing.** No way to specify or query the device (CPU vs potential future GPU) where a tensor resides. Required for Phase 4.
     *   **Critical Dependency:** The implementation of **stored strides** (fixing the Phase 0 inconsistency) is the **absolute prerequisite** for tackling View Semantics and Contiguous Tensors, which are fundamental Tensor features.
-*   **1.5 Testing & Documentation [🚧 Partially Implemented]**
+*   **1.5 Testing & Documentation [🚧 Very Incomplete]**
     *   🎯 Goal: Ensure correctness through rigorous testing and provide clear documentation.
     *   🚧 Comprehensive Gradient Tests: Basic backward tests exist for the ops implemented in 1.2. However, they **lack systematic numerical gradient checking** using finite differences to verify the analytical gradients' correctness. **Improvement Needed.**
     *   ⏳ Property-Based Testing: **Missing.** Consider using crates like `proptest` to automatically generate diverse tensor inputs and test properties of operations and autograd.
     *   🚧 Expanded Unit Tests: Need significant expansion to cover all newly added forward ops (from 1.3) and Tensor API methods (from 1.4) as they are implemented.
     *   🚧 Documentation (`rustdoc`): Docstrings are present for some parts but are often **minimal or incomplete**. Need thorough documentation for all public modules, structs, functions, and methods, including usage examples.
 *   **Overall Status Phase 1:** The foundational dynamic autograd graph construction and traversal mechanism works. Backward passes are implemented for a small core set of arithmetic and basic ops. However, the implementation is **severely hampered** by:
-    1.  **Missing Strides:** Blocking essential view/contiguous tensor support.
+    1.  **Missing Strides:** Blocking efficient view/contiguous tensor support.
     2.  **Incomplete Op Coverage:** Many crucial forward and backward operations are missing.
     3.  **Lack of Core Tensor Features:** Missing multiple data types, device awareness, robust in-place ops, and creation methods.
     4.  **Insufficient Testing:** Gradient tests need numerical verification.
 *   **Immediate Priorities:**
+    1.  **Implement Views:** Refactor `reshape`, `transpose`, `slice` (and add `view`, `permute`, etc.) to create true views (no data copy) using the new strides. Implement their corresponding backward passes correctly considering views.
     1.  **Implement Stored Strides:** Add `strides: Vec<usize>` to `TensorData` and refactor indexing/memory access logic accordingly. This unblocks views.
     2.  **Implement Views:** Refactor `reshape`, `transpose`, `slice` (and add `view`, `permute`, etc.) to create true views (no data copy) using the new strides. Implement their corresponding backward passes correctly considering views.
     3.  **Numerical Gradient Checks:** Implement a testing utility for comparing analytical gradients with numerical approximations (finite differences) and apply it to all existing and new backward ops.

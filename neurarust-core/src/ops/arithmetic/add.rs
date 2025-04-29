@@ -3,7 +3,7 @@
 use crate::tensor::Tensor;
 use crate::autograd::{BackwardOp, accumulate_gradient};
 use crate::tensor_data::TensorData;
-use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord, coord_to_index_broadcasted, reduce_gradient};
+use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord, reduce_gradient};
 use std::ops::{Add, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;

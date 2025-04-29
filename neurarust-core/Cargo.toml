@@ -7,3 +7,7 @@ edition = "2021"
 num-traits = "0.2"
 rand = "0.8"
 # neurarust-optim = { path = "../neurarust-optim" } # Removed to break cycle
+thiserror = "1.0"
+
+[dev-dependencies]
+float-cmp = "0.9"

@@ -4,8 +4,6 @@ use crate::nn::parameter::Parameter;
 use std::fmt::{Debug};
 use num_traits::{Zero, One}; // Need Zero/One for data initialization and ops
 use std::ops::{Add, Mul, AddAssign, Neg, Deref, Sub}; // Ops for forward/backward - Added Deref back
-use std::cell::RefCell;
-use crate::tensor_data::TensorData;
 use crate::ops::linalg;
 use std::iter::Sum; // Restore Sum trait import
 

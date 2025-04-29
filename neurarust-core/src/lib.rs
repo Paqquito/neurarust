@@ -24,3 +24,10 @@ pub use num_traits;
 
 // Le reste du code (structs, impls, anciens tests) a été déplacé
 // dans les modules correspondants.
+
+pub mod error;
+
+pub use error::NeuraRustError;
+
+// Re-export common tensor creation functions for easier access
+pub use tensor::{full, ones, zeros};
