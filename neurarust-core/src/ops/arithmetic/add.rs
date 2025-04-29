@@ -37,18 +37,42 @@ where
         let self_td = self.borrow_tensor_data(); 
         let other_td = other.borrow_tensor_data();
         
-        // Utiliser compute_broadcasted_op générique ? Pour l'instant, refaire la logique ici.
+        // Calculer la shape et les strides du résultat
         let numel_result = result_shape.iter().product();
         let mut result_data = Vec::with_capacity(numel_result);
-        let strides_a = calculate_strides(&self_shape);
-        let strides_b = calculate_strides(&other_shape);
         let result_strides = calculate_strides(&result_shape);
+        let rank_diff_a = result_shape.len().saturating_sub(self_td.shape.len());
+        let rank_diff_b = result_shape.len().saturating_sub(other_td.shape.len());
+        
+        let mut input_a_coords = vec![0; self_td.shape.len()];
+        let mut input_b_coords = vec![0; other_td.shape.len()];
 
         for i in 0..numel_result {
-            let multi_index = index_to_coord(i, &result_strides, &result_shape);
-            let index_a = coord_to_index_broadcasted(&multi_index, &self_shape, &strides_a);
-            let index_b = coord_to_index_broadcasted(&multi_index, &other_shape, &strides_b);
-            result_data.push(self_td.data[index_a] + other_td.data[index_b]); // Utiliser les données directement
+            let output_coords = index_to_coord(i, &result_strides, &result_shape);
+            
+            // Calculer les coordonnées et l'offset pour l'input A
+            for dim_idx in 0..self_td.shape.len() {
+                let output_coord_idx = rank_diff_a + dim_idx;
+                input_a_coords[dim_idx] = if self_td.shape[dim_idx] == 1 {
+                    0
+                } else {
+                    output_coords[output_coord_idx]
+                };
+            }
+            let offset_a = self_td.get_offset(&input_a_coords);
+            
+            // Calculer les coordonnées et l'offset pour l'input B
+            for dim_idx in 0..other_td.shape.len() {
+                let output_coord_idx = rank_diff_b + dim_idx;
+                 input_b_coords[dim_idx] = if other_td.shape[dim_idx] == 1 {
+                    0
+                 } else {
+                    output_coords[output_coord_idx]
+                 };
+            }
+            let offset_b = other_td.get_offset(&input_b_coords);
+
+            result_data.push(self_td.data[offset_a] + other_td.data[offset_b]);
         }
 
         drop(self_td);
