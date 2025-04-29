@@ -597,4 +597,74 @@ mod tests {
     }
 
     // zeros_like is now part of the main impl block
+    
+    #[test]
+    fn test_zeros_creation() {
+        let shape = vec![2, 3];
+        let t = zeros::<f32>(shape.clone());
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.data().as_ref(), &[0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+        assert!(!t.requires_grad());
+    }
+
+    #[test]
+    fn test_ones_creation() {
+        let shape = vec![1, 4];
+        let t = ones::<i32>(shape.clone());
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.data().as_ref(), &[1, 1, 1, 1]);
+        assert!(!t.requires_grad());
+    }
+
+    #[test]
+    fn test_full_creation() {
+        let shape = vec![2, 1, 2];
+        let fill_val = 42.0f64;
+        let t = full(shape.clone(), fill_val);
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.data().as_ref(), &[42.0, 42.0, 42.0, 42.0]);
+        assert!(!t.requires_grad());
+    }
+}
+
+// --- Standalone Creation Functions --- 
+
+/// Creates a tensor filled with zeros.
+///
+/// # Arguments
+/// * `shape` - The desired shape of the tensor.
+///
+/// # Returns
+/// A new `Tensor<T>` filled with zeros.
+pub fn zeros<T: Zero + Clone>(shape: Vec<usize>) -> Tensor<T> {
+    let numel = shape.iter().product::<usize>();
+    let data = vec![T::zero(); numel];
+    Tensor::new(data, shape)
+}
+
+/// Creates a tensor filled with ones.
+///
+/// # Arguments
+/// * `shape` - The desired shape of the tensor.
+///
+/// # Returns
+/// A new `Tensor<T>` filled with ones.
+pub fn ones<T: One + Clone>(shape: Vec<usize>) -> Tensor<T> {
+    let numel = shape.iter().product::<usize>();
+    let data = vec![T::one(); numel];
+    Tensor::new(data, shape)
+}
+
+/// Creates a tensor filled with a specific value.
+///
+/// # Arguments
+/// * `shape` - The desired shape of the tensor.
+/// * `fill_value` - The value to fill the tensor with.
+///
+/// # Returns
+/// A new `Tensor<T>` filled with `fill_value`.
+pub fn full<T: Clone>(shape: Vec<usize>, fill_value: T) -> Tensor<T> {
+    let numel = shape.iter().product::<usize>();
+    let data = vec![fill_value; numel];
+    Tensor::new(data, shape)
 }
