@@ -4,13 +4,15 @@ use crate::nn::parameter::Parameter;
 use std::fmt::{Debug};
 use num_traits::{Zero, One}; // Need Zero/One for data initialization and ops
 use std::ops::{Add, Mul, AddAssign, Neg, Deref, Sub}; // Ops for forward/backward - Added Deref back
-use std::rc::{Rc, Weak};
+use std::rc::Weak;
 use std::cell::RefCell;
 use std::marker::PhantomData;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use std::iter::Sum as IterSum; // Added IterSum import
 use std::collections::HashMap;
+use crate::ops::linalg;
+use std::iter::Sum; // Import Sum trait
 
 // Placeholder for random initialization
 fn simple_uniform_init<T>(rows: usize, cols: usize) -> Vec<T> 
@@ -70,163 +72,66 @@ where
     }
 }
 
-
-// --- Backward Operation for Linear Layer --- 
-
-#[derive(Debug)]
-struct LinearBackward<T> {
-    input: Tensor<T>,
-    weight: Parameter<T>,
-    input_ref: Weak<RefCell<TensorData<T>>>,
-    weight_ref: Weak<RefCell<TensorData<T>>>,
-    bias_ref: Option<Weak<RefCell<TensorData<T>>>>,
-    _phantom: PhantomData<T>,
-}
-
-impl<T> BackwardOp<T> for LinearBackward<T>
-where
-    T: Add<Output = T> + Mul<Output = T> + AddAssign + Neg<Output = T> + Sub<Output = T> + 
-       Zero + One + Copy + Clone + 'static + Debug + PartialEq + IterSum + Default,
-{
-    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
-        // println!("\n--- DEBUG LinearBackward --- Upstream shape: {:?}", upstream_grad.shape());
-        
-        // 1. Gradient w.r.t. Layer Input (dL/dInput = dL/dOutput @ W)
-        let needs_grad_input = self.input_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
-        // println!("[Input Grad] Needs grad? {}", needs_grad_input);
-        if needs_grad_input {
-            let weight_tensor = self.weight.deref();
-            // println!("[Input Grad] Calc: upstream({:?}) @ W({:?})", upstream_grad.shape(), weight_tensor.shape());
-            let grad_input = upstream_grad.matmul(weight_tensor); 
-            grad_input.set_requires_grad(false);
-            // println!("[Input Grad] Result shape: {:?}", grad_input.shape());
-            crate::autograd::accumulate_gradient(gradients, &self.input_ref, grad_input);
-            // println!("[Input Grad] Accumulated.");
-        }
-
-        // 2. Gradient w.r.t. Weight (dL/dW = (dL/dOutput)^T @ input)
-        let grad_wrt_output_t = upstream_grad.transpose();
-        // println!("[Weight Grad] upstream.T shape: {:?}", grad_wrt_output_t.shape());
-        let grad_weight = grad_wrt_output_t.matmul(&self.input);
-        grad_weight.set_requires_grad(false);
-        // println!("[Weight Grad] Result shape: {:?}", grad_weight.shape());
-        crate::autograd::accumulate_gradient(gradients, &self.weight_ref, grad_weight);
-        // println!("[Weight Grad] Accumulated.");
-
-        // 3. Gradient w.r.t. Bias (dL/db = sum(dL/dOutput, axis=0)) 
-        if let Some(ref bias_weak_ref) = self.bias_ref {
-            let needs_grad_bias = bias_weak_ref.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
-            // println!("[Bias Grad] Needs grad? {}", needs_grad_bias);
-            if needs_grad_bias {
-                let upstream_rank = upstream_grad.shape().len();
-                // println!("[Bias Grad] Calc from upstream({:?})", upstream_grad.shape());
-                let grad_bias = if upstream_rank > 1 {
-                    let axes_to_sum: Vec<usize> = (0..upstream_rank - 1).collect();
-                    let summed_grad = upstream_grad.sum_axes(&axes_to_sum, false);
-                    summed_grad.set_requires_grad(false);
-                    // println!("[Bias Grad] Result shape (summed): {:?}", summed_grad.shape());
-                    summed_grad
-                } else {
-                     let cloned_grad = upstream_grad.clone();
-                     cloned_grad.set_requires_grad(false);
-                     // println!("[Bias Grad] Result shape (cloned): {:?}", cloned_grad.shape());
-                     cloned_grad
-                }; 
-                 crate::autograd::accumulate_gradient(gradients, bias_weak_ref, grad_bias);
-                 // println!("[Bias Grad] Accumulated.");
-            }
-        } else {
-            // println!("[Bias Grad] No bias in this layer.");
-        }
-        // println!("--- DEBUG LinearBackward END ---");
-    }
-
-    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
-        // Return weak refs to all potential gradient sources: input, weight, bias
-        let mut inputs = Vec::with_capacity(3);
-        inputs.push(self.input_ref.clone());
-        inputs.push(self.weight_ref.clone());
-        if let Some(ref bias_ref) = self.bias_ref {
-            inputs.push(bias_ref.clone());
-        }
-        inputs
-    }
-}
-
-
 impl<T> Module<T> for Linear<T>
 where
-    // Bounds needed for forward AND backward (matmul, transpose, add, sum, etc.)
+    // Added Sum to bounds, matching add.rs requirements
     T: Zero + One + Copy + Clone + 'static + Debug + PartialEq 
-       + Add<Output=T> + Mul<Output=T> + AddAssign 
-       + Neg<Output=T> + Sub<Output=T> + IterSum + Default, // Added Default
+       + Add<Output=T> + Mul<Output=T> + AddAssign + Default + Sum, 
 {
-    fn forward(&self, input: &Tensor<T>) -> Tensor<T> 
-        where T: Add<Output=T>
-    {
+    fn forward(&self, input: &Tensor<T>) -> Tensor<T> {
         let input_shape = input.shape();
         assert!(input_shape.len() >= 1, "Input tensor must have at least one dimension.");
         assert_eq!(input_shape[input_shape.len() - 1], self.in_features, "Input feature dimension mismatch");
 
         // Perform matrix multiplication: input @ weight.T
-        // Use clone of weight parameter for potential backward pass
-        let weight_for_matmul = self.weight.clone(); 
-        let output = input.matmul(&weight_for_matmul.transpose());
+        let weight_tensor = self.weight.deref(); 
+        let weight_transposed = weight_tensor.transpose();
+        // Utiliser la fonction matmul du module linalg
+        let output = linalg::matmul(input, &weight_transposed);
         
         let final_output = if let Some(ref bias_param) = self.bias {
-             // --- Bias Addition Logic --- 
              let output_shape = output.shape();
-             let bias_shape = bias_param.shape(); // Bias is [out_features] == [N]
+             let bias_shape = bias_param.shape(); 
              
-             // Cas 1: Output est [B, ..., N] et Bias est [N]
+             // Cas 1: Output [B, ..., N], Bias [N]
              if output_shape.len() > 1 && bias_shape.len() == 1 && output_shape[output_shape.len()-1] == bias_shape[0] {
-                 // Toujours broadcaster le biais à la forme de l'output dans ce cas
-                 let batch_size = output_shape[0..output_shape.len()-1].iter().product::<usize>();
-                 let bias_data = bias_param.data();
+                 // Calcul batch_size correct
+                 let batch_dims = &output_shape[0..output_shape.len()-1];
+                 let batch_size: usize = batch_dims.iter().product(); 
+                 let bias_data_ref = bias_param.borrow_tensor_data();
                  let mut broadcasted_bias_data = Vec::with_capacity(batch_size * self.out_features);
                  for _ in 0..batch_size {
-                     broadcasted_bias_data.extend_from_slice(&bias_data);
+                     broadcasted_bias_data.extend_from_slice(&bias_data_ref.data);
                  }
+                 // Drop the immutable borrow before creating the new tensor
+                 drop(bias_data_ref);
                  let broadcasted_bias = Tensor::new(broadcasted_bias_data, output_shape.clone());
-                 // On suppose que broadcasted_bias a requires_grad = true si bias_param l'a
-                 // et que l'op Add propage requires_grad correctement.
                  if bias_param.requires_grad() { broadcasted_bias.set_requires_grad(true); }
                  
+                 // Utiliser l'opérateur Add pour &Tensor + &Tensor
                  &output + &broadcasted_bias 
              
-             // Cas 2: Output et Bias ont exactement la même forme (e.g., input était 1D, output est [N])
-             } else if output_shape == bias_shape {
+             // Cas 2: Output et Bias ont la même forme (ex: [N])
+             } else if output_shape == bias_param.shape() { 
                   // Déréférencer Parameter vers &Tensor<T> pour l'addition
-                  &output + &*bias_param 
+                  &output + bias_param.deref() // Utiliser Add pour &Tensor + &Tensor
              } else {
                  panic!("Cannot broadcast bias shape {:?} to output shape {:?}", bias_shape, output_shape);
              }
         } else {
-             output // Return the matmul result directly if no bias
+             output // Pas de biais
         };
 
-        // Set up backward pass if needed
-        let requires_grad = input.requires_grad() || self.weight.requires_grad() || self.bias.as_ref().map_or(false, |b| b.requires_grad());
-        if requires_grad {
-            final_output.data.borrow_mut().grad_fn = Some(Rc::new(LinearBackward {
-                input: input.clone(), // Clone input for backward
-                weight: self.weight.clone(), // Clone weight parameter
-                input_ref: input.get_weak_ref(),
-                weight_ref: self.weight.get_weak_ref(),
-                bias_ref: self.bias.as_ref().map(|p| p.get_weak_ref()),
-                _phantom: PhantomData,
-            }));
-        }
+        // L'autograd est géré par les opérations `matmul` et `add` appelées ci-dessus.
+        // Il n'y a rien à faire ici pour configurer un `grad_fn` spécifique à `Linear`.
 
         final_output
     }
 
     fn parameters(&self) -> Vec<Tensor<T>> {
         let mut params = Vec::with_capacity(2);
-        // Clone the Tensor itself using Deref on Parameter
         params.push(self.weight.deref().clone()); 
         if let Some(ref bias_param) = self.bias {
-            // Clone the Tensor itself using Deref on Parameter
             params.push(bias_param.deref().clone()); 
         }
         params

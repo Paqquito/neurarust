@@ -1,7 +1,7 @@
 // neurarust-core/src/ops/arithmetic/add.rs
 
 use crate::tensor::Tensor;
-use crate::autograd::BackwardOp;
+use crate::autograd::{BackwardOp, accumulate_gradient};
 use crate::tensor_data::TensorData;
 use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord, coord_to_index_broadcasted, reduce_gradient};
 use std::ops::{Add, AddAssign};
@@ -12,6 +12,7 @@ use std::fmt::Debug;
 use num_traits::{Zero, One};
 use std::iter::Sum;
 use std::collections::HashMap;
+use std::default::Default;
 
 // --- Forward Operation --- 
 
@@ -58,13 +59,13 @@ where
         if requires_grad {
             result.set_requires_grad(true);
             let grad_fn = AddBackward {
-                input_a_shape: self_shape.clone(), // Correction: Ajouter les shapes manquantes
+                input_a_shape: self_shape.clone(),
                 input_b_shape: other_shape.clone(),
-                input_a: self.get_weak_ref(),
-                input_b: other.get_weak_ref(),
+                input_a: self.clone(),
+                input_b: other.clone(),
                 _phantom: PhantomData,
             };
-            result.borrow_tensor_data_mut().grad_fn = Some(Rc::new(grad_fn));
+            result.set_grad_fn(Some(Rc::new(grad_fn)));
         }
         result
     }
@@ -92,42 +93,40 @@ where
 
 // --- Backward Operation --- 
 
+/// Backward operation for addition
 #[derive(Debug)]
-struct AddBackward<T> {
-    input_a_shape: Vec<usize>, 
+struct AddBackward<T: 'static> {
+    input_a_shape: Vec<usize>,
     input_b_shape: Vec<usize>,
-    input_a: Weak<RefCell<TensorData<T>>>,
-    input_b: Weak<RefCell<TensorData<T>>>,
+    input_a: Tensor<T>,
+    input_b: Tensor<T>,
     _phantom: PhantomData<T>,
 }
 
 impl<T> BackwardOp<T> for AddBackward<T>
-where
-    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + Sum<T>,
+where 
+    T: AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
-        // Vérifier si les entrées nécessitent un gradient
-        let needs_grad_a = self.input_a.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
-        let needs_grad_b = self.input_b.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
+        let grad_clone = upstream_grad.clone();
+        let weak_a = self.input_a.get_weak_ref();
+        let weak_b = self.input_b.get_weak_ref();
 
-        // Calculer les gradients seulement si nécessaire
-        if needs_grad_a || needs_grad_b {
-            let grad_clone = upstream_grad.clone();
-            
-            if needs_grad_a {
-                let grad_a = reduce_gradient(&grad_clone, &self.input_a_shape);
-                crate::autograd::accumulate_gradient(gradients, &self.input_a, grad_a);
-            }
-    
-            if needs_grad_b {
-                let grad_b = reduce_gradient(&grad_clone, &self.input_b_shape); 
-                crate::autograd::accumulate_gradient(gradients, &self.input_b, grad_b);
-            }
+        if weak_a.upgrade().map_or(false, |rc| rc.borrow().requires_grad) {
+            let grad_a = reduce_gradient(&grad_clone, &self.input_a_shape);
+            grad_a.set_requires_grad(false);
+            accumulate_gradient(gradients, &weak_a, grad_a);
+        }
+
+        if weak_b.upgrade().map_or(false, |rc| rc.borrow().requires_grad) {
+            let grad_b = reduce_gradient(&grad_clone, &self.input_b_shape);
+            grad_b.set_requires_grad(false);
+            accumulate_gradient(gradients, &weak_b, grad_b);
         }
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
-        vec![self.input_a.clone(), self.input_b.clone()]
+        vec![self.input_a.get_weak_ref(), self.input_b.get_weak_ref()]
     }
 }
 

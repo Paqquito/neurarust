@@ -2,8 +2,9 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-use std::ops::{AddAssign, Mul};
+use std::ops::{AddAssign, Mul, Add};
 use std::rc::{Rc, Weak};
+use std::iter::Sum;
 
 use num_traits::{Float, Zero, One};
 
@@ -232,7 +233,7 @@ impl<T> Tensor<T> {
     ///   the backward pass with a gradient of `1.0` (only valid for scalar tensors).
     pub fn backward(&self, upstream_grad: Option<&Tensor<T>>)
         where 
-        T: Clone + Zero + One + Copy + Debug + 'static + AddAssign 
+        T: Clone + Zero + One + Copy + Debug + 'static + AddAssign + Add<Output=T> + Mul<Output=T> + PartialEq + Default + Sum,
     {
         // --- 1. Build Topological Sort --- 
         // `build_topo` performs a Depth First Search (DFS) starting from the current tensor (`self`)
@@ -269,61 +270,52 @@ impl<T> Tensor<T> {
                 Tensor::new(vec![T::one()], vec![]) // Use empty vec for scalar shape
             }
         };
-        // Store the initial gradient in the HashMap, associated with `self`.
-        gradients.insert(Rc::as_ptr(&self.data), final_grad_val);
+        let self_ptr = Rc::as_ptr(&self.data);
+        gradients.insert(self_ptr, final_grad_val);
 
         // --- 4. Propagate gradients backward through the sorted graph --- 
-        // Iterate through the graph in reverse topological order (from output towards inputs).
+        println!("[Tensor::backward] Starting propagation loop. Initial grad set for {:?}", self_ptr);
         for node in sorted_graph.iter().rev() { 
-            // Get the pointer to use as the key for the gradients HashMap.
-            let node_ptr = Rc::as_ptr(&node.data);
+            let node_ptr = Rc::as_ptr(&node.data); 
+            println!("[Tensor::backward] Processing node: {:?}", node_ptr);
 
-            // Retrieve the gradient accumulated so far for the current node.
-            // Clone it because `grad_fn.backward` needs an immutable reference to the gradient,
-            // while the HashMap needs to be passed mutably for accumulation.
-            let grad_to_propagate = match gradients.get(&node_ptr) {
-                Some(grad) => grad.clone(),
-                // If a node doesn't have a gradient yet (e.g., it didn't require grad, 
-                // or it's a leaf node that isn't `self`), we can skip it.
-                None => continue, 
-            };
-            
-            // Get the operation (BackwardOp) that produced this node, if any.
-            let grad_fn = node.grad_fn(); // Clones the Rc<dyn BackwardOp>
-            
-            // If this node was created by an operation (i.e., it has a grad_fn),
-            // call its backward method to compute and accumulate gradients for its inputs.
-            if let Some(grad_fn_op) = grad_fn {
-                 // The `backward` method of the specific operation (e.g., AddBackward, MulBackward)
-                 // will calculate the local gradients with respect to its inputs and 
-                 // use the `gradients` HashMap to add these local gradients to the 
-                 // gradients accumulated so far for those inputs.
-                 grad_fn_op.backward(&grad_to_propagate, &mut gradients);
-            }
-        }
-
-        // --- 5. Copy final gradients into the TensorData --- 
-        // After the pass, the `gradients` HashMap holds the final computed gradients.
-        // We copy these back into the `.grad` field of each TensorData 
-        // for external access via the `tensor.grad()` method.
-        // Iterate through the raw pointers of visited nodes.
-        for node_ptr in visited { // node_ptr is *const RefCell<TensorData<T>>
-            // Use remove to take ownership of the gradient Tensor from the HashMap,
-            // using the node_ptr directly as the key.
-            if let Some(final_grad) = gradients.remove(&node_ptr) {
-                 // UNSAFE: Dereference the raw pointer to access the RefCell.
-                 // This assumes the pointer is valid and the underlying Rc/RefCell 
-                 // still exists and is not mutably borrowed elsewhere (which should 
-                 // hold true if the backward pass logic is correct).
-                 unsafe {
-                     // (*node_ptr) dereferences the pointer to get the RefCell<TensorData<T>>.
-                     // .borrow_mut() then borrows the contents mutably. Panics if already borrowed mutably.
-                     let mut td = (*node_ptr).borrow_mut();
-                     // Assign the final gradient.
-                     td.grad = Some(final_grad);
+            if gradients.contains_key(&node_ptr) {
+                 let grad_to_propagate = gradients.get(&node_ptr).expect("Checked contains key").clone(); 
+                 println!("[Tensor::backward]  Node {:?} has gradient.", node_ptr);
+                 if let Some(grad_fn_op) = node.grad_fn() { 
+                     println!("[Tensor::backward]  Node {:?} has grad_fn. Calling its backward...", node_ptr);
+                     grad_fn_op.backward(&grad_to_propagate, &mut gradients);
+                     println!("[Tensor::backward]  ...backward call finished for node {:?}", node_ptr);
+                 } else {
+                     println!("[Tensor::backward]  Node {:?} is a leaf or has no grad_fn.", node_ptr);
                  }
+            } else {
+                 println!("[Tensor::backward]  Node {:?} has no gradient yet.", node_ptr);
             }
         }
+        println!("[Tensor::backward] Propagation loop finished.");
+
+        // --- 5. Copy final gradients to TensorData --- 
+        println!("[Tensor::backward] Final gradients map keys: {:?}", gradients.keys().collect::<Vec<_>>());
+        for node_ptr in visited { 
+            if gradients.contains_key(&node_ptr) { // Check if grad exists before removing
+                 println!("[Tensor::backward] Checking assignment for node {:?}", node_ptr);
+                 let requires_grad_flag = unsafe { (*node_ptr).borrow().requires_grad };
+                 if requires_grad_flag { 
+                      let final_grad = gradients.remove(&node_ptr).unwrap(); // Now remove safely
+                      println!("[Tensor::backward]   Node requires grad. Assigning gradient.");
+                      unsafe {
+                          let mut td = (*node_ptr).borrow_mut();
+                          td.grad = Some(final_grad);
+                      }
+                 } else {
+                     println!("[Tensor::backward]   Node does NOT require grad. Skipping assignment.");
+                 }
+            } else {
+                println!("[Tensor::backward] No final gradient found for visited node {:?}", node_ptr);
+            }
+        }
+        println!("[Tensor::backward] Finished.");
     }
 
     /// Returns a clone of the gradient function Rc, if it exists.

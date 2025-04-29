@@ -107,7 +107,7 @@ mod tests {
         grad_values: Vec<T>
     )
     where 
-        T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T>,
+        T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T> + PartialEq,
     {
         assert_eq!(tensor.numel(), grad_values.len(), "Tensor numel must match grad_values length");
         tensor.set_requires_grad(true);

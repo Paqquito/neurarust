@@ -184,8 +184,8 @@ mod tests {
         grad_values: Vec<T>
     )
     where 
-        // Required bounds based on operations used (Mul, Sum, Backward)
-        T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T>,
+        // Added PartialEq to support Tensor::backward bound
+        T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T> + PartialEq,
     {
         assert_eq!(tensor.numel(), grad_values.len(), "Tensor numel must match grad_values length");
         tensor.set_requires_grad(true);
@@ -198,19 +198,25 @@ mod tests {
     }
 
     // Type alias for tests
-    type TestFloat = f32;
+    type TestFloat = f64;
 
-    // Helper to create tensor requiring grad
-    fn create_grad_tensor(data: Vec<TestFloat>, shape: Vec<usize>) -> Tensor<TestFloat> {
+    // Helper to create a tensor with *generated* gradients using backward()
+    fn create_grad_tensor(data: Vec<TestFloat>, shape: Vec<usize>, grad_data: Vec<TestFloat>) -> Tensor<TestFloat> 
+    where
+        // Bounds needed by generate_gradient
+        TestFloat: Mul<Output = TestFloat> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=TestFloat> + PartialEq,
+    {
+        // Create tensor 
         let t = Tensor::new(data, shape);
-        t.set_requires_grad(true);
+        // Use generate_gradient to populate the .grad field via backward()
+        generate_gradient(&t, grad_data);
         t
     }
 
     #[test]
     fn test_adam_zero_grad() {
-        let mut p1 = create_grad_tensor(vec![1.0, 2.0], vec![2]);
-        let mut p2 = create_grad_tensor(vec![3.0, 4.0], vec![2]);
+        let mut p1 = create_grad_tensor(vec![1.0, 2.0], vec![2], vec![0.1, 0.2]);
+        let mut p2 = create_grad_tensor(vec![3.0, 4.0], vec![2], vec![0.3, 0.4]);
         p2.set_requires_grad(false); // p2 doesn't need grad calculation itself
 
         // Generate gradient only on p1
@@ -233,8 +239,9 @@ mod tests {
 
     #[test]
     fn test_adam_step_basic() {
-        let mut param1 = create_grad_tensor(vec![1.0, 2.0], vec![2]);
-        let mut param2 = create_grad_tensor(vec![3.0, 4.0], vec![2]);
+        let mut p1 = create_grad_tensor(vec![1.0, 2.0], vec![2], vec![0.1, 0.2]);
+        let mut p2 = create_grad_tensor(vec![3.0, 4.0], vec![2], vec![0.3, 0.4]);
+        let mut p3 = Tensor::new(vec![5.0], vec![1]);
 
         let lr = 0.001;
         let betas = (0.9, 0.999);
@@ -244,11 +251,11 @@ mod tests {
         // --- Step 1 --- 
         let grad1_s1 = vec![0.1, 0.2];
         let grad2_s1 = vec![0.3, 0.4];
-        generate_gradient(&param1, grad1_s1.clone());
-        generate_gradient(&param2, grad2_s1.clone());
+        generate_gradient(&p1, grad1_s1.clone());
+        generate_gradient(&p2, grad2_s1.clone());
         
         {
-            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut param1, &mut param2];
+            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut p1, &mut p2, &mut p3];
             optimizer.step(&mut params_slice);
         } 
         
@@ -288,8 +295,8 @@ mod tests {
         let expected_p2_s1 = vec![3.0 - update2_1, 4.0 - update2_2];
 
         // Check results of step 1
-        check_data_approx(&param1, &expected_p1_s1);
-        check_data_approx(&param2, &expected_p2_s1);
+        check_data_approx(&p1, &expected_p1_s1);
+        check_data_approx(&p2, &expected_p2_s1);
 
         // --- Step 2 --- 
         // Need previous moments m1_1, v1_1 etc. for calculation
@@ -300,14 +307,14 @@ mod tests {
         
         // Generate new gradients
         // Need to zero previous grad first before generating new one
-        optimizer.zero_grad(&mut [&mut param1, &mut param2]);
+        optimizer.zero_grad(&mut [&mut p1, &mut p2, &mut p3]);
         let grad1_s2 = vec![0.5, 0.6];
         let grad2_s2 = vec![0.7, 0.8];
-        generate_gradient(&param1, grad1_s2.clone());
-        generate_gradient(&param2, grad2_s2.clone());
+        generate_gradient(&p1, grad1_s2.clone());
+        generate_gradient(&p2, grad2_s2.clone());
 
         {
-            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut param1, &mut param2];
+            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut p1, &mut p2, &mut p3];
             optimizer.step(&mut params_slice);
         }
         
@@ -345,7 +352,7 @@ mod tests {
         let expected_p2_s2 = vec![expected_p2_s1[0] - update2_1_s2, expected_p2_s1[1] - update2_2_s2];
 
         // Check results of step 2
-        check_data_approx(&param1, &expected_p1_s2);
-        check_data_approx(&param2, &expected_p2_s2);
+        check_data_approx(&p1, &expected_p1_s2);
+        check_data_approx(&p2, &expected_p2_s2);
     }
 }
