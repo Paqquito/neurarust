@@ -40,22 +40,32 @@ pub(crate) fn accumulate_gradient<T>(
     local_gradient: Tensor<T>,
 )
 where
-    // Required bounds for the function logic:
     T: AddAssign + Clone + Debug + Zero + Copy + 'static, 
 {
-    // Need Rc for as_ptr, Weak for upgrade, HashMap for entry/or_insert 
-    // Tensor for shape/AddAssign, RefCell for pointer key type
-    // Zero/AddAssign/Clone/Debug/Copy/'static are trait bounds on T.
-    // These should all be available from the context.
     if let Some(input_rc) = input_weak_ref.upgrade() {
         let input_ptr = Rc::as_ptr(&input_rc);
+        
+        // Clone local_gradient data *before* accessing the HashMap entry
+        // to avoid potential borrow conflicts if local_gradient somehow depends
+        // on what's being modified.
+        // Note: accumulate_gradient takes ownership of local_gradient now.
+        let local_gradient_clone = local_gradient.clone(); 
+
         gradients.entry(input_ptr)
             .and_modify(|existing_grad| {
-                assert_eq!(existing_grad.shape(), local_gradient.shape(), 
+                assert_eq!(existing_grad.shape(), local_gradient_clone.shape(), 
                            "Gradient shape mismatch during accumulation: existing {:?} vs new {:?}",
-                           existing_grad.shape(), local_gradient.shape());
-                *existing_grad += &local_gradient;
+                           existing_grad.shape(), local_gradient_clone.shape());
+                
+                // Manual element-wise addition using the clone
+                let mut existing_data = existing_grad.borrow_tensor_data_mut();
+                // Borrow data from the clone immutably
+                let local_gradient_data = local_gradient_clone.borrow_tensor_data(); 
+                
+                existing_data.data.iter_mut()
+                    .zip(local_gradient_data.data.iter())
+                    .for_each(|(e, &l)| *e += l); 
             })
-            .or_insert(local_gradient);
+            .or_insert(local_gradient); // Insert the original local_gradient (moves ownership)
     }
 } 

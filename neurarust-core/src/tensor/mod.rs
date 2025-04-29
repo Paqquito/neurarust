@@ -2,11 +2,10 @@
 use std::cell::{Ref, RefCell, RefMut};
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-use std::ops::{AddAssign, Sub, Mul, Neg};
+use std::ops::{AddAssign, Mul};
 use std::rc::{Rc, Weak};
-use std::iter::Sum as IterSum;
 
-use num_traits::{Zero, One, Pow, FromPrimitive};
+use num_traits::{Float, Zero, One};
 
 use crate::tensor_data::TensorData;
 use crate::autograd::{BackwardOp, graph::build_topo};
@@ -358,12 +357,19 @@ impl<T> Tensor<T> {
     }
 
     /// Computes the element-wise square root of the tensor.
+    /// This operation supports autograd.
+    /// 
+    /// # Returns
+    /// A new tensor containing the square root of each element.
+    /// 
+    /// # Panics
+    /// Typically panics if the tensor contains negative values when using standard floats,
+    /// or might produce NaN depending on the float type's behavior.
     pub fn sqrt(&self) -> Tensor<T>
     where
-        T: Pow<T, Output = T> + FromPrimitive + Mul<Output=T> + AddAssign + Copy + Clone + Debug + 'static + One + Zero + Sub<Output=T> + Neg<Output=T> + IterSum + Default,
+        T: Float + Debug + 'static + Clone + Zero + One + AddAssign + Default + Copy + Mul<Output = T>,
     {
-        let half = T::from_f64(0.5).expect("Cannot represent 0.5 in tensor type T for sqrt");
-        self.pow(half)
+        crate::ops::math_elem::SqrtOp::forward(self)
     }
 
     /// Stacks a sequence of tensors along a new dimension.
