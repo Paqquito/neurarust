@@ -132,66 +132,62 @@ where
 {
     let grad_shape = grad.shape();
     if grad_shape == target_shape {
-        return grad.clone(); // No reduction needed if shapes already match
+        return grad.clone();
     }
 
-    // Handle reduction to scalar explicitly for clarity and efficiency.
-    // A scalar target shape means we need to sum the gradient over all its dimensions.
+    // Handle reduction to scalar target
     if target_shape.is_empty() {
         let axes_to_sum = (0..grad_shape.len()).collect::<Vec<_>>();
-        // Use sum_axes with keep_dims=false to produce a scalar tensor (shape []).
-        // Note: Tensor::new expects shape `[]` for scalar, not `[1]`.
-        // If Tensor::sum_axes returns shape [1] for scalar, we might need reshape.
-        // Assuming Tensor::sum_axes(..., false) correctly produces shape [].
-        return grad.sum_axes(&axes_to_sum, false);
+        return grad.sum_axes(&axes_to_sum, false); // keep_dims=false produces scalar shape []
     }
 
     let rank_diff = grad_shape.len().saturating_sub(target_shape.len());
     let mut axes_to_sum = Vec::new();
 
-    // Identify axes to sum:
-    // 1. Dimensions that were added (prepended) to the target shape during broadcasting.
-    // These correspond to the first `rank_diff` dimensions of the gradient tensor.
+    // 1. Sum dimensions that were prepended
     for i in 0..rank_diff {
         axes_to_sum.push(i);
     }
 
-    // 2. Dimensions that were originally 1 in the target shape but are > 1 in the gradient's shape.
-    // These dimensions were expanded during broadcasting.
+    // 2. Sum dimensions that were broadcasted from 1
     for i in 0..target_shape.len() {
         let grad_dim_index = rank_diff + i;
-        // Ensure we don't go out of bounds for grad_shape (can happen if target_shape is longer? Unlikely)
         if grad_dim_index < grad_shape.len() 
-           && target_shape[i] == 1         // Dimension was 1 in the original input
-           && grad_shape[grad_dim_index] != 1 // Dimension is > 1 in the gradient (result of broadcast)
+           && target_shape[i] == 1
+           && grad_shape[grad_dim_index] != 1 
         {
-             // Avoid adding the same axis twice if it was already added in step 1 (rank_diff)
              if !axes_to_sum.contains(&grad_dim_index) {
                 axes_to_sum.push(grad_dim_index);
              }
         }
     }
     
-    // Perform the summation along the identified axes.
-    if !axes_to_sum.is_empty() {
-        // We use `keep_dims=true` here. This ensures the resulting tensor still has the same
-        // number of dimensions as the input `grad`, but with size 1 in the summed dimensions.
-        // This is often the desired behavior for gradient reduction in autograd frameworks,
-        // as it simplifies further operations if needed. The final shape might not exactly
-        // match `target_shape` if target_shape had fewer dimensions, but it represents the
-        // correctly summed gradient values projected back into the higher-rank space.
-        // Example: grad [2,3], target [3] -> axes_to_sum=[0] -> result [1,3]
-        // Example: grad [2,3], target [1] -> axes_to_sum=[0,1] -> result [1,1]
-        grad.sum_axes(&axes_to_sum, true) 
+    // Perform summation (keep_dims=false removes summed axes)
+    let summed_grad = if !axes_to_sum.is_empty() {
+        grad.sum_axes(&axes_to_sum, false) 
     } else {
-        // If shapes differ but no axes to sum were identified, it might indicate an issue
-        // in the broadcasting logic or an unexpected input.
-        // Warn and return a clone as a safe fallback, though this case shouldn't ideally happen.
+        // If shapes differ but no axes to sum, this is likely an error, but return clone for now.
         eprintln!(
             "Warning: reduce_gradient inconsistency. Shapes {:?} and {:?} differ, but no axes to sum found.",
             grad_shape, target_shape
         );
         grad.clone()
+    };
+
+    // Reshape the summed gradient to exactly match the target shape.
+    // sum_axes(keep_dims=false) might return a shape that needs adjustment.
+    // Example: grad=[2,3], target=[3] -> sum(axis=0, keep_dims=false) -> summed_grad=[3]
+    // Example: grad=[2,1,3], target=[1,3] -> sum(axis=0, keep_dims=false) -> summed_grad=[1,3]
+    // Example: grad=[2,3], target=[1] -> sum(axes=[0,1], keep_dims=false) -> summed_grad=[] (scalar)
+    // This reshape ensures the final gradient has the *exact* dimensions required.
+    if summed_grad.shape() != target_shape {
+         // This assert ensures the number of elements matches before reshaping.
+         assert_eq!(summed_grad.numel(), target_shape.iter().product::<usize>(), 
+                    "Element count mismatch after summing gradient. Summed shape: {:?}, Target shape: {:?}",
+                    summed_grad.shape(), target_shape);
+        summed_grad.reshape(target_shape.to_vec())
+    } else {
+        summed_grad
     }
 }
 

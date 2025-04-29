@@ -215,25 +215,27 @@ mod tests {
 
     #[test]
     fn test_adam_zero_grad() {
-        let mut p1 = create_grad_tensor(vec![1.0, 2.0], vec![2], vec![0.1, 0.2]);
-        let mut p2 = create_grad_tensor(vec![3.0, 4.0], vec![2], vec![0.3, 0.4]);
-        p2.set_requires_grad(false); // p2 doesn't need grad calculation itself
-
-        // Generate gradient only on p1
+        type TestFloat = f64;
+        let mut p1 = Tensor::new(vec![1.0, 2.0], vec![2]);
+        // Créer p2 sans gradient initial
+        let mut p2 = Tensor::new(vec![3.0, 4.0], vec![2]); 
+        p2.set_requires_grad(false); // p2 n'a pas besoin de gradient
+        
+        // Générer un gradient uniquement pour p1
         let initial_grad_p1 = vec![0.1, 0.2];
         generate_gradient(&p1, initial_grad_p1.clone());
+        
         assert!(p1.grad().is_some(), "p1 should have gradient after generate_gradient");
         check_data_approx(&p1.grad().unwrap(), &initial_grad_p1);
+        // Vérifier que p2 n'a pas de gradient
         assert!(p2.grad().is_none(), "p2 should not have gradient initially");
 
-        let optim: Adam<TestFloat> = Adam::new(0.001, (0.9, 0.999), 1e-8);
-
+        let optim: Adam<TestFloat> = Adam::new(0.1, (0.9, 0.999), 1e-8);
         let mut params_slice = [&mut p1, &mut p2];
         optim.zero_grad(&mut params_slice);
 
-        // Check state after zero_grad
         assert!(p1.grad().is_some(), "p1 gradient should still exist after zero_grad");
-        check_data_approx(&p1.grad().unwrap(), &[0.0, 0.0]); // Check if zeroed
+        check_data_approx(&p1.grad().unwrap(), &[0.0, 0.0]); 
         assert!(p2.grad().is_none(), "p2 gradient should remain None after zero_grad");
     }
 

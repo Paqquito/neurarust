@@ -58,8 +58,8 @@ where
         // Bias tensor shape: [out_features]
         let bias_param = if has_bias {
             let bias_data = vec![T::zero(); out_features];
-            let bias_tensor = Tensor::new(bias_data, vec![out_features]);
-            Some(Parameter::new(bias_tensor)) // Wrap in Parameter
+            let bias_tensor = Tensor::new(bias_data, vec![out_features]); 
+            Some(Parameter::new(bias_tensor))
         } else {
             None
         };
@@ -90,6 +90,7 @@ where
         let output = linalg::matmul(input, &weight_transposed);
         
         let final_output = if let Some(ref bias_param) = self.bias {
+             let bias_tensor_ref = bias_param.deref();
              let output_shape = output.shape();
              let bias_shape = bias_param.shape(); 
              
@@ -109,12 +110,12 @@ where
                  if bias_param.requires_grad() { broadcasted_bias.set_requires_grad(true); }
                  
                  // Utiliser l'opérateur Add pour &Tensor + &Tensor
-                 &output + &broadcasted_bias 
+                 &output + bias_tensor_ref 
              
              // Cas 2: Output et Bias ont la même forme (ex: [N])
              } else if output_shape == bias_param.shape() { 
                   // Déréférencer Parameter vers &Tensor<T> pour l'addition
-                  &output + bias_param.deref() // Utiliser Add pour &Tensor + &Tensor
+                  &output + bias_tensor_ref // Utiliser Add pour &Tensor + &Tensor
              } else {
                  panic!("Cannot broadcast bias shape {:?} to output shape {:?}", bias_shape, output_shape);
              }
@@ -257,14 +258,9 @@ mod tests {
         assert!((output.data()[0] - 110.1).abs() < 1e-6, "Output data mismatch");
         assert!(output.grad_fn().is_some());
 
-        // Create scalar loss
         let loss = output.sum();
-
-        // println!("\nDEBUG test_linear_backward_simple: Running backward on loss...");
         loss.backward(None);
-        // println!("DEBUG test_linear_backward_simple: Backward finished.");
 
-        // println!("DEBUG test_linear_backward_simple: Checking input grad...");
         let grad_input_opt = input.grad();
         assert!(grad_input_opt.is_some(), "Input gradient missing");
         let grad_input = grad_input_opt.unwrap();
@@ -272,7 +268,6 @@ mod tests {
         assert!((grad_input.data()[0] - 3.0).abs() < 1e-6, "Input grad[0] mismatch");
         assert!((grad_input.data()[1] - 4.0).abs() < 1e-6, "Input grad[1] mismatch");
         
-        // println!("DEBUG test_linear_backward_simple: Checking weight grad...");
         let grad_weight_opt = linear.weight.grad();
         assert!(grad_weight_opt.is_some(), "Weight gradient missing");
         let grad_weight = grad_weight_opt.unwrap();
@@ -280,7 +275,6 @@ mod tests {
         assert!((grad_weight.data()[0] - 10.0).abs() < 1e-6, "Weight grad[0] mismatch");
         assert!((grad_weight.data()[1] - 20.0).abs() < 1e-6, "Weight grad[1] mismatch");
 
-        // println!("DEBUG test_linear_backward_simple: Checking bias grad...");
         let bias_param = linear.bias.as_ref().unwrap();
         let grad_bias_opt = bias_param.grad();
         assert!(grad_bias_opt.is_some(), "Bias gradient missing");
@@ -306,32 +300,23 @@ mod tests {
         assert!(output.requires_grad());
 
         let loss = output.sum();
-        // println!("\nDEBUG test_linear_backward_batch: Running backward...");
         loss.backward(None);
-        // println!("DEBUG test_linear_backward_batch: Backward finished.");
 
-        // println!("DEBUG test_linear_backward_batch: Checking input grad...");
         let grad_input_opt = input.grad();
         assert!(grad_input_opt.is_some(), "Input gradient missing");
         let grad_input = grad_input_opt.unwrap();
         check_tensor(&grad_input, &[2, 3], false);
 
-        // println!("DEBUG test_linear_backward_batch: Checking weight grad...");
         let grad_weight_opt = linear.weight.grad();
         assert!(grad_weight_opt.is_some(), "Weight gradient missing");
         let grad_weight = grad_weight_opt.unwrap();
         check_tensor(&grad_weight, &[4, 3], false);
         
-        // println!("DEBUG test_linear_backward_batch: Checking bias grad...");
         let bias_param = linear.bias.as_ref().unwrap();
         let grad_bias_opt = bias_param.grad();
         assert!(grad_bias_opt.is_some(), "Bias gradient missing");
         let grad_bias = grad_bias_opt.unwrap();
         check_tensor(&grad_bias, &[4], false);
-        // dLoss/dBias = Sum(dLoss/dOutput, axis=0)
-        // dLoss/dOutput is 1.0 for every element because loss = output.sum()
-        // So grad_bias should be [batch_size, batch_size, ..., batch_size]
-        // Here batch_size is 2. So expected grad is [2.0, 2.0, 2.0, 2.0]
         assert_eq!(grad_bias.data().to_vec(), vec![2.0_f32, 2.0, 2.0, 2.0], "Bias grad data mismatch");
     }
 }
