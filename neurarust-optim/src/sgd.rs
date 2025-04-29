@@ -83,7 +83,7 @@ mod tests {
     // use crate::Optimizer; // No longer needed in tests directly if we use concrete type
     use num_traits::{Float, Zero, One, FromPrimitive};
     use std::fmt::Debug;
-    use std::ops::{Mul, SubAssign, AddAssign, Neg, Div};
+    use std::ops::{Mul, AddAssign, Neg};
     use std::iter::Sum;
 
     // Helper to check approximate data equality - Use relative tolerance based on T::epsilon()

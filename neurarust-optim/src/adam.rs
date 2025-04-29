@@ -158,9 +158,9 @@ where
 mod tests {
     use super::*;
     use neurarust_core::tensor::Tensor;
-    use num_traits::{Zero, One, Float, FromPrimitive, Pow};
+    use num_traits::{Zero, One, Float, FromPrimitive};
     use std::fmt::Debug;
-    use std::ops::{AddAssign, Mul, Sub, Neg, Div};
+    use std::ops::{AddAssign, Mul, Neg};
     use std::iter::Sum;
 
     // Helper to check approximate data equality - Copied from sgd.rs tests

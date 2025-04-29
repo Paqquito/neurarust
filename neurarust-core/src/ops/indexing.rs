@@ -1,7 +1,7 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
-use crate::tensor::utils::{calculate_strides, index_to_coord};
+use crate::tensor::utils::calculate_strides;
 use std::ops::{Range, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -264,7 +264,7 @@ where
 mod tests {
     use super::*;
     use crate::Tensor;
-    use std::ops::{Range, AddAssign};
+    use std::ops::AddAssign;
     use num_traits::Zero;
     use std::fmt::Debug;
     use std::collections::HashMap;

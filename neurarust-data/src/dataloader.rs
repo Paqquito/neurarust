@@ -46,6 +46,7 @@ impl<I, T, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> DataLoader<I, T, D> {
     }
 
     /// Resets the iterator, optionally shuffling the indices if `shuffle` is true.
+    #[allow(dead_code)] // Keep reset for potential future use (e.g., manual epoch reset)
     fn reset(&mut self) {
         self.current_pos = 0;
         if self.shuffle {
@@ -146,18 +147,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{VecDataset, Dataset};
+    use crate::VecDataset; // Removed unused 'Dataset' import
     use neurarust_core::tensor::Tensor;
     use std::collections::HashSet;
-    use num_traits::{Zero, One};
-    use std::ops::AddAssign;
-    use std::fmt::Debug;
+    
+    
+    
 
     #[test]
     fn test_dataloader_basic_iteration_no_shuffle() {
         let inputs_data = vec![1i32, 2, 3, 4, 5];
         let targets_data = vec![10i32, 20, 30, 40, 50];
-        let dataset_len = inputs_data.len();
+        let _dataset_len = inputs_data.len(); // Prefixed with _ as it's unused in this test
         let batch_size = 2;
 
         let inputs = inputs_data.iter().map(|&x| Tensor::new(vec![x], vec![1])).collect::<Vec<_>>();

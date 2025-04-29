@@ -1,4 +1,3 @@
-use neurarust_core::tensor::Tensor;
 
 /// Trait representing a dataset.
 /// 
