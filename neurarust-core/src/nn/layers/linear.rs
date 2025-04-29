@@ -4,15 +4,10 @@ use crate::nn::parameter::Parameter;
 use std::fmt::{Debug};
 use num_traits::{Zero, One}; // Need Zero/One for data initialization and ops
 use std::ops::{Add, Mul, AddAssign, Neg, Deref, Sub}; // Ops for forward/backward - Added Deref back
-use std::rc::Weak;
 use std::cell::RefCell;
-use std::marker::PhantomData;
-use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
-use std::iter::Sum as IterSum; // Added IterSum import
-use std::collections::HashMap;
 use crate::ops::linalg;
-use std::iter::Sum; // Import Sum trait
+use std::iter::Sum; // Restore Sum trait import
 
 // Placeholder for random initialization
 fn simple_uniform_init<T>(rows: usize, cols: usize) -> Vec<T> 
@@ -40,7 +35,7 @@ impl<T> Linear<T>
 where 
     T: Zero + One + Copy + Clone + 'static + Debug + PartialEq 
        + AddAssign + Mul<Output=T> + Add<Output=T> 
-       + Neg<Output=T> + Sub<Output=T> + IterSum, // Added missing bounds (Sub, Sum, Add was already there)
+       + Neg<Output=T> + Sub<Output=T> + Sum, // Changed IterSum to Sum
 {
     /// Creates a new Linear layer.
     ///

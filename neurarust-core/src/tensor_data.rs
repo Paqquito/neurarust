@@ -9,6 +9,7 @@ use crate::tensor::Tensor; // Need Tensor for grad field
 pub struct TensorData<T> {
     pub data: Vec<T>,
     pub shape: Vec<usize>,
+    pub strides: Vec<usize>,
     pub requires_grad: bool,
     pub grad: Option<Tensor<T>>,
     pub grad_fn: Option<Rc<dyn BackwardOp<T>>>,
@@ -21,6 +22,7 @@ impl<T: Debug> Debug for TensorData<T> {
         f.debug_struct("TensorData")
          .field("data", &self.data)
          .field("shape", &self.shape)
+         .field("strides", &self.strides)
          .field("requires_grad", &self.requires_grad)
          .field("grad_defined", &self.grad.is_some())
          .field("grad_fn_defined", &self.grad_fn.is_some())
@@ -40,8 +42,36 @@ impl<T: PartialEq> PartialEq for TensorData<T> {
 impl<T: Eq> Eq for TensorData<T> {}
 
 impl<T> TensorData<T> {
+    // Public constructor - Takes data and shape, calculates contiguous strides
+    pub fn new(data: Vec<T>, shape: Vec<usize>) -> Self {
+        let numel: usize = shape.iter().product();
+        assert_eq!(data.len(), numel, "Data length {} does not match shape {:?}", data.len(), shape);
+        let strides = Self::calculate_contiguous_strides(&shape);
+        TensorData {
+            data,
+            shape,
+            strides,
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
+            _ctx: None,
+        }
+    }
+    
+    // Calculates strides for a contiguous tensor
+    pub fn calculate_contiguous_strides(shape: &[usize]) -> Vec<usize> {
+        let mut strides = vec![0; shape.len()];
+        if shape.is_empty() { return strides; } // Handle empty shape (scalar)
+        
+        strides[shape.len() - 1] = 1;
+        for i in (0..shape.len() - 1).rev() {
+            strides[i] = strides[i + 1] * shape[i + 1];
+        }
+        strides
+    }
+    
     // Helper to get number of elements, used internally
     pub fn numel(&self) -> usize {
-        self.data.len()
+        self.shape.iter().product()
     }
 } 

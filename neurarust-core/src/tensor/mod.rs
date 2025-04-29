@@ -27,31 +27,16 @@ pub struct Tensor<T> {
 impl<T> Tensor<T> {
     // --- Constructors and Basic Properties ---
     /// Creates a new tensor with the given data and shape.
+    /// Calculates contiguous strides.
     pub fn new(data: Vec<T>, shape: Vec<usize>) -> Self where T: Clone {
-        let numel = if shape.is_empty() {
-            1 // Scalar tensor has 1 element
-        } else {
-            shape.iter().product()
-        };
-        assert_eq!(data.len(), numel, 
-            "Data length ({}) does not match shape {:?} (expected {} elements)", 
-            data.len(), shape, numel);
-        
-        // Initialize TensorData directly
-        let tensor_data = TensorData {
-            data,
-            shape,
-            requires_grad: false,
-            grad: None,
-            grad_fn: None,
-            _ctx: None,
-        };
+        // Utilise le nouveau constructeur TensorData::new qui calcule les strides
+        let tensor_data = TensorData::new(data, shape);
         Tensor { data: Rc::new(RefCell::new(tensor_data)) }
     }
 
     /// Creates a new tensor that requires gradient tracking.
     pub fn new_with_grad(data: Vec<T>, shape: Vec<usize>) -> Self where T: Clone + Debug {
-        let tensor = Tensor::new(data, shape);
+        let tensor = Tensor::new(data, shape); // Calls the updated new()
         tensor.set_requires_grad(true);
         tensor
     }
@@ -61,7 +46,7 @@ impl<T> Tensor<T> {
         let shape = other.shape();
         let numel = shape.iter().product::<usize>();
         let data = vec![T::zero(); numel];
-        Tensor::new(data, shape)
+        Tensor::new(data, shape) // Calls the updated new()
     }
 
     /// Returns the shape of the tensor.
@@ -115,9 +100,14 @@ impl<T> Tensor<T> {
         // A proper reshape should ideally modify the shape in-place or create a view.
         // For now, let's assume this reshape is mainly for non-gradient tensors or specific internal uses.
         let data_clone = self.data().to_vec(); // Clone data for the new tensor
+        
+        // Calculate contiguous strides for the new shape
+        let new_strides = TensorData::<T>::calculate_contiguous_strides(&new_shape);
+        
         let new_tensor_data = TensorData {
             data: data_clone,
             shape: new_shape,
+            strides: new_strides, // Add calculated strides
             requires_grad: false, // Reshaped tensor does not track grad by default
             grad: None,
             grad_fn: None, // No grad_fn for basic reshape
