@@ -166,18 +166,17 @@ mod tests {
         t1.set_requires_grad(true); 
         let t_sqrt = SqrtOp::forward(&t1); // sqrt(4) = 2
         
-        // Simplify the operation: Use clone instead of add
-        // If this passes, the issue is likely in AddBackward or its interaction
-        let t_final = t_sqrt.clone(); 
+        // Restore original operation using Add
+        let t_final = &t_sqrt + &t_sqrt; // Should trigger AddBackward
         
         t_final.backward(None); 
         
-        // Expected gradient: d(clone)/d(t_sqrt) * d(t_sqrt)/d(t1)
-        // d(clone)/d(t_sqrt) = 1 (assuming clone op correctly implemented for autograd or doesn't interfere)
+        // Expected gradient: d(final)/d(t_sqrt) * d(t_sqrt)/d(t1)
+        // d(final)/d(t_sqrt) = 1 + 1 = 2 (since t_sqrt is used twice)
         // d(sqrt)/d(t1) = 1 / (2 * sqrt(t1)) = 1 / (2 * 2) = 0.25
-        // Total gradient = 1 * 0.25 = 0.25
+        // Total gradient = 2 * 0.25 = 0.5
         let grad = t1.grad().unwrap();
-        assert_approx_eq_float(Ref::map(grad.borrow_tensor_data(), |d| &d.data)[0], 0.25, 1e-9 as TestType);
+        assert_approx_eq_float(Ref::map(grad.borrow_tensor_data(), |d| &d.data)[0], 0.5, 1e-9 as TestType);
     }
 
     #[test]

@@ -4,7 +4,7 @@ use std::cell::RefCell;
 use std::rc::Weak;
 use std::collections::HashMap;
 use std::rc::Rc;
-use std::ops::AddAssign;
+use std::ops::{AddAssign, Add};
 use std::fmt::Debug;
 use num_traits::Zero;
 
@@ -40,32 +40,33 @@ pub(crate) fn accumulate_gradient<T>(
     local_gradient: Tensor<T>,
 )
 where
-    T: AddAssign + Clone + Debug + Zero + Copy + 'static, 
+    // Bounds for manual addition and tensor creation
+    T: Add<Output = T> + AddAssign + Clone + Debug + Zero + Copy + 'static, 
 {
     if let Some(input_rc) = input_weak_ref.upgrade() {
         let input_ptr = Rc::as_ptr(&input_rc);
         
-        // Clone local_gradient data *before* accessing the HashMap entry
-        // to avoid potential borrow conflicts if local_gradient somehow depends
-        // on what's being modified.
-        // Note: accumulate_gradient takes ownership of local_gradient now.
+        // Clone local_gradient for potential use in and_modify
         let local_gradient_clone = local_gradient.clone(); 
 
         gradients.entry(input_ptr)
-            .and_modify(|existing_grad| {
+            .and_modify(|existing_grad| { // existing_grad: &mut Tensor<T>
                 assert_eq!(existing_grad.shape(), local_gradient_clone.shape(), 
                            "Gradient shape mismatch during accumulation: existing {:?} vs new {:?}",
                            existing_grad.shape(), local_gradient_clone.shape());
                 
-                // Manual element-wise addition using the clone
-                let mut existing_data = existing_grad.borrow_tensor_data_mut();
-                // Borrow data from the clone immutably
-                let local_gradient_data = local_gradient_clone.borrow_tensor_data(); 
+                // Calculate summed data without modifying existing_grad directly
+                let summed_data: Vec<T> = existing_grad.borrow_tensor_data().data.iter() // Immutable borrow of existing
+                    .zip(local_gradient_clone.borrow_tensor_data().data.iter()) // Immutable borrow of clone
+                    .map(|(&e, &l)| e + l) // Requires T: Add + Copy
+                    .collect();
                 
-                existing_data.data.iter_mut()
-                    .zip(local_gradient_data.data.iter())
-                    .for_each(|(e, &l)| *e += l); 
+                // Create a new tensor with the summed data
+                let summed_grad = Tensor::new(summed_data, existing_grad.shape()); 
+                
+                // Replace the existing tensor in the map with the new one
+                *existing_grad = summed_grad; // Moves ownership of summed_grad
             })
-            .or_insert(local_gradient); // Insert the original local_gradient (moves ownership)
+            .or_insert(local_gradient); // Moves ownership of original local_gradient
     }
 } 
