@@ -104,18 +104,21 @@ where
     let b_data = b.borrow_tensor_data();
 
     // --- Naive MatMul Calculation (C[i,j] = sum(A[i,k]*B[k,j])) ---
+    // Use get_offset for stride-aware indexing
     for i in 0..m {         
         for j in 0..n {     
             let mut sum = T::zero();
             for k in 0..k_a { 
-                // A[i, k] -> index i * k_a + k
-                // B[k, j] -> index k * n + j  <-- Corrected index for B
-                let a_val = a_data.data[i * k_a + k];
-                let b_val = b_data.data[k * n + j]; 
+                let a_offset = a_data.get_offset(&[i, k]);
+                let b_offset = b_data.get_offset(&[k, j]);
+                let a_val = a_data.data[a_offset];
+                let b_val = b_data.data[b_offset]; 
                 sum += a_val * b_val;
             }
-            // C[i, j] -> index i * n + j
-            output_data[i * n + j] = sum;
+            // Output tensor is contiguous, calculate offset directly
+            // (Could also create temporary TensorData for output and use get_offset)
+            let output_offset = i * n + j; // Output C is [m, n]
+            output_data[output_offset] = sum;
         }
     }
     

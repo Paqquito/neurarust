@@ -74,4 +74,22 @@ impl<T> TensorData<T> {
     pub fn numel(&self) -> usize {
         self.shape.iter().product()
     }
+    
+    /// Calculates the linear offset into the data vector for given multi-dimensional indices.
+    /// Handles strides correctly.
+    /// Panics if the number of indices doesn't match the tensor rank or if any index is out of bounds.
+    pub fn get_offset(&self, indices: &[usize]) -> usize {
+        assert_eq!(indices.len(), self.shape.len(), 
+                   "Number of indices ({}) does not match tensor rank ({}) for shape {:?}",
+                   indices.len(), self.shape.len(), self.shape);
+                   
+        let mut offset = 0;
+        for i in 0..self.shape.len() {
+            assert!(indices[i] < self.shape[i], 
+                    "Index {} is out of bounds for dimension {} with size {} (shape: {:?})",
+                    indices[i], i, self.shape[i], self.shape);
+            offset += indices[i] * self.strides[i];
+        }
+        offset
+    }
 } 
