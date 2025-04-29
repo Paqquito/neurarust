@@ -1,6 +1,6 @@
 [workspace]
 members = [
-    "neurarust-core", "neurarust-optim",
+    "neurarust-core", "neurarust-data", "neurarust-optim",
     # D'autres crates comme neurarust-nn viendront ici
 ]
 resolver = "2" 
