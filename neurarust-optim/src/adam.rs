@@ -75,47 +75,67 @@ where
     fn step(&mut self, params: &mut [&mut Tensor<T>]) {
         self.t += 1;
         let t_usize = self.t as usize;
-        let bias_correction1 = T::one() - self.beta1.powi(t_usize as i32);
-        let bias_correction2 = T::one() - self.beta2.powi(t_usize as i32);
+        // Avoid potential division by zero if t=0 (though unlikely with u64)
+        let bc1_pow = if t_usize == 0 { T::one() } else { self.beta1.powi(t_usize as i32) };
+        let bc2_pow = if t_usize == 0 { T::one() } else { self.beta2.powi(t_usize as i32) };
+        let bias_correction1 = T::one() - bc1_pow;
+        let bias_correction2 = T::one() - bc2_pow;
+        // Avoid division by zero if bias_correction is zero (can happen if beta=1 or t is huge)
         let bc1 = if bias_correction1.is_zero() { T::epsilon() } else { bias_correction1 };
         let bc2 = if bias_correction2.is_zero() { T::epsilon() } else { bias_correction2 };
 
         for param in params.iter_mut() {
-            if let Some(grad_ref) = param.grad() {
-                let grad = grad_ref.clone();
-                let key = param.id();
-
+            // Clone the gradient tensor FIRST to avoid borrow conflicts
+            if let Some(grad_tensor) = param.grad().map(|g_ref| g_ref.clone()) { 
+                let grad_data = grad_tensor.data(); // Immutable borrow on grad clone
+                let key = param.id(); // Use param ID after cloning grad
                 let numel = param.numel();
-                let grad_data = grad.data();
 
+                assert_eq!(grad_data.len(), numel, "Gradient numel mismatch");
+
+                // Get or insert moments (these are separate tensors)
                 let m_t = self.moments1.entry(key).or_insert_with(|| Tensor::zeros_like(param));
                 let v_t = self.moments2.entry(key).or_insert_with(|| Tensor::zeros_like(param));
 
+                // --- Perform calculations using cloned grad_data and moment data --- 
+                // Borrow moment data mutably
                 let mut m_t_data = m_t.data_mut();
                 let mut v_t_data = v_t.data_mut();
-                let mut param_data = param.data_mut();
-
-                assert_eq!(m_t_data.len(), numel);
-                assert_eq!(v_t_data.len(), numel);
-                assert_eq!(param_data.len(), numel);
-                assert_eq!(grad_data.len(), numel);
 
                 let one_minus_beta1 = T::one() - self.beta1;
                 let one_minus_beta2 = T::one() - self.beta2;
 
+                // Calculate updates in a separate buffer to avoid borrowing param_data yet
+                let mut update_values = Vec::with_capacity(numel);
+
                 for i in 0..numel {
+                    // Update moments in-place
                     m_t_data[i] = self.beta1 * m_t_data[i] + one_minus_beta1 * grad_data[i];
                     let grad_i_sq = grad_data[i] * grad_data[i];
                     v_t_data[i] = self.beta2 * v_t_data[i] + one_minus_beta2 * grad_i_sq;
 
+                    // Calculate bias-corrected moments
                     let m_hat_i = m_t_data[i] / bc1;
                     let v_hat_i = v_t_data[i] / bc2;
 
+                    // Calculate the update value
                     let v_hat_sqrt_i = v_hat_i.sqrt();
                     let denom_i = v_hat_sqrt_i + self.epsilon;
                     let update_i = self.lr * m_hat_i / denom_i;
+                    update_values.push(update_i);
+                }
+                // Drop borrows on moment data explicitly before borrowing param data
+                drop(m_t_data);
+                drop(v_t_data);
 
-                    param_data[i] = param_data[i] - update_i;
+                // --- NOW, borrow param data mutably and apply updates --- 
+                let mut param_data = param.data_mut();
+                assert_eq!(param_data.len(), update_values.len(), "Update values length mismatch");
+                for i in 0..numel {
+                    // Apply update: param = param - update
+                    // Requires T: Sub<Output=T> which is covered by Float trait generally
+                    // If T doesn't implement Sub, this would need SubAssign or manual subtract
+                    param_data[i] = param_data[i] - update_values[i]; 
                 }
             }
         }
@@ -138,86 +158,194 @@ where
 mod tests {
     use super::*;
     use neurarust_core::tensor::Tensor;
-    use num_traits::{Zero, One, Float, FromPrimitive};
+    use num_traits::{Zero, One, Float, FromPrimitive, Pow};
     use std::fmt::Debug;
-    use crate::Optimizer;
+    use std::ops::{AddAssign, Mul, Sub, Neg, Div};
+    use std::iter::Sum;
 
+    // Helper to check approximate data equality - Copied from sgd.rs tests
     fn check_data_approx<T>(tensor: &Tensor<T>, expected_data: &[T])
     where
         T: Float + Debug + FromPrimitive,
     {
         let tensor_data = tensor.data();
-        assert_eq!(tensor_data.len(), expected_data.len());
+        assert_eq!(tensor_data.len(), expected_data.len(), "Tensor length mismatch");
         let tol = T::epsilon() * T::from_u32(100).unwrap_or_else(T::one);
         for (a, b) in tensor_data.iter().zip(expected_data.iter()) {
-            assert!( (*a - *b).abs() < tol, "Data mismatch: expected {:?} ({:?}), got {:?} ({:?}). Diff: {:?}",
-                    expected_data, b, tensor_data.as_ref(), a, (*a - *b).abs());
+            assert!( (*a - *b).abs() < tol, "Data mismatch: expected {:?}, got {:?}. Diff: {:?}",
+                    expected_data, &*tensor_data, (*a - *b).abs());
         }
     }
 
-    // --- Tests need rework to set gradients without private access --- 
-    // TODO: Rework these tests after deciding on a public gradient setting method.
+    // Helper function to generate a gradient on a tensor using backward()
+    // Copied from sgd.rs tests
+    fn generate_gradient<T>(
+        tensor: &Tensor<T>, 
+        grad_values: Vec<T>
+    )
+    where 
+        // Required bounds based on operations used (Mul, Sum, Backward)
+        T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T>,
+    {
+        assert_eq!(tensor.numel(), grad_values.len(), "Tensor numel must match grad_values length");
+        tensor.set_requires_grad(true);
+        let constant = Tensor::new(grad_values, tensor.shape());
+        let mul_result = tensor * &constant;
+        let loss = mul_result.sum(); 
+        assert!(loss.requires_grad());
+        loss.backward(None); 
+        assert!(tensor.grad().is_some(), "Gradient was not generated by backward pass");
+    }
 
-    /*
-    #[test]
-    fn test_adam_step_basic() {
-        type TestFloat = f32;
+    // Type alias for tests
+    type TestFloat = f32;
 
-        let param1_data = vec![1.0 as TestFloat, 2.0];
-        let param2_data = vec![3.0 as TestFloat, 4.0];
-        let mut param1 = Tensor::new(param1_data.clone(), vec![2]);
-        let mut param2 = Tensor::new(param2_data.clone(), vec![2]);
-
-        let lr = 0.001 as TestFloat;
-        let betas = (0.9 as TestFloat, 0.999 as TestFloat);
-        let eps = 1e-8 as TestFloat;
-        let mut optimizer: Adam<TestFloat> = Adam::new(lr, betas, eps);
-
-        // Cannot set gradient easily for now
-        // set_test_gradient(&param1, vec![0.1 as TestFloat, 0.2]);
-        // set_test_gradient(&param2, vec![0.3 as TestFloat, 0.4]);
-
-        // Placeholder: Check step runs without grads
-        let initial_p1_data = param1.data().to_vec();
-        let initial_p2_data = param2.data().to_vec();
-        {
-            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut param1, &mut param2];
-            optimizer.step(&mut params_slice);
-        } 
-
-        check_data_approx(&param1, &initial_p1_data);
-        check_data_approx(&param2, &initial_p2_data);
-
-        // --- Test Step 2 - Invalid without gradients ---
-        // set_test_gradient(&param1, vec![0.5 as TestFloat, 0.5]);
-        // set_test_gradient(&param2, vec![0.6 as TestFloat, 0.6]);
-        // {
-        //     let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut param1, &mut param2];
-        //     optimizer.step(&mut params_slice);
-        // }
+    // Helper to create tensor requiring grad
+    fn create_grad_tensor(data: Vec<TestFloat>, shape: Vec<usize>) -> Tensor<TestFloat> {
+        let t = Tensor::new(data, shape);
+        t.set_requires_grad(true);
+        t
     }
 
     #[test]
     fn test_adam_zero_grad() {
-        type TestFloat = f32;
-        let mut p1 = Tensor::new(vec![1.0 as TestFloat, 2.0], vec![2]);
-        let mut p2 = Tensor::new(vec![3.0 as TestFloat, 4.0], vec![2]);
+        let mut p1 = create_grad_tensor(vec![1.0, 2.0], vec![2]);
+        let mut p2 = create_grad_tensor(vec![3.0, 4.0], vec![2]);
+        p2.set_requires_grad(false); // p2 doesn't need grad calculation itself
 
-        // Cannot set gradient easily
-        // set_test_gradient(&p1, vec![0.1, 0.2]);
-        p1.zero_grad(); // Ensure starts clean
-        p2.zero_grad();
+        // Generate gradient only on p1
+        let initial_grad_p1 = vec![0.1, 0.2];
+        generate_gradient(&p1, initial_grad_p1.clone());
+        assert!(p1.grad().is_some(), "p1 should have gradient after generate_gradient");
+        check_data_approx(&p1.grad().unwrap(), &initial_grad_p1);
+        assert!(p2.grad().is_none(), "p2 should not have gradient initially");
 
         let optim: Adam<TestFloat> = Adam::new(0.001, (0.9, 0.999), 1e-8);
-
-        assert!(p1.grad().is_none());
-        assert!(p2.grad().is_none());
 
         let mut params_slice = [&mut p1, &mut p2];
         optim.zero_grad(&mut params_slice);
 
-        assert!(p1.grad().is_none());
-        assert!(p2.grad().is_none());
+        // Check state after zero_grad
+        assert!(p1.grad().is_some(), "p1 gradient should still exist after zero_grad");
+        check_data_approx(&p1.grad().unwrap(), &[0.0, 0.0]); // Check if zeroed
+        assert!(p2.grad().is_none(), "p2 gradient should remain None after zero_grad");
     }
-    */
+
+    #[test]
+    fn test_adam_step_basic() {
+        let mut param1 = create_grad_tensor(vec![1.0, 2.0], vec![2]);
+        let mut param2 = create_grad_tensor(vec![3.0, 4.0], vec![2]);
+
+        let lr = 0.001;
+        let betas = (0.9, 0.999);
+        let eps = 1e-8;
+        let mut optimizer: Adam<TestFloat> = Adam::new(lr, betas, eps);
+
+        // --- Step 1 --- 
+        let grad1_s1 = vec![0.1, 0.2];
+        let grad2_s1 = vec![0.3, 0.4];
+        generate_gradient(&param1, grad1_s1.clone());
+        generate_gradient(&param2, grad2_s1.clone());
+        
+        {
+            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut param1, &mut param2];
+            optimizer.step(&mut params_slice);
+        } 
+        
+        // Calculate expected values after step 1 MANUALLY
+        let t1 = 1_i32;
+        let beta1 = betas.0 as TestFloat;
+        let beta2 = betas.1 as TestFloat;
+        let bc1_s1 = 1.0 - beta1.powi(t1);
+        let bc2_s1 = 1.0 - beta2.powi(t1);
+
+        // Param 1 update
+        let m1_1 = (1.0 - beta1) * grad1_s1[0]; // m = (1-b1)*g
+        let v1_1 = (1.0 - beta2) * grad1_s1[0].powi(2); // v = (1-b2)*g^2
+        let m1_hat_1 = m1_1 / bc1_s1;
+        let v1_hat_1 = v1_1 / bc2_s1;
+        let update1_1 = lr * m1_hat_1 / (v1_hat_1.sqrt() + eps);
+
+        let m1_2 = (1.0 - beta1) * grad1_s1[1];
+        let v1_2 = (1.0 - beta2) * grad1_s1[1].powi(2);
+        let m1_hat_2 = m1_2 / bc1_s1;
+        let v1_hat_2 = v1_2 / bc2_s1;
+        let update1_2 = lr * m1_hat_2 / (v1_hat_2.sqrt() + eps);
+        let expected_p1_s1 = vec![1.0 - update1_1, 2.0 - update1_2];
+
+        // Param 2 update
+        let m2_1 = (1.0 - beta1) * grad2_s1[0];
+        let v2_1 = (1.0 - beta2) * grad2_s1[0].powi(2);
+        let m2_hat_1 = m2_1 / bc1_s1;
+        let v2_hat_1 = v2_1 / bc2_s1;
+        let update2_1 = lr * m2_hat_1 / (v2_hat_1.sqrt() + eps);
+
+        let m2_2 = (1.0 - beta1) * grad2_s1[1];
+        let v2_2 = (1.0 - beta2) * grad2_s1[1].powi(2);
+        let m2_hat_2 = m2_2 / bc1_s1;
+        let v2_hat_2 = v2_2 / bc2_s1;
+        let update2_2 = lr * m2_hat_2 / (v2_hat_2.sqrt() + eps);
+        let expected_p2_s1 = vec![3.0 - update2_1, 4.0 - update2_2];
+
+        // Check results of step 1
+        check_data_approx(&param1, &expected_p1_s1);
+        check_data_approx(&param2, &expected_p2_s1);
+
+        // --- Step 2 --- 
+        // Need previous moments m1_1, v1_1 etc. for calculation
+        let m1_s1 = vec![m1_1, m1_2];
+        let v1_s1 = vec![v1_1, v1_2];
+        let m2_s1 = vec![m2_1, m2_2];
+        let v2_s1 = vec![v2_1, v2_2];
+        
+        // Generate new gradients
+        // Need to zero previous grad first before generating new one
+        optimizer.zero_grad(&mut [&mut param1, &mut param2]);
+        let grad1_s2 = vec![0.5, 0.6];
+        let grad2_s2 = vec![0.7, 0.8];
+        generate_gradient(&param1, grad1_s2.clone());
+        generate_gradient(&param2, grad2_s2.clone());
+
+        {
+            let mut params_slice: Vec<&mut Tensor<TestFloat>> = vec![&mut param1, &mut param2];
+            optimizer.step(&mut params_slice);
+        }
+        
+        // Calculate expected values after step 2
+        let t2 = 2_i32;
+        let bc1_s2 = 1.0 - beta1.powi(t2);
+        let bc2_s2 = 1.0 - beta2.powi(t2);
+
+        // Param 1 update (step 2)
+        let m1_1_s2 = beta1 * m1_s1[0] + (1.0 - beta1) * grad1_s2[0];
+        let v1_1_s2 = beta2 * v1_s1[0] + (1.0 - beta2) * grad1_s2[0].powi(2);
+        let m1_hat_1_s2 = m1_1_s2 / bc1_s2;
+        let v1_hat_1_s2 = v1_1_s2 / bc2_s2;
+        let update1_1_s2 = lr * m1_hat_1_s2 / (v1_hat_1_s2.sqrt() + eps);
+
+        let m1_2_s2 = beta1 * m1_s1[1] + (1.0 - beta1) * grad1_s2[1];
+        let v1_2_s2 = beta2 * v1_s1[1] + (1.0 - beta2) * grad1_s2[1].powi(2);
+        let m1_hat_2_s2 = m1_2_s2 / bc1_s2;
+        let v1_hat_2_s2 = v1_2_s2 / bc2_s2;
+        let update1_2_s2 = lr * m1_hat_2_s2 / (v1_hat_2_s2.sqrt() + eps);
+        let expected_p1_s2 = vec![expected_p1_s1[0] - update1_1_s2, expected_p1_s1[1] - update1_2_s2];
+
+        // Param 2 update (step 2)
+        let m2_1_s2 = beta1 * m2_s1[0] + (1.0 - beta1) * grad2_s2[0];
+        let v2_1_s2 = beta2 * v2_s1[0] + (1.0 - beta2) * grad2_s2[0].powi(2);
+        let m2_hat_1_s2 = m2_1_s2 / bc1_s2;
+        let v2_hat_1_s2 = v2_1_s2 / bc2_s2;
+        let update2_1_s2 = lr * m2_hat_1_s2 / (v2_hat_1_s2.sqrt() + eps);
+
+        let m2_2_s2 = beta1 * m2_s1[1] + (1.0 - beta1) * grad2_s2[1];
+        let v2_2_s2 = beta2 * v2_s1[1] + (1.0 - beta2) * grad2_s2[1].powi(2);
+        let m2_hat_2_s2 = m2_2_s2 / bc1_s2;
+        let v2_hat_2_s2 = v2_2_s2 / bc2_s2;
+        let update2_2_s2 = lr * m2_hat_2_s2 / (v2_hat_2_s2.sqrt() + eps);
+        let expected_p2_s2 = vec![expected_p2_s1[0] - update2_1_s2, expected_p2_s1[1] - update2_2_s2];
+
+        // Check results of step 2
+        check_data_approx(&param1, &expected_p1_s2);
+        check_data_approx(&param2, &expected_p2_s2);
+    }
 }
