@@ -111,12 +111,22 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Tensor;
-    use num_traits::{Zero, One}; // For test helpers
-    use std::ops::AddAssign;    // For test helpers
-    
-    
-    
+    use crate::tensor::Tensor;
+    use num_traits::{Zero, One}; // Needed for create_test_tensor
+    use std::fmt::Debug; // Needed for create_test_tensor
+    use std::ops::{AddAssign, Add, Mul}; // Needed for create_test_tensor
+    use std::iter::Sum; // Needed for create_test_tensor
+    use crate::error::NeuraRustError;
+
+    /* Commenting out unused test helper
+    // Helper function for creating tensors in tests
+    fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Mul<Output=T> + Default + Sum + 'static,
+    {
+        Tensor::new(data, shape).expect("Tensor creation failed in test")
+    }
+    */
 
     // Basic helper
     fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>

@@ -32,20 +32,21 @@ struct MatMulBackward<T> {
 }
 
 impl<T> MatMulBackward<T> {
+    /* Field is never used
     fn new(a: &Tensor<T>, b: &Tensor<T>) -> Self 
-    where 
-        T: Clone // Clone is needed to store inputs
+    where T: Clone + 'static 
     {
-        Self {
-            a: a.clone(),
-            b: b.clone(),
-            a_ref: a.get_weak_ref(),
-            b_ref: b.get_weak_ref(),
-            a_shape: a.shape().clone(),
-            b_shape: b.shape().clone(),
+        MatMulBackward {
+            input_a_shape: a.shape(),
+            input_b_shape: b.shape(),
+            input_a_ref: a.get_weak_ref(),
+            input_b_ref: b.get_weak_ref(),
+            input_a_val: a.clone(), // Clone needed tensors
+            input_b_val: b.clone(),
             _phantom: PhantomData,
         }
     }
+    */
 }
 
 impl<T> BackwardOp<T> for MatMulBackward<T> 

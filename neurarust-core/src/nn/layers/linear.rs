@@ -14,12 +14,14 @@ use crate::error::NeuraRustError; // Keep only one import
 // use rand_chacha::ChaCha8Rng;
 
 /// A fully connected linear layer: y = xA^T + b
-#[derive(Debug)]
+#[derive(Debug, Clone)]
 pub struct Linear<T> {
+    #[allow(dead_code)]
+    in_features: usize,
+    #[allow(dead_code)]
+    out_features: usize,
     pub weight: Parameter<T>,
     pub bias: Option<Parameter<T>>,
-    in_features: usize,
-    out_features: usize,
 }
 
 impl<T> Linear<T>
@@ -98,7 +100,7 @@ mod tests {
     use crate::error::NeuraRustError;
     // Import traits needed for test helpers and asserts
     use num_traits::{Zero, One};
-    use std::ops::{AddAssign, Add, Mul};
+    use std::ops::AddAssign;
     use std::iter::Sum;
     use std::fmt::Debug;
 
@@ -167,7 +169,7 @@ mod tests {
     
     #[test]
     fn test_linear_forward_grad_propagation() -> Result<(), NeuraRustError> {
-        let mut linear = Linear::<f32>::new(3, 2, true)?;
+        let linear = Linear::<f32>::new(3, 2, true)?;
         let input_grad = create_grad_tensor::<f32>(vec![1.0, 2.0, 3.0], vec![1, 3]);
         let input_no_grad = create_tensor::<f32>(vec![1.0, 2.0, 3.0], vec![1, 3]);
 

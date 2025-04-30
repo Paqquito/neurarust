@@ -2,7 +2,6 @@ use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use std::ops::{Add, AddAssign};
-use std::iter::Sum as IterSum; // Keep IterSum
 use num_traits::{Zero, One}; // Need Zero for sum init, One for grad init, AddAssign for grad accum
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData; // Add PhantomData import
@@ -13,7 +12,7 @@ use std::fmt::Debug;
 use std::collections::HashMap;
 use crate::error::NeuraRustError;
 use crate::autograd::accumulate_gradient; // Import from autograd
-use std::iter::Sum; // Add import for Sum trait
+use std::iter::Sum; // MOVED IMPORT HERE
 
 // --- Structures (BackwardOp defined before use) ---
 
@@ -77,7 +76,7 @@ pub fn sum_axes<T>(
     keep_dims: bool
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Add<Output = T> + Zero + Copy + Clone + 'static + AddAssign + Sum + Debug + Default + One,
+    T: Add<Output = T> + Zero + Copy + Clone + 'static + AddAssign + Debug + Default + One + Sum<T>,
 {
     let input_td = input.borrow_tensor_data();
     let input_shape = input_td.shape.clone();
@@ -169,19 +168,23 @@ where
 impl<T: Debug> Tensor<T> {
     pub fn sum_axes(&self, axes: &[usize], keep_dims: bool) -> Tensor<T>
     where
-        T: Add<Output = T> + Zero + Copy + Clone + 'static + AddAssign + Sum + Debug + Default + One,
+        T: Add<Output = T> + Zero + Copy + Clone + 'static + AddAssign + Debug + Default + One + Sum<T>,
     {
         sum_axes(self, axes, keep_dims)
             .unwrap_or_else(|e| panic!("Tensor sum_axes failed: {:?}", e))
     }
 
+    /// Computes the sum of all elements in the tensor.
     pub fn sum(&self) -> Tensor<T>
     where
-        T: Add<Output = T> + Zero + Copy + Clone + 'static + AddAssign + One + Sum + Debug + Default,
+         // Also add Sum constraint to the public method
+        T: Add<Output = T> + Zero + Copy + Clone + 'static + AddAssign + One + Debug + Default + Sum<T>,
     {
+        let rank = self.shape().len(); // Use shape().len() instead of rank()
+        let axes: Vec<usize> = (0..rank).collect();
         // Call the fallible sum_axes and unwrap
-        sum_axes(self, &[], false)
-             .unwrap_or_else(|e| panic!("Tensor sum failed: {:?}", e)) 
+        sum_axes(self, &axes, false)
+            .unwrap_or_else(|e| panic!("Tensor sum failed: {:?}", e))
     }
 }
 
@@ -189,7 +192,7 @@ impl<T: Debug> Tensor<T> {
 
 impl<T> BackwardOp<T> for SumAxesBackward<T>
 where
-    T: Clone + Debug + AddAssign + Zero + Copy + 'static + Sum + Default + One,
+    T: Clone + Debug + AddAssign + Zero + Copy + 'static + Default + One + Sum<T>,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
         if let Some(input_rc) = self.input_ref.upgrade() {
@@ -266,8 +269,8 @@ mod tests {
     use num_traits::{Zero, One};
     use std::ops::{AddAssign, Add};
     use std::fmt::Debug;
-    use std::iter::Sum;
     use crate::error::NeuraRustError;
+    use std::iter::Sum; // Keep Sum import here as well if tests use it
 
     // --- Helpers --- (Ajouter bounds manquants si nécessaire)
     fn create_test_tensor<T>(
@@ -275,7 +278,7 @@ mod tests {
         shape: Vec<usize>
     ) -> Tensor<T>
     where 
-        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + IterSum + Default + 'static
+        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + 'static
     {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
@@ -284,7 +287,7 @@ mod tests {
         shape: Vec<usize>
     ) -> Tensor<T>
     where 
-        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + IterSum + Default + 'static
+        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + 'static
     {
         Tensor::new_with_grad(data, shape).expect("Test grad tensor creation failed")
     }

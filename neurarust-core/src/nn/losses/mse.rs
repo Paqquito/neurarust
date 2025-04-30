@@ -171,10 +171,10 @@ mod tests {
     use super::*;
     use crate::Tensor;
     use crate::error::NeuraRustError;
-    use num_traits::{Zero, One, FromPrimitive};
-    use std::ops::{Sub, Mul, AddAssign, Neg, Div, Add};
-    use std::iter::Sum;
-    use std::fmt::Debug;
+    
+    
+    
+    
     
     // Helper functions
     fn create_tensor_f32(data: Vec<f32>, shape: Vec<usize>) -> Tensor<f32> {

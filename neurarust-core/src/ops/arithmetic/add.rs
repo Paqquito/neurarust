@@ -14,7 +14,6 @@ use std::iter::Sum;
 use std::collections::HashMap;
 use std::default::Default;
 use crate::error::NeuraRustError;
-use crate::tensor::ones;
 
 // --- Forward Operation --- 
 
@@ -27,28 +26,26 @@ where
     let a_shape = a.shape();
     let b_shape = b.shape();
     
-    // Use `map_err` to convert the String error from broadcast_shapes
-    let result_shape = broadcast_shapes(&a_shape, &b_shape)
-        .map_err(|e| NeuraRustError::BroadcastError { 
-            shape1: a_shape.clone(), // Or provide more context from `e` if needed
-            shape2: b_shape.clone(), 
-            // message: e // Or include the original message
+    let output_shape = broadcast_shapes(&a_shape, &b_shape)
+        .map_err(|_e| NeuraRustError::BroadcastError { 
+            shape1: a_shape.clone(), 
+            shape2: b_shape.clone()
         })?;
 
     let a_td = a.borrow_tensor_data(); 
     let b_td = b.borrow_tensor_data();
     
-    let numel_result = result_shape.iter().product();
+    let numel_result = output_shape.iter().product();
     let mut result_data = Vec::with_capacity(numel_result);
-    let result_strides = calculate_strides(&result_shape);
-    let rank_diff_a = result_shape.len().saturating_sub(a_td.shape.len());
-    let rank_diff_b = result_shape.len().saturating_sub(b_td.shape.len());
+    let result_strides = calculate_strides(&output_shape);
+    let rank_diff_a = output_shape.len().saturating_sub(a_td.shape.len());
+    let rank_diff_b = output_shape.len().saturating_sub(b_td.shape.len());
     
     let mut input_a_coords = vec![0; a_td.shape.len()];
     let mut input_b_coords = vec![0; b_td.shape.len()];
 
     for i in 0..numel_result {
-        let output_coords = index_to_coord(i, &result_strides, &result_shape);
+        let output_coords = index_to_coord(i, &result_strides, &output_shape);
         
         for dim_idx in 0..a_td.shape.len() {
             let output_coord_idx = rank_diff_a + dim_idx;
@@ -68,7 +65,7 @@ where
     drop(a_td);
     drop(b_td);
 
-    let result = Tensor::new(result_data, result_shape.clone())?; 
+    let result = Tensor::new(result_data, output_shape.clone())?; 
 
     let requires_grad = a.requires_grad() || b.requires_grad();
     if requires_grad {
@@ -155,7 +152,7 @@ mod tests {
     use std::fmt::Debug;
     use std::iter::Sum;
     use crate::error::NeuraRustError;
-    use crate::tensor::utils::broadcast_shapes; // Import broadcast_shapes if needed for direct testing
+     // Import broadcast_shapes if needed for direct testing
     use crate::tensor::ones; // Import ones
 
     // Helpers remain the same

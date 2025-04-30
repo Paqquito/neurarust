@@ -113,7 +113,7 @@ mod tests {
     use std::iter::Sum as IterSum;
     use std::collections::HashMap;
     use std::rc::Rc;
-    use crate::error::NeuraRustError;
+    
 
     fn create_test_tensor<T>(
         data: Vec<T>, 

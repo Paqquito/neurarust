@@ -11,7 +11,6 @@ use num_traits::{Zero, One};
 use std::iter::Sum;
 use std::collections::HashMap;
 use crate::error::NeuraRustError;
-use crate::tensor::ones;
 
 // --- Forward Operation --- 
 
@@ -175,8 +174,8 @@ mod tests {
     use std::ops::{Sub, AddAssign, Neg};
     use std::fmt::Debug;
     use std::iter::Sum;
-    use std::collections::HashMap;
-    use std::rc::Rc;
+    
+    
     use crate::error::NeuraRustError;
     use crate::tensor::ones;
 

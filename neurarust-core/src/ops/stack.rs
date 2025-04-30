@@ -17,8 +17,6 @@ use crate::error::NeuraRustError;
 struct StackBackward<T> {
     /// Weak references to the original input tensor data.
     input_refs: Vec<Weak<RefCell<TensorData<T>>>>,
-    /// Store shapes for unstacking in backward pass
-    input_shapes: Vec<Vec<usize>>,
     /// The dimension along which stacking occurred.
     dim: usize,
     _phantom: PhantomData<T>,
@@ -129,13 +127,13 @@ where
     }
     
     // Validate shapes are consistent
-    for (i, tensor) in tensors.iter().enumerate().skip(1) {
-        if tensor.shape() != first_shape {
+    for (_i, tensor) in tensors.iter().enumerate().skip(1) {
+        let current_shape = tensor.shape();
+        // Check full shape equality, not just rank
+        if current_shape != first_shape { 
             return Err(NeuraRustError::IncompatibleShapes { 
                 shape1: first_shape.clone(), 
-                shape2: tensor.shape(),
-                // Add detail about which tensor mismatched
-                // detail: Some(format!("Tensor at index {} has mismatching shape", i))
+                shape2: tensor.shape(), // Use tensor.shape() directly
             });
         }
     }
@@ -200,7 +198,6 @@ where
         result.set_requires_grad(true);
         let grad_fn = StackBackward {
             input_refs: tensors.iter().map(|t| t.get_weak_ref()).collect(),
-            input_shapes: tensors.iter().map(|t| t.shape()).collect(),
             dim,
             _phantom: PhantomData,
         };
@@ -222,10 +219,7 @@ mod tests {
     fn create_tensor<T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
-     fn create_grad_tensor<T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        Tensor::new_with_grad(data, shape).expect("Test grad tensor creation failed")
-    }
-
+    
     #[test]
     fn test_stack_basic() {
         let t1 = create_tensor(vec![1, 2], vec![2]);

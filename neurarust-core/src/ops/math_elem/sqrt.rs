@@ -146,16 +146,18 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::Tensor;
+    use crate::tensor::Tensor;
+    use num_traits::{Zero, One, Float};
     use crate::error::NeuraRustError;
+    use std::ops::AddAssign;
+    use std::fmt::Debug;
     use crate::tensor::ones; // Import ones
-    use num_traits::{Float, Zero, One, FromPrimitive}; // Add FromPrimitive
     use std::iter::Sum;
-    use std::ops::{AddAssign, Mul};
+    use std::ops::{Mul};
     use crate::autograd::BackwardOp;
-    use std::collections::HashMap;
-    use std::cell::RefCell;
-    use crate::tensor_data::TensorData;
+    
+    
+    
 
 
     // Helper to create tensors, add bounds needed by sqrt and backward

@@ -11,7 +11,6 @@ use num_traits::{Zero, One};
 use std::iter::Sum;
 use std::collections::HashMap;
 use crate::error::NeuraRustError;
-use crate::tensor::ones;
 
 // --- Forward Operation --- 
 
@@ -176,14 +175,10 @@ where
 #[cfg(test)]
 mod tests {
     use super::*; // Import the new `mul` function
-    use crate::Tensor;
+    use crate::{tensor::Tensor}; 
     use num_traits::{Zero, One};
     use std::ops::{Mul, AddAssign, Neg};
-    use std::fmt::Debug;
-    use std::iter::Sum;
-    use std::collections::HashMap;
-    use std::rc::Rc;
-    use crate::error::NeuraRustError;
+    use crate::tensor::ones; // RE-ADD THIS IMPORT
 
     // Update helpers to handle Result from Tensor::new
     fn create_test_tensor<T>(
