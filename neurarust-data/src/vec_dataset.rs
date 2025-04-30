@@ -2,11 +2,11 @@ use crate::Dataset;
 use neurarust_core::tensor::Tensor;
 
 /// A simple dataset implementation backed by Vectors of Tensors.
-/// 
-/// Assumes that the i-th element of `inputs` corresponds to the i-th element 
+///
+/// Assumes that the i-th element of `inputs` corresponds to the i-th element
 /// of `targets`.
 #[derive(Debug, Clone)]
-pub struct VecDataset<InputType, TargetType> 
+pub struct VecDataset<InputType, TargetType>
 where
     InputType: Clone + 'static,
     TargetType: Clone + 'static,
@@ -21,11 +21,11 @@ where
     TargetType: Clone + 'static,
 {
     /// Creates a new VecDataset from input and target vectors.
-    /// 
+    ///
     /// # Panics
     /// Panics if the lengths of `inputs` and `targets` vectors are different.
     pub fn new(inputs: Vec<Tensor<InputType>>, targets: Vec<Tensor<TargetType>>) -> Self {
-        assert_eq!(inputs.len(), targets.len(), 
+        assert_eq!(inputs.len(), targets.len(),
             "Input and target vectors must have the same length. Got {} and {}.",
             inputs.len(), targets.len()
         );
@@ -54,7 +54,7 @@ where
     }
 }
 
-// --- Tests --- 
+// --- Tests ---
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -62,14 +62,16 @@ mod tests {
 
     #[test]
     fn test_vec_dataset_creation_and_len() {
+        // Handle Result from Tensor::new using expect
         let inputs = vec![
-            Tensor::new(vec![1.0f32, 2.0], vec![2]), 
-            Tensor::new(vec![3.0, 4.0], vec![2])
+            Tensor::new(vec![1.0f32, 2.0], vec![2]).expect("Input 1 failed"),
+            Tensor::new(vec![3.0, 4.0], vec![2]).expect("Input 2 failed")
         ];
         let targets = vec![
-            Tensor::new(vec![0.0f32], vec![1]), 
-            Tensor::new(vec![1.0], vec![1])
+            Tensor::new(vec![0i32], vec![1]).expect("Target 1 failed"), // Specify i32 for target type clarity
+            Tensor::new(vec![1i32], vec![1]).expect("Target 2 failed")
         ];
+        // Now inputs/targets are Vec<Tensor<T>>, VecDataset::new should work
         let dataset = VecDataset::new(inputs, targets);
         assert_eq!(dataset.len(), 2);
         assert!(!dataset.is_empty());
@@ -82,24 +84,28 @@ mod tests {
     #[test]
     #[should_panic(expected = "Input and target vectors must have the same length")]
     fn test_vec_dataset_creation_panic() {
-        let inputs = vec![Tensor::new(vec![1.0f32], vec![1])];
+        // Handle Result
+        let inputs = vec![Tensor::new(vec![1.0f32], vec![1]).expect("Input creation failed")];
         let targets: Vec<Tensor<i32>> = vec![];
         let _dataset = VecDataset::new(inputs, targets);
     }
 
     #[test]
     fn test_vec_dataset_get() {
-        let input1 = Tensor::new(vec![1.0f32, 2.0], vec![2]);
-        let target1 = Tensor::new(vec![0], vec![1]);
-        let input2 = Tensor::new(vec![3.0, 4.0], vec![2]);
-        let target2 = Tensor::new(vec![1], vec![1]);
-        
+        // Handle Result
+        let input1 = Tensor::new(vec![1.0f32, 2.0], vec![2]).expect("Input 1 failed");
+        let target1 = Tensor::new(vec![0i32], vec![1]).expect("Target 1 failed"); // Specify i32
+        let input2 = Tensor::new(vec![3.0, 4.0], vec![2]).expect("Input 2 failed");
+        let target2 = Tensor::new(vec![1i32], vec![1]).expect("Target 2 failed"); // Specify i32
+
+        // Clone Tensors, not Results
         let dataset = VecDataset::new(
-            vec![input1.clone(), input2.clone()], 
+            vec![input1.clone(), input2.clone()],
             vec![target1.clone(), target2.clone()]
         );
 
         let (retrieved_input1, retrieved_target1) = dataset.get(0);
+        // Compare Tensor with Tensor
         assert_eq!(retrieved_input1, input1);
         assert_eq!(retrieved_target1, target1);
 
@@ -111,7 +117,7 @@ mod tests {
     #[test]
     #[should_panic(expected = "Index out of bounds")]
     fn test_vec_dataset_get_panic() {
-        let dataset: VecDataset<f32, i32> = VecDataset::new(vec![], vec![]);
-        dataset.get(0);
+        let empty_dataset: VecDataset<f32, i32> = VecDataset::new(vec![], vec![]);
+        empty_dataset.get(0); // This should panic
     }
-} 
+}

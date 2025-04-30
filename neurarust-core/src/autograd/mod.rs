@@ -7,6 +7,9 @@ use std::rc::Rc;
 use std::ops::{AddAssign, Add};
 use std::fmt::Debug;
 use num_traits::Zero;
+use crate::ops::arithmetic::add;
+use std::iter::Sum;
+use num_traits::One;
 
 pub mod graph;
 
@@ -40,33 +43,25 @@ pub(crate) fn accumulate_gradient<T>(
     local_gradient: Tensor<T>,
 )
 where
-    // Bounds for manual addition and tensor creation
-    T: Add<Output = T> + AddAssign + Clone + Debug + Zero + Copy + 'static, 
+    // Use the bounds required by `ops::arithmetic::add` and the logic inside
+    T: Add<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static,
 {
     if let Some(input_rc) = input_weak_ref.upgrade() {
         let input_ptr = Rc::as_ptr(&input_rc);
-        
-        // Clone local_gradient for potential use in and_modify
-        let local_gradient_clone = local_gradient.clone(); 
-
         gradients.entry(input_ptr)
-            .and_modify(|existing_grad| { // existing_grad: &mut Tensor<T>
-                assert_eq!(existing_grad.shape(), local_gradient_clone.shape(), 
-                           "Gradient shape mismatch during accumulation: existing {:?} vs new {:?}",
-                           existing_grad.shape(), local_gradient_clone.shape());
-                
-                // Calculate summed data without modifying existing_grad directly
-                let summed_data: Vec<T> = existing_grad.borrow_tensor_data().data.iter() // Immutable borrow of existing
-                    .zip(local_gradient_clone.borrow_tensor_data().data.iter()) // Immutable borrow of clone
-                    .map(|(&e, &l)| e + l) // Requires T: Add + Copy
-                    .collect();
-                
-                // Create a new tensor with the summed data
-                let summed_grad = Tensor::new(summed_data, existing_grad.shape()); 
-                
-                // Replace the existing tensor in the map with the new one
-                *existing_grad = summed_grad; // Moves ownership of summed_grad
+            .and_modify(|existing_grad| { 
+                // Use the fallible add operation
+                let sum_result = add(existing_grad, &local_gradient);
+                match sum_result {
+                    Ok(summed_grad) => {
+                         *existing_grad = summed_grad; 
+                    },
+                    Err(e) => {
+                         panic!("Error adding gradients during accumulation: {:?}. Existing shape {:?}, New shape {:?}", 
+                               e, existing_grad.shape(), local_gradient.shape());
+                    }
+                }
             })
-            .or_insert(local_gradient); // Moves ownership of original local_gradient
+            .or_insert(local_gradient);
     }
 } 

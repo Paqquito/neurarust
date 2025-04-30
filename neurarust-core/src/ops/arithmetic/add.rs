@@ -13,86 +13,76 @@ use num_traits::{Zero, One};
 use std::iter::Sum;
 use std::collections::HashMap;
 use std::default::Default;
+use crate::error::NeuraRustError;
+use crate::tensor::ones;
 
 // --- Forward Operation --- 
 
-/// Implements element-wise addition for two Tensors with broadcasting.
-///
-/// Performs `&tensor1 + &tensor2`.
-/// The shapes of the two tensors must be identical.
-/// Requires the element type `T` to implement `Add<Output = T>`, `AddAssign` (for grad), `Copy` and `Clone`.
-impl<'a, 'b, T> Add<&'b Tensor<T>> for &'a Tensor<T>
+/// Performs element-wise addition for two Tensors with broadcasting.
+/// Returns a `Result` wrapping the new `Tensor` or a `NeuraRustError`.
+pub fn add<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
     T: Add<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static,
 {
-    type Output = Tensor<T>;
+    let a_shape = a.shape();
+    let b_shape = b.shape();
+    
+    // Use `map_err` to convert the String error from broadcast_shapes
+    let result_shape = broadcast_shapes(&a_shape, &b_shape)
+        .map_err(|e| NeuraRustError::BroadcastError { 
+            shape1: a_shape.clone(), // Or provide more context from `e` if needed
+            shape2: b_shape.clone(), 
+            // message: e // Or include the original message
+        })?;
 
-    fn add(self, other: &'b Tensor<T>) -> Self::Output {
-        let self_shape = self.shape();
-        let other_shape = other.shape();
+    let a_td = a.borrow_tensor_data(); 
+    let b_td = b.borrow_tensor_data();
+    
+    let numel_result = result_shape.iter().product();
+    let mut result_data = Vec::with_capacity(numel_result);
+    let result_strides = calculate_strides(&result_shape);
+    let rank_diff_a = result_shape.len().saturating_sub(a_td.shape.len());
+    let rank_diff_b = result_shape.len().saturating_sub(b_td.shape.len());
+    
+    let mut input_a_coords = vec![0; a_td.shape.len()];
+    let mut input_b_coords = vec![0; b_td.shape.len()];
+
+    for i in 0..numel_result {
+        let output_coords = index_to_coord(i, &result_strides, &result_shape);
         
-        let result_shape = broadcast_shapes(&self_shape, &other_shape)
-            .expect(&format!("Shapes {:?} and {:?} cannot be broadcasted for addition.", self_shape, other_shape));
-
-        let self_td = self.borrow_tensor_data(); 
-        let other_td = other.borrow_tensor_data();
-        
-        // Calculer la shape et les strides du résultat
-        let numel_result = result_shape.iter().product();
-        let mut result_data = Vec::with_capacity(numel_result);
-        let result_strides = calculate_strides(&result_shape);
-        let rank_diff_a = result_shape.len().saturating_sub(self_td.shape.len());
-        let rank_diff_b = result_shape.len().saturating_sub(other_td.shape.len());
-        
-        let mut input_a_coords = vec![0; self_td.shape.len()];
-        let mut input_b_coords = vec![0; other_td.shape.len()];
-
-        for i in 0..numel_result {
-            let output_coords = index_to_coord(i, &result_strides, &result_shape);
-            
-            // Calculer les coordonnées et l'offset pour l'input A
-            for dim_idx in 0..self_td.shape.len() {
-                let output_coord_idx = rank_diff_a + dim_idx;
-                input_a_coords[dim_idx] = if self_td.shape[dim_idx] == 1 {
-                    0
-                } else {
-                    output_coords[output_coord_idx]
-                };
-            }
-            let offset_a = self_td.get_offset(&input_a_coords);
-            
-            // Calculer les coordonnées et l'offset pour l'input B
-            for dim_idx in 0..other_td.shape.len() {
-                let output_coord_idx = rank_diff_b + dim_idx;
-                 input_b_coords[dim_idx] = if other_td.shape[dim_idx] == 1 {
-                    0
-                 } else {
-                    output_coords[output_coord_idx]
-                 };
-            }
-            let offset_b = other_td.get_offset(&input_b_coords);
-
-            result_data.push(self_td.data[offset_a] + other_td.data[offset_b]);
+        for dim_idx in 0..a_td.shape.len() {
+            let output_coord_idx = rank_diff_a + dim_idx;
+            input_a_coords[dim_idx] = if a_td.shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
         }
-
-        drop(self_td);
-        drop(other_td);
-
-        let requires_grad = self.requires_grad() || other.requires_grad();
-        let result = Tensor::new(result_data, result_shape);
-        if requires_grad {
-            result.set_requires_grad(true);
-            let grad_fn = AddBackward {
-                input_a_shape: self_shape.clone(),
-                input_b_shape: other_shape.clone(),
-                input_a: self.clone(),
-                input_b: other.clone(),
-                _phantom: PhantomData,
-            };
-            result.set_grad_fn(Some(Rc::new(grad_fn)));
+        let offset_a = a_td.get_offset(&input_a_coords);
+        
+        for dim_idx in 0..b_td.shape.len() {
+            let output_coord_idx = rank_diff_b + dim_idx;
+            input_b_coords[dim_idx] = if b_td.shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
         }
-        result
+        let offset_b = b_td.get_offset(&input_b_coords);
+
+        result_data.push(a_td.data[offset_a] + b_td.data[offset_b]);
     }
+
+    drop(a_td);
+    drop(b_td);
+
+    let result = Tensor::new(result_data, result_shape.clone())?; 
+
+    let requires_grad = a.requires_grad() || b.requires_grad();
+    if requires_grad {
+        result.set_requires_grad(true);
+        let grad_fn = AddBackward {
+            input_a_shape: a_shape.clone(),
+            input_b_shape: b_shape.clone(),
+            input_a: a.clone(), 
+            input_b: b.clone(), 
+            _phantom: PhantomData,
+        };
+        result.set_grad_fn(Some(Rc::new(grad_fn)));
+    }
+    Ok(result)
 }
 
 /// Implements in-place element-wise addition (`+=`) for Tensor += &Tensor.
@@ -158,20 +148,28 @@ where
 
 #[cfg(test)]
 mod tests {
+    use super::*; 
     use crate::Tensor;
     use num_traits::{Zero, One};
     use std::ops::{Add, AddAssign};
     use std::fmt::Debug;
     use std::iter::Sum;
-    
-    
+    use crate::error::NeuraRustError;
+    use crate::tensor::utils::broadcast_shapes; // Import broadcast_shapes if needed for direct testing
+    use crate::tensor::ones; // Import ones
 
-    // Bounds mis à jour pour correspondre à l'impl Add
-    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        Tensor::new(data, shape)
+    // Helpers remain the same
+    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum>(
+        data: Vec<T>, 
+        shape: Vec<usize>
+    ) -> Tensor<T> { 
+        Tensor::new(data, shape).expect("Test tensor creation failed")
     }
-    fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        let tensor = Tensor::new(data, shape);
+    fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum + 'static>(
+        data: Vec<T>, 
+        shape: Vec<usize>
+    ) -> Tensor<T> { 
+        let tensor = Tensor::new(data, shape).expect("Test tensor_with_grad creation failed (new)");
         tensor.set_requires_grad(true);
         tensor
     }
@@ -182,19 +180,40 @@ mod tests {
         let t2 = create_test_tensor(vec![5_i32, 6, 7, 8], vec![2, 2]);
         let expected_data = vec![6_i32, 8, 10, 12];
         let expected_shape = vec![2, 2];
-        let result = &t1 + &t2;
         
-        assert_eq!(result.data().to_vec(), expected_data);
-        assert_eq!(result.shape(), expected_shape, "Shape mismatch");
-        assert!(!result.requires_grad());
+        let result = add(&t1, &t2);
+        assert!(result.is_ok());
+        let res_tensor = result.unwrap();
+        
+        assert_eq!(res_tensor.data().to_vec(), expected_data);
+        assert_eq!(res_tensor.shape(), expected_shape, "Shape mismatch");
+        assert!(!res_tensor.requires_grad());
+
+        // Remove the test for the Add trait for now
+        // let res_op = &t1 + &t2;
+        // assert_eq!(res_op.data().to_vec(), expected_data);
+        // assert_eq!(res_op.shape(), expected_shape);
     }
 
     #[test]
-    #[should_panic(expected = "cannot be broadcasted")]
     fn test_add_tensors_shape_mismatch() {
         let t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
         let t_non_broadcast = create_test_tensor(vec![5, 6, 7, 8, 9, 10], vec![2, 3]);
-        let _result = &t1 + &t_non_broadcast;
+        
+        let result = add(&t1, &t_non_broadcast);
+        assert!(result.is_err());
+        // Check the specific error type
+        match result.err().unwrap() {
+            NeuraRustError::BroadcastError { shape1, shape2 } => {
+                assert_eq!(shape1, vec![2, 2]);
+                assert_eq!(shape2, vec![2, 3]);
+            },
+            _ => panic!("Incorrect error type returned"),
+        }
+
+        // Remove the panic test for the Add trait impl
+        // let panic_result = std::panic::catch_unwind(|| { &t1 + &t_non_broadcast });
+        // assert!(panic_result.is_err());
     }
 
     #[test]
@@ -223,53 +242,32 @@ mod tests {
         let t2 = create_test_tensor_with_grad::<f32>(vec![2.0], vec![1]); 
         let t3 = create_test_tensor::<f32>(vec![3.0], vec![1]);
 
-        let res1 = &t1 + &t2;
+        // Use fallible add
+        let res1 = add(&t1, &t2).unwrap();
         assert!(res1.requires_grad());
 
-        let res2 = &t1 + &t3;
+        let res2 = add(&t1, &t3).unwrap();
         assert!(!res2.requires_grad());
 
         let t1_grad = create_test_tensor_with_grad::<f32>(vec![4.0], vec![1]);
-        let res3 = &t1_grad + &t2; 
+        let res3 = add(&t1_grad, &t2).unwrap(); 
         assert!(res3.requires_grad());
     }
 
     #[test]
-    fn test_add_backward() {
-        let a = create_test_tensor_with_grad::<f32>(vec![2.0, 3.0], vec![2]);
-        let b = create_test_tensor_with_grad::<f32>(vec![4.0, 5.0], vec![2]);
+    fn test_add_backward() -> Result<(), NeuraRustError> {
+        let a = create_test_tensor_with_grad::<f32>(vec![1.0, 2.0, 3.0], vec![3]);
+        let b = create_test_tensor_with_grad::<f32>(vec![4.0, 5.0, 6.0], vec![3]);
+        let result = add(&a, &b)?;
 
-        let c = &a + &b; // c = [6.0, 8.0]
-        assert!(c.requires_grad());
-        let grad_fn_option = c.borrow_tensor_data().grad_fn.clone(); 
-        assert!(grad_fn_option.is_some());
-        // let grad_fn = grad_fn_option.unwrap(); // Not needed anymore
+        // Provide upstream gradient of ones using the standalone ones function
+        let upstream_grad = ones(result.shape()).expect("Failed to create upstream grad");
+        result.backward(Some(&upstream_grad));
 
-        // Ensure grads are initially None
-        assert!(a.grad().is_none());
-        assert!(b.grad().is_none());
-        
-        // Sum the result to get a scalar loss, then call backward
-        let loss = c.sum(); // loss = 14.0 (scalar)
-        loss.backward(None); // Call backward on the scalar loss
-
-        // Check gradients AFTER backward call
-        let grad_a_opt = a.grad();
-        let grad_b_opt = b.grad();
-        assert!(grad_a_opt.is_some());
-        assert!(grad_b_opt.is_some());
-
-        // Borrow the unwrapped gradients
-        let grad_a = grad_a_opt.as_ref().unwrap();
-        let grad_b = grad_b_opt.as_ref().unwrap();
-
-        let expected_grad_a_data = vec![1.0_f32, 1.0]; // dLoss/da = dLoss/dc * dc/da = 1.0 * 1.0
-        let expected_grad_b_data = vec![1.0_f32, 1.0]; // dLoss/db = dLoss/dc * dc/db = 1.0 * 1.0
-        let expected_shape = vec![2];
-
-        assert_eq!(grad_a.data().to_vec(), expected_grad_a_data);
-        assert_eq!(grad_a.shape(), expected_shape);
-        assert_eq!(grad_b.data().to_vec(), expected_grad_b_data);
-        assert_eq!(grad_b.shape(), expected_shape);
+        let grad_a = a.grad().expect("Grad a missing");
+        assert_eq!(grad_a.data().to_vec(), vec![1.0, 1.0, 1.0]);
+        let grad_b = b.grad().expect("Grad b missing");
+        assert_eq!(grad_b.data().to_vec(), vec![1.0, 1.0, 1.0]);
+        Ok(())
     }
 } 

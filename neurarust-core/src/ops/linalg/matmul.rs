@@ -1,7 +1,7 @@
 // Ce module contiendra les opérations d'algèbre linéaire comme matmul.
 
 use crate::tensor::Tensor;
-use crate::autograd::{BackwardOp};
+use crate::autograd::{BackwardOp, accumulate_gradient};
 use crate::tensor_data::TensorData; // Use correct path
 use num_traits::{Zero, One};
 use std::ops::{Add, Mul, AddAssign};
@@ -12,6 +12,10 @@ use std::fmt::Debug;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
 use std::default::Default;
+use crate::error::NeuraRustError;
+ // Import add/mul for backward
+use std::iter::Sum;
+use crate::tensor::utils::reduce_gradient;
 
 /// Represents the Matrix Multiplication operation.
 #[derive(Debug)]
@@ -20,6 +24,10 @@ struct MatMulBackward<T> {
     // Using clones might be easier than weak refs if we need their data directly
     a: Tensor<T>, 
     b: Tensor<T>,
+    a_ref: Weak<RefCell<TensorData<T>>>, 
+    b_ref: Weak<RefCell<TensorData<T>>>, 
+    a_shape: Vec<usize>,
+    b_shape: Vec<usize>,
     _phantom: PhantomData<T>,
 }
 
@@ -31,6 +39,10 @@ impl<T> MatMulBackward<T> {
         Self {
             a: a.clone(),
             b: b.clone(),
+            a_ref: a.get_weak_ref(),
+            b_ref: b.get_weak_ref(),
+            a_shape: a.shape().clone(),
+            b_shape: b.shape().clone(),
             _phantom: PhantomData,
         }
     }
@@ -39,103 +51,122 @@ impl<T> MatMulBackward<T> {
 impl<T> BackwardOp<T> for MatMulBackward<T> 
 where
     // Added PartialEq, Default to existing bounds
-    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static + One + Zero + Add<Output=T> + Debug + PartialEq + Default,
+    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static + One + Zero + Add<Output=T> + Debug + PartialEq + Default + Sum,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) {
-        let a_weak = self.a.get_weak_ref();
-        let b_weak = self.b.get_weak_ref();
-        let a_ptr_opt = a_weak.upgrade().map(|rc| Rc::as_ptr(&rc));
-        let b_ptr_opt = b_weak.upgrade().map(|rc| Rc::as_ptr(&rc));
-        println!("[MatMulBackward] backward called. a_ptr: {:?}, b_ptr: {:?}", a_ptr_opt, b_ptr_opt);
-
-        let needs_grad_a = a_weak.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
-        println!("[MatMulBackward] needs_grad_a: {}", needs_grad_a);
-        if needs_grad_a {
-            let b_transposed = self.b.transpose();
-            let grad_a = matmul(upstream_grad, &b_transposed);
-            grad_a.set_requires_grad(false);
-            println!("[MatMulBackward] Accumulating grad for A (ptr: {:?})", a_ptr_opt);
-            crate::autograd::accumulate_gradient(gradients, &a_weak, grad_a);
-        }
+        let grad_a_unreduced = matmul(upstream_grad, &self.b.transpose())
+            .expect("Matmul backward failed calculating grad_a");
+        let grad_a = reduce_gradient(&grad_a_unreduced, &self.a_shape);
         
-        let needs_grad_b = b_weak.upgrade().map_or(false, |rc| rc.borrow().requires_grad);
-        println!("[MatMulBackward] needs_grad_b: {}", needs_grad_b);
-        if needs_grad_b {
-             let a_transposed = self.a.transpose();
-             let grad_b = matmul(&a_transposed, upstream_grad); 
-             grad_b.set_requires_grad(false);
-             println!("[MatMulBackward] Accumulating grad for B (ptr: {:?})", b_ptr_opt);
-             crate::autograd::accumulate_gradient(gradients, &b_weak, grad_b);
+        let grad_b_unreduced = matmul(&self.a.transpose(), upstream_grad)
+             .expect("Matmul backward failed calculating grad_b");
+        let grad_b = reduce_gradient(&grad_b_unreduced, &self.b_shape);
+        grad_b.set_requires_grad(false);
+
+        if let Some(a_rc) = self.a_ref.upgrade() {
+             if a_rc.borrow().requires_grad {
+                 accumulate_gradient(gradients, &self.a_ref, grad_a);
+             }
         }
+         if let Some(b_rc) = self.b_ref.upgrade() {
+             if b_rc.borrow().requires_grad {
+                 accumulate_gradient(gradients, &self.b_ref, grad_b);
+             }
+         }
     }
 
     fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
-        // Use get_weak_ref, no need to clone weak refs
-        vec![self.a.get_weak_ref(), self.b.get_weak_ref()]
+        vec![self.a_ref.clone(), self.b_ref.clone()]
     }
 }
 
 /// Performs matrix multiplication C = A @ B.
 /// Currently supports only 2D tensors (matrices).
 /// A: [M, K], B: [K, N] -> C: [M, N]
-pub fn matmul<T>(a: &Tensor<T>, b: &Tensor<T>) -> Tensor<T>
+pub fn matmul<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    // Added PartialEq to existing bounds
-    T: Mul<Output = T> + AddAssign + Zero + One + Default + Clone + Copy + Debug + 'static + Add<Output=T> + PartialEq,
+    T: Mul<Output = T> + AddAssign + Copy + Clone + 'static + One + Zero + Add<Output=T> + Debug + PartialEq + Default + Sum,
 {
     let a_shape = a.shape();
     let b_shape = b.shape();
 
-    // --- Basic Shape Checks (2D only for now) ---
-    assert_eq!(a_shape.len(), 2, "MatMul input A must be 2D, got shape: {:?}", a_shape);
-    assert_eq!(b_shape.len(), 2, "MatMul input B must be 2D, got shape: {:?}", b_shape);
+    // Validation
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        // Use correct error variant IncompatibleShapes
+        return Err(NeuraRustError::IncompatibleShapes {
+            shape1: a_shape.clone(),
+            shape2: b_shape.clone(),
+            // Add context if needed, or rely on the default message
+            // detail: format!("Matmul inputs must be 2D. Got A: {:?}, B: {:?}", a_shape, b_shape)
+        });
+    }
+    if a_shape[1] != b_shape[0] {
+         // Use correct error variant IncompatibleShapes
+         return Err(NeuraRustError::IncompatibleShapes {
+            shape1: a_shape.clone(),
+            shape2: b_shape.clone(),
+             // detail: format!("Matmul inner dimensions mismatch: {} != {}", a_shape[1], b_shape[0])
+        });
+    }
+
     let m = a_shape[0];
-    let k_a = a_shape[1];
-    let k_b = b_shape[0];
+    let k = a_shape[1]; // == b_shape[0]
     let n = b_shape[1];
-    assert_eq!(k_a, k_b, 
-        "MatMul dimension mismatch: A shape {:?} vs B shape {:?}. Inner dimensions ({} and {}) must match.",
-        a_shape, b_shape, k_a, k_b);
 
     let output_shape = vec![m, n];
     let mut output_data = vec![T::zero(); m * n];
 
-    let a_data = a.borrow_tensor_data();
-    let b_data = b.borrow_tensor_data();
+    let a_data = a.data(); // Borrow starts here
+    let b_data = b.data(); // Borrow starts here
 
-    // --- Naive MatMul Calculation (C[i,j] = sum(A[i,k]*B[k,j])) ---
-    // Use get_offset for stride-aware indexing
-    for i in 0..m {         
-        for j in 0..n {     
+    for i in 0..m {
+        for j in 0..n {
             let mut sum = T::zero();
-            for k in 0..k_a { 
-                let a_offset = a_data.get_offset(&[i, k]);
-                let b_offset = b_data.get_offset(&[k, j]);
-                let a_val = a_data.data[a_offset];
-                let b_val = b_data.data[b_offset]; 
-                sum += a_val * b_val;
+            for l in 0..k {
+                sum += a_data[i * k + l] * b_data[l * n + j];
             }
-            // Output tensor is contiguous, calculate offset directly
-            // (Could also create temporary TensorData for output and use get_offset)
-            let output_offset = i * n + j; // Output C is [m, n]
-            output_data[output_offset] = sum;
+            output_data[i * n + j] = sum;
         }
-    }
+    } // Borrows of a_data and b_data end here
     
+    // Move drops after the borrows end
     drop(a_data);
     drop(b_data);
 
-    // --- Autograd Setup ---
+    let a_ref_for_backward = a.get_weak_ref();
+    let b_ref_for_backward = b.get_weak_ref();
+    let a_shape_clone = a_shape.clone();
+    let b_shape_clone = b_shape.clone();
+    let a_clone = a.clone(); 
+    let b_clone = b.clone();
+
     let requires_grad = a.requires_grad() || b.requires_grad();
-    let output_tensor = Tensor::new(output_data, output_shape);
+    let result = Tensor::new(output_data, output_shape)?; 
 
     if requires_grad {
-        output_tensor.set_requires_grad(true);
-        let matmul_backward: Rc<dyn BackwardOp<T>> = Rc::new(MatMulBackward::new(a, b));
-        output_tensor.set_grad_fn(Some(matmul_backward));
+        result.set_requires_grad(true);
+        let grad_fn = MatMulBackward {
+            a_ref: a_ref_for_backward,
+            b_ref: b_ref_for_backward,
+            a_shape: a_shape_clone,
+            b_shape: b_shape_clone,
+            a: a_clone,
+            b: b_clone,
+            _phantom: PhantomData,
+        };
+        result.set_grad_fn(Some(Rc::new(grad_fn))); 
     }
+    Ok(result)
+}
 
-    output_tensor
+impl<T> Tensor<T> {
+    pub fn matmul(&self, other: &Tensor<T>) -> Tensor<T>
+    where
+        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Mul<Output=T> + Default + Sum + 'static,
+    {
+        matmul(self, other)
+            .unwrap_or_else(|e| panic!("Tensor matmul failed: {:?}", e))
+    }
 }
 
 #[cfg(test)]
@@ -149,97 +180,98 @@ mod tests {
     use std::ops::{AddAssign, Mul, Add};
     use std::default::Default;
     use std::cmp::PartialEq;
+    use crate::error::NeuraRustError; // Import NeuraRustError
+    use std::iter::Sum; // Import Sum for test helpers
      // For backward tests later
 
     // Removed Float import as tests use concrete types or simple comparisons
 
     // Helper function for creating tensors in tests, updated bounds
     // Ensure these bounds match what matmul function and backward require
-    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Mul<Output=T> + Default + 'static>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        Tensor::new(data, shape)
+    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Mul<Output=T> + Default + Sum + 'static>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+        Tensor::new(data, shape).expect("Tensor creation failed in test")
     }
-    fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Mul<Output=T> + Default + 'static>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
-        let tensor = Tensor::new(data, shape);
-        tensor.set_requires_grad(true);
-        tensor
-    }
-    
-    #[test]
-    fn test_matmul_forward_2x2() {
-        let a = create_test_tensor(vec![1.0f64, 2.0, 3.0, 4.0], vec![2, 2]);
-        let b = create_test_tensor(vec![5.0f64, 6.0, 7.0, 8.0], vec![2, 2]);
-        // Use the explicitly imported function
-        let result = matmul(&a, &b);
-        let expected_data = vec![19.0, 22.0, 43.0, 50.0];
-        let expected_shape = vec![2, 2];
-        assert_eq!(result.shape(), expected_shape);
-        assert_eq!(result.borrow_tensor_data().data.to_vec(), expected_data);
-        assert!(!result.requires_grad());
-    }
-
-    #[test]
-    fn test_matmul_forward_2x3_3x2() {
-        let a = create_test_tensor(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let b = create_test_tensor(vec![7.0f32, 8.0, 9.0, 10.0, 11.0, 12.0], vec![3, 2]);
-        // Use the explicitly imported function
-        let result = matmul(&a, &b);
-        let expected_data = vec![58.0, 64.0, 139.0, 154.0];
-        let expected_shape = vec![2, 2];
-        assert_eq!(result.shape(), expected_shape);
-        assert_eq!(result.borrow_tensor_data().data.to_vec(), expected_data);
-        assert!(!result.requires_grad());
-    }
-
-    #[test]
-    #[should_panic(expected = "MatMul dimension mismatch")]
-    fn test_matmul_dimension_mismatch() {
-        let a = create_test_tensor(vec![1.0f64, 2.0, 3.0, 4.0], vec![2, 2]);
-        let b_wrong_k = create_test_tensor(vec![5.0f64, 6.0, 7.0, 8.0, 9.0, 10.0], vec![3, 2]);
-        // Use the explicitly imported function
-        let _result = matmul(&a, &b_wrong_k);
-    }
-
-    #[test]
-    #[should_panic(expected = "MatMul input A must be 2D")]
-    fn test_matmul_first_arg_not_2d() {
-        let a_1d = create_test_tensor(vec![1.0f64, 2.0], vec![2]);
-        let b = create_test_tensor(vec![5.0f64, 6.0], vec![2, 1]);
-        // Use the explicitly imported function
-        let _result = matmul(&a_1d, &b);
+    fn create_test_tensor_with_grad<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Mul<Output=T> + Default + Sum + 'static>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+         let tensor = Tensor::new_with_grad(data, shape).expect("Test grad tensor creation failed");
+         tensor
     }
     
     #[test]
-    #[should_panic(expected = "MatMul input B must be 2D")]
-    fn test_matmul_second_arg_not_2d() {
-        let a = create_test_tensor(vec![1.0f64, 2.0], vec![1, 2]);
-        let b_1d = create_test_tensor(vec![5.0f64, 6.0], vec![2]);
-        // Use the explicitly imported function
-        let _result = matmul(&a, &b_1d);
+    fn test_matmul_forward() {
+        let a = create_test_tensor::<i32>(vec![1, 2, 3, 4], vec![2, 2]);
+        let b = create_test_tensor::<i32>(vec![5, 6, 7, 8], vec![2, 2]);
+
+        let result = matmul(&a, &b);
+        assert!(result.is_ok());
+        let result_tensor = result.unwrap();
+
+        let expected_data = vec![19, 22, 43, 50];
+        assert_eq!(result_tensor.data().to_vec(), expected_data);
+        assert_eq!(result_tensor.shape(), vec![2, 2]);
+        assert!(!result_tensor.requires_grad());
+
+        // Test incompatible shapes - use correct error variant IncompatibleShapes
+        let c = create_test_tensor::<i32>(vec![1, 2], vec![1, 2]); // a=[2,2], c=[1,2] -> k mismatch (2 != 1)
+        let result_err = matmul(&a, &c);
+        assert!(result_err.is_err());
+        assert!(matches!(result_err.err().unwrap(), NeuraRustError::IncompatibleShapes { .. }));
+        
+        let d = create_test_tensor::<i32>(vec![1,2,3,4,5,6], vec![2, 3]); // d=[2,3]
+        let e = create_test_tensor::<i32>(vec![1,2,3,4,5,6], vec![2, 3]); // e=[2,3] -> k mismatch (3 != 2)
+        let result_err2 = matmul(&d, &e);
+        assert!(result_err2.is_err());
+        assert!(matches!(result_err2.err().unwrap(), NeuraRustError::IncompatibleShapes { .. }));
+
+        // Test the Tensor method
+        let result_method = a.matmul(&b); // Should still work
+        assert_eq!(result_method.data().to_vec(), expected_data);
+    }
+
+    #[test]
+    fn test_matmul_backward() {
+        type TestType = f32;
+        let a = create_test_tensor_with_grad::<TestType>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let b = create_test_tensor_with_grad::<TestType>(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
+
+        let output = matmul(&a, &b).expect("Matmul failed in backward test setup");
+        
+        let loss = output.sum();
+        loss.backward(None);
+
+        let grad_a_opt = a.grad();
+        assert!(grad_a_opt.is_some(), "Gradient A missing");
+        let grad_a = grad_a_opt.as_ref().unwrap();
+        assert_eq!(grad_a.shape(), vec![2, 2]);
+        assert_eq!(grad_a.data().to_vec(), vec![11.0, 15.0, 11.0, 15.0]);
+
+        let grad_b_opt = b.grad();
+        assert!(grad_b_opt.is_some(), "Gradient B missing");
+        let grad_b = grad_b_opt.as_ref().unwrap();
+         assert_eq!(grad_b.shape(), vec![2, 2]);
+        assert_eq!(grad_b.data().to_vec(), vec![4.0, 4.0, 6.0, 6.0]);
     }
 
     #[test]
     fn test_matmul_propagate_requires_grad() {
-        let a = create_test_tensor_with_grad::<f32>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let b = create_test_tensor::<f32>(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
-        // Use the explicitly imported function
-        let result = matmul(&a, &b);
-        assert!(result.requires_grad());
-        assert!(result.grad_fn().is_some());
+        let a_grad = create_test_tensor_with_grad::<f32>(vec![1.0], vec![1, 1]);
+        let b_grad = create_test_tensor_with_grad::<f32>(vec![2.0], vec![1, 1]);
+        let a_no_grad = create_test_tensor::<f32>(vec![3.0], vec![1, 1]);
+        let b_no_grad = create_test_tensor::<f32>(vec![4.0], vec![1, 1]);
 
-        let c = create_test_tensor::<f32>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let d = create_test_tensor_with_grad::<f32>(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
-        // Use the explicitly imported function
-        let result2 = matmul(&c, &d);
-        assert!(result2.requires_grad());
-        assert!(result2.grad_fn().is_some());
+        let res1 = matmul(&a_grad, &b_grad).unwrap();
+        assert!(res1.requires_grad());
+        assert!(res1.grad_fn().is_some());
 
-        let e = create_test_tensor::<f32>(vec![1.0, 2.0], vec![1, 2]);
-        let f = create_test_tensor::<f32>(vec![3.0, 4.0], vec![2, 1]);
-        // Use the explicitly imported function
-        let result3 = matmul(&e, &f);
-        assert!(!result3.requires_grad());
-        assert!(result3.grad_fn().is_none());
+        let res2 = matmul(&a_grad, &b_no_grad).unwrap();
+        assert!(res2.requires_grad());
+        assert!(res2.grad_fn().is_some());
+
+        let res3 = matmul(&a_no_grad, &b_grad).unwrap();
+        assert!(res3.requires_grad());
+        assert!(res3.grad_fn().is_some());
+
+        let res4 = matmul(&a_no_grad, &b_no_grad).unwrap();
+        assert!(!res4.requires_grad());
+        assert!(res4.grad_fn().is_none());
     }
-    
-    // TODO: Add autograd tests (backward simple, backward chain)
 }

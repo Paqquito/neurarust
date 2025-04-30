@@ -10,12 +10,15 @@ use std::fmt::Debug;
 use num_traits::Zero;
 use std::collections::HashMap;
 use num_traits::One;
+use crate::error::NeuraRustError;
 
 /// Backward operation for the `stack_op` function.
 #[derive(Debug)]
 struct StackBackward<T> {
     /// Weak references to the original input tensor data.
     input_refs: Vec<Weak<RefCell<TensorData<T>>>>,
+    /// Store shapes for unstacking in backward pass
+    input_shapes: Vec<Vec<usize>>,
     /// The dimension along which stacking occurred.
     dim: usize,
     _phantom: PhantomData<T>,
@@ -24,7 +27,7 @@ struct StackBackward<T> {
 impl<T> BackwardOp<T> for StackBackward<T>
 where
     // Add Zero/One for Tensor::stack/slice + Default/Debug/Static
-    T: Clone + Debug + Default + Zero + One + AddAssign + 'static,
+    T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy,
 {
     /// Performs the backward pass for the stacking operation.
     /// Splits the `upstream_grad` along the stacking dimension and accumulates
@@ -103,13 +106,13 @@ where
 ///
 /// # Returns
 /// A `Result` containing the stacked tensor or an error message.
-pub fn stack_op<T>(tensors: &[Tensor<T>], dim: usize) -> Result<Tensor<T>, String>
+pub fn stack_op<T>(tensors: &[Tensor<T>], dim: usize) -> Result<Tensor<T>, NeuraRustError>
 where
     // Add T: One, needed for the BackwardOp trait object conversion
-    T: Clone + Debug + Default + Zero + One + AddAssign + 'static, 
+    T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy, 
 {
     if tensors.is_empty() {
-        return Err("Cannot stack empty sequence of tensors".to_string());
+        return Err(NeuraRustError::UnsupportedOperation("Cannot stack empty tensor list".to_string()));
     }
 
     // --- 1. Validate input shapes and calculate output shape --- 
@@ -119,16 +122,21 @@ where
 
     // Validate dimension
     if dim > rank {
-        return Err(format!("Stack dimension ({}) out of range for tensor rank ({})", dim, rank));
+        return Err(NeuraRustError::IndexOutOfBounds { 
+            index: vec![dim], // Simplified index for error
+            shape: vec![rank + 1] // Indicate target rank
+        });
     }
     
     // Validate shapes are consistent
     for (i, tensor) in tensors.iter().enumerate().skip(1) {
         if tensor.shape() != first_shape {
-            return Err(format!(
-                "Cannot stack tensors: shape mismatch at index {}. Expected {:?}, got {:?}.",
-                i, first_shape, tensor.shape()
-            ));
+            return Err(NeuraRustError::IncompatibleShapes { 
+                shape1: first_shape.clone(), 
+                shape2: tensor.shape(),
+                // Add detail about which tensor mismatched
+                // detail: Some(format!("Tensor at index {} has mismatching shape", i))
+            });
         }
     }
 
@@ -155,28 +163,27 @@ where
             
             // Calculate the multi-dimensional coordinates in the *input* tensor shape
             let input_coords = crate::tensor::utils::index_to_coord(input_linear_idx, &input_strides, &first_shape);
-            let input_coords_clone_for_err = input_coords.clone(); // Clone for potential error message
-            
-            // Construct the multi-dimensional coordinates in the *output* tensor shape
-            let mut output_coords = input_coords; // Move occurs here
-            // Insert the index `i` (from the input tensor enumeration) at the stack dimension `dim`.
+            let input_coords_clone = input_coords.clone(); 
+            let mut output_coords = input_coords_clone;
             output_coords.insert(dim, i);
             
-            // Convert output coordinates to the linear index in the output data vector
-            let mut output_linear_idx = 0;
-            for d in 0..output_shape.len() {
-                output_linear_idx += output_coords[d] * output_strides[d];
-            }
+            // Calculate the linear index in the output tensor manually
+            let output_linear_idx = output_coords.iter().zip(&output_strides)
+                .map(|(&coord, &stride)| coord * stride)
+                .sum::<usize>();
             
-            // Place the input value into the correct position in the output data
-            // Check bounds just in case (shouldn't happen if logic is correct)
-            if output_linear_idx < output_numel {
-                 output_data[output_linear_idx] = input_val;
-            } else {
-                // This path indicates a bug in the indexing logic.
-                return Err(format!("Internal error: Calculated output index {} out of bounds ({}). Input tensor {}, input idx {}, input coords {:?}, output coords {:?}", 
-                    output_linear_idx, output_numel, i, input_linear_idx, input_coords_clone_for_err, output_coords)); // Use the clone
+            if output_linear_idx >= output_numel {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Internal error: Calculated output index {} out of bounds ({}). Input tensor {}, input idx {}, input coords {:?}, output coords {:?}",
+                    output_linear_idx, 
+                    output_numel, 
+                    i, 
+                    input_linear_idx, 
+                    input_coords, 
+                    output_coords
+                )));
             }
+            output_data[output_linear_idx] = input_val;
         }
         // Release borrow for the current input tensor
         drop(input_td);
@@ -186,19 +193,123 @@ where
     // eprintln!("WARNING: stack_op data copying not implemented yet!");
 
     // --- 3. Create output tensor and set up autograd --- 
-    let result = Tensor::new(output_data, output_shape);
+    let result = Tensor::new(output_data, output_shape)?;
     let requires_grad = tensors.iter().any(|t| t.requires_grad());
 
     if requires_grad {
         result.set_requires_grad(true);
-        let input_refs = tensors.iter().map(|t| t.get_weak_ref()).collect();
         let grad_fn = StackBackward {
-            input_refs,
+            input_refs: tensors.iter().map(|t| t.get_weak_ref()).collect(),
+            input_shapes: tensors.iter().map(|t| t.shape()).collect(),
             dim,
             _phantom: PhantomData,
         };
-        result.borrow_tensor_data_mut().grad_fn = Some(Rc::new(grad_fn));
+        result.set_grad_fn(Some(Rc::new(grad_fn)));
     }
 
     Ok(result)
+} 
+
+// --- Tests ---
+#[cfg(test)]
+mod tests {
+    use super::*; 
+    use crate::Tensor;
+    use num_traits::{Zero, One};
+    use crate::error::NeuraRustError;
+
+    // Helper functions
+    fn create_tensor<T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+        Tensor::new(data, shape).expect("Test tensor creation failed")
+    }
+     fn create_grad_tensor<T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T> {
+        Tensor::new_with_grad(data, shape).expect("Test grad tensor creation failed")
+    }
+
+    #[test]
+    fn test_stack_basic() {
+        let t1 = create_tensor(vec![1, 2], vec![2]);
+        let t2 = create_tensor(vec![3, 4], vec![2]);
+
+        // Stack along new axis 0
+        let result0 = stack_op(&[t1.clone(), t2.clone()], 0);
+        assert!(result0.is_ok());
+        let res0 = result0.unwrap();
+        assert_eq!(res0.shape(), vec![2, 2]);
+        assert_eq!(res0.data().to_vec(), vec![1, 2, 3, 4]);
+
+        // Stack along new axis 1
+        let result1 = stack_op(&[t1.clone(), t2.clone()], 1);
+        assert!(result1.is_ok());
+        let res1 = result1.unwrap();
+        assert_eq!(res1.shape(), vec![2, 2]);
+        assert_eq!(res1.data().to_vec(), vec![1, 3, 2, 4]);
+    }
+
+    #[test]
+    fn test_stack_multiple_tensors() {
+        let t1 = create_tensor(vec![1], vec![1]);
+        let t2 = create_tensor(vec![2], vec![1]);
+        let t3 = create_tensor(vec![3], vec![1]);
+
+        let result = stack_op(&[t1, t2, t3], 0);
+        assert!(result.is_ok());
+        let res = result.unwrap();
+        assert_eq!(res.shape(), vec![3, 1]);
+        assert_eq!(res.data().to_vec(), vec![1, 2, 3]);
+    }
+    
+     #[test]
+    fn test_stack_2d_tensors() {
+        let t1 = create_tensor(vec![1, 2, 3, 4], vec![2, 2]);
+        let t2 = create_tensor(vec![5, 6, 7, 8], vec![2, 2]);
+
+        // Stack along axis 0
+        let result0 = stack_op(&[t1.clone(), t2.clone()], 0);
+         assert!(result0.is_ok());
+        let res0 = result0.unwrap();
+        assert_eq!(res0.shape(), vec![2, 2, 2]);
+        assert_eq!(res0.data().to_vec(), vec![1, 2, 3, 4, 5, 6, 7, 8]);
+
+        // Stack along axis 1
+        let result1 = stack_op(&[t1.clone(), t2.clone()], 1);
+        assert!(result1.is_ok());
+        let res1 = result1.unwrap();
+        assert_eq!(res1.shape(), vec![2, 2, 2]);
+        // Expected: [[ [1,2], [5,6] ], [ [3,4], [7,8] ] ] -> Flattened
+        assert_eq!(res1.data().to_vec(), vec![1, 2, 5, 6, 3, 4, 7, 8]);
+
+        // Stack along axis 2
+        let result2 = stack_op(&[t1.clone(), t2.clone()], 2);
+         assert!(result2.is_ok());
+        let res2 = result2.unwrap();
+        assert_eq!(res2.shape(), vec![2, 2, 2]);
+         // Expected: [[ [1,5], [2,6] ], [ [3,7], [4,8] ] ] -> Flattened
+        assert_eq!(res2.data().to_vec(), vec![1, 5, 2, 6, 3, 7, 4, 8]);
+    }
+
+    #[test]
+    fn test_stack_errors() {
+        let t1 = create_tensor(vec![1, 2], vec![2]);
+        let t2_diff_shape = create_tensor(vec![3, 4, 5], vec![3]);
+
+        // Empty list
+        let result_empty = stack_op::<i32>(&[], 0);
+        assert!(result_empty.is_err());
+        assert!(matches!(result_empty.err().unwrap(), NeuraRustError::UnsupportedOperation(_)));
+
+        // Axis out of bounds
+        let result_axis = stack_op(&[t1.clone()], 2); // rank=1, axis=2
+        assert!(result_axis.is_err());
+         assert!(matches!(result_axis.err().unwrap(), NeuraRustError::IndexOutOfBounds { .. }));
+
+        // Shape mismatch
+        let result_shape = stack_op(&[t1.clone(), t2_diff_shape], 0);
+        assert!(result_shape.is_err());
+         assert!(matches!(result_shape.err().unwrap(), NeuraRustError::IncompatibleShapes { .. }));
+    }
+
+    // --- Backward Tests --- 
+    // TODO: Add backward tests for stack
+
 } 

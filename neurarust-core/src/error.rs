@@ -1,37 +1,67 @@
 use thiserror::Error;
 
-#[derive(Error, Debug, PartialEq)]
+/// Custom error type for the NeuraRust framework.
+#[derive(Error, Debug, PartialEq, Clone)] // PartialEq for easier testing, Clone added
 pub enum NeuraRustError {
-    #[error("Shape mismatch: expected {expected:?}, found {found:?}")]
-    ShapeMismatch { expected: Vec<usize>, found: Vec<usize> },
+    #[error("Shape mismatch: expected {expected:?}, got {actual:?}")]
+    ShapeMismatch {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
 
-    #[error("Incompatible shapes for broadcasting: {shape1:?} and {shape2:?}")]
-    BroadcastError { shape1: Vec<usize>, shape2: Vec<usize> },
+    #[error("Dimension mismatch: expected {expected}, got {actual}")]
+    DimensionMismatch {
+        expected: usize,
+        actual: usize,
+    },
 
-    #[error("Index out of bounds: index {index:?} is out of bounds for dimension {dim} with size {size}")]
-    IndexOutOfBounds { index: usize, dim: usize, size: usize },
+    #[error("Incompatible shapes for operation: {shape1:?} and {shape2:?}")]
+    IncompatibleShapes {
+        shape1: Vec<usize>,
+        shape2: Vec<usize>,
+    },
+    
+    #[error("Cannot broadcast shapes: {shape1:?} and {shape2:?}")]
+    BroadcastError {
+        shape1: Vec<usize>,
+        shape2: Vec<usize>,
+    },
 
-    #[error("Slice out of bounds: range {start}..{end} is out of bounds for dimension {dim} with size {size}")]
-    SliceOutOfBounds { start: usize, end: usize, dim: usize, size: usize },
+    #[error("Index out of bounds: index {index:?} for shape {shape:?}")]
+    IndexOutOfBounds {
+        index: Vec<usize>,
+        shape: Vec<usize>,
+    },
 
-    #[error("Invalid number of dimensions for operation: expected {expected}, found {found}")]
-    InvalidDimensions { expected: usize, found: usize },
+    #[error("Slice error: {message}")]
+    SliceError { message: String },
 
-    #[error("Operation requires tensor to require grad, but it does not")]
-    RequiresGradError,
+    #[error("Tensor creation error: data length {data_len} does not match shape {shape:?}")]
+    TensorCreationError {
+        data_len: usize,
+        shape: Vec<usize>,
+    },
 
-    #[error("Cannot perform backward on non-scalar tensor without providing gradient")]
-    BackwardNonScalarError,
+    #[error("Operation requires tensor to require grad, but it doesn't.")]
+    RequiresGradNotMet,
 
-    #[error("Division by zero")]
+    #[error("Backward called on non-scalar tensor without explicit gradient.")]
+    BackwardNonScalar,
+
+    #[error("Shape mismatch during gradient accumulation: expected {expected:?}, got {actual:?}")]
+    GradientAccumulationShapeMismatch {
+        expected: Vec<usize>,
+        actual: Vec<usize>,
+    },
+
+    #[error("Unsupported operation: {0}")]
+    UnsupportedOperation(String),
+
+    #[error("Internal error: {0}")]
+    InternalError(String),
+
+     #[error("Division by zero error")]
     DivisionByZero,
 
-    #[error("Negative dimension size is not allowed")]
-    NegativeDimension,
-
-    #[error("Feature not implemented yet: {feature}")]
-    NotImplemented { feature: String },
-
-    #[error("Internal error: {message}")] // For unexpected logic errors
-    InternalError { message: String },
+    // Add more specific errors as needed
 } 

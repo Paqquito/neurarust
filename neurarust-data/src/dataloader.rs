@@ -9,7 +9,7 @@ use std::marker::PhantomData; // Import PhantomData
 
 /// Provides an iterator over a Dataset, yielding batches of data.
 #[derive(Debug)]
-pub struct DataLoader<I, T, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> {
+pub struct DataLoader<I: Copy, T: Copy, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> {
     dataset: D,
     batch_size: usize,
     shuffle: bool,
@@ -18,7 +18,7 @@ pub struct DataLoader<I, T, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> {
     _marker: PhantomData<(I, T)>, // Add PhantomData for unused I, T
 }
 
-impl<I, T, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> DataLoader<I, T, D> {
+impl<I: Copy, T: Copy, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> DataLoader<I, T, D> {
     /// Creates a new DataLoader.
     /// 
     /// # Arguments
@@ -61,9 +61,9 @@ impl<I, T, D: Dataset<Item = (Tensor<I>, Tensor<T>)>> DataLoader<I, T, D> {
 impl<I, T, D> Iterator for DataLoader<I, T, D>
 where
     D: Dataset<Item = (Tensor<I>, Tensor<T>)>, // Dataset provides the tuples
-    // Add bounds required by collate_batch
-    I: Clone + Debug + Default + Zero + One + AddAssign + 'static, 
-    T: Clone + Debug + Default + Zero + One + AddAssign + 'static,
+    // Add bounds required by collate_batch (including Copy)
+    I: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy, 
+    T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy,
 {
     // Change the associated type to the collated batch tuple
     type Item = (Tensor<I>, Tensor<T>); 
@@ -118,8 +118,8 @@ where
 /// Panics if `Tensor::stack` fails (e.g., inconsistent shapes).
 pub fn collate_batch<I, T>(batch: Vec<(Tensor<I>, Tensor<T>)>) -> Option<(Tensor<I>, Tensor<T>)> 
 where 
-    I: Clone + Debug + Default + Zero + One + AddAssign + 'static, // AddAssign needed by Tensor::stack -> stack_op
-    T: Clone + Debug + Default + Zero + One + AddAssign + 'static, // AddAssign needed by Tensor::stack -> stack_op
+    I: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy,
+    T: Clone + Debug + Default + Zero + One + AddAssign + 'static + Copy,
 {
     if batch.is_empty() {
         return None;
@@ -134,10 +134,8 @@ where
     }
 
     // Stack tensors along a new batch dimension (dim 0)
-    let batch_inputs = Tensor::stack(&input_tensors, 0)
-        .expect("Failed to stack input tensors into a batch. Ensure all input tensors have the same shape.");
-    let batch_targets = Tensor::stack(&target_tensors, 0)
-        .expect("Failed to stack target tensors into a batch. Ensure all target tensors have the same shape.");
+    let batch_inputs = Tensor::stack(&input_tensors, 0);
+    let batch_targets = Tensor::stack(&target_tensors, 0);
     
     Some((batch_inputs, batch_targets))
 }
@@ -161,8 +159,8 @@ mod tests {
         let _dataset_len = inputs_data.len(); // Prefixed with _ as it's unused in this test
         let batch_size = 2;
 
-        let inputs = inputs_data.iter().map(|&x| Tensor::new(vec![x], vec![1])).collect::<Vec<_>>();
-        let targets = targets_data.iter().map(|&x| Tensor::new(vec![x], vec![1])).collect::<Vec<_>>();
+        let inputs = inputs_data.iter().map(|&x| Tensor::new(vec![x], vec![1]).expect("Test input tensor creation failed")).collect::<Vec<_>>();
+        let targets = targets_data.iter().map(|&x| Tensor::new(vec![x], vec![1]).expect("Test target tensor creation failed")).collect::<Vec<_>>();
         
         type MyDataset = VecDataset<i32, i32>;
         let dataset = MyDataset::new(inputs.clone(), targets.clone());
@@ -205,8 +203,8 @@ mod tests {
         let batch_size = 10;
         let num_batches = (dataset_len + batch_size - 1) / batch_size; // = 10
 
-        let inputs = (0..dataset_len).map(|i| Tensor::new(vec![i as i32], vec![1])).collect::<Vec<_>>();
-        let targets = (0..dataset_len).map(|i| Tensor::new(vec![i as i32 * 10], vec![1])).collect::<Vec<_>>();
+        let inputs = (0..dataset_len).map(|i| Tensor::new(vec![i as i32], vec![1]).expect("Test input tensor creation failed")).collect::<Vec<_>>();
+        let targets = (0..dataset_len).map(|i| Tensor::new(vec![i as i32 * 10], vec![1]).expect("Test target tensor creation failed")).collect::<Vec<_>>();
         type MyDataset = VecDataset<i32, i32>; 
         let dataset = MyDataset::new(inputs, targets);
         let mut dataloader: DataLoader<i32, i32, _> = DataLoader::new(dataset, batch_size, true);
@@ -249,8 +247,8 @@ mod tests {
 
      #[test]
     fn test_dataloader_exact_batch_size() {
-        let inputs = (0..6).map(|i| Tensor::new(vec![i], vec![1])).collect::<Vec<_>>();
-        let targets = (0..6).map(|i| Tensor::new(vec![i*10], vec![1])).collect::<Vec<_>>();
+        let inputs = (0..6).map(|i| Tensor::new(vec![i], vec![1]).expect("Test input tensor creation failed")).collect::<Vec<_>>();
+        let targets = (0..6).map(|i| Tensor::new(vec![i*10], vec![1]).expect("Test target tensor creation failed")).collect::<Vec<_>>();
         let dataset = VecDataset::new(inputs.clone(), targets.clone());
         let mut dataloader: DataLoader<i32, i32, _> = DataLoader::new(dataset, 3, false);
 
@@ -270,8 +268,8 @@ mod tests {
     #[test]
     fn test_collate_batch_simple() {
         let batch = vec![
-            (Tensor::new(vec![1.0f64, 2.0], vec![2]), Tensor::new(vec![0i32], vec![1])),
-            (Tensor::new(vec![3.0, 4.0], vec![2]), Tensor::new(vec![1i32], vec![1])),
+            (Tensor::new(vec![1.0f64, 2.0], vec![2]).expect("Input 1 creation failed"), Tensor::new(vec![0i32], vec![1]).expect("Target 1 creation failed")),
+            (Tensor::new(vec![3.0, 4.0], vec![2]).expect("Input 2 creation failed"), Tensor::new(vec![1i32], vec![1]).expect("Target 2 creation failed")),
         ];
 
         type InputType = f64;

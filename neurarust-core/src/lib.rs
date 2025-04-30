@@ -26,8 +26,4 @@ pub use num_traits;
 // dans les modules correspondants.
 
 pub mod error;
-
 pub use error::NeuraRustError;
-
-// Re-export common tensor creation functions for easier access
-pub use tensor::{full, ones, zeros};

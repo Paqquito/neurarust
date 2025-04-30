@@ -1,190 +1,152 @@
 // neurarust-optim/src/sgd.rs
 
 // Utiliser les types de neurarust_core
-use neurarust_core::tensor::Tensor;
+use neurarust_core::nn::Parameter; // Import Parameter
 // Importer le trait Optimizer depuis lib.rs
 use crate::Optimizer; 
 // Import necessary traits for calculations
-use std::ops::{SubAssign, Mul};
-use num_traits::{FromPrimitive, Zero};
+use std::ops::{SubAssign, Mul, Sub, Add, Div, Neg, AddAssign};
+use num_traits::{Float, FromPrimitive, Zero, One, Pow};
 use std::fmt::Debug;
+use std::iter::Sum as IterSum;
+// Import arithmetic ops from core
+// Import correct sum function via sum module
+use std::marker::PhantomData;
+use neurarust_core::error::NeuraRustError;
 
-/// Implements stochastic gradient descent (optionally with momentum).
-/// 
-/// Updates parameters `p` according to the rule:
-/// `p = p - lr * grad(p)`
+/// Stochastic Gradient Descent optimizer.
 #[derive(Debug)]
-pub struct SGD<T: Clone> { 
-    lr: T, // Learning rate
-    // params: Vec<Tensor<T>>, // Removed: Optimizer is stateless regarding params list
+pub struct SGD<T: Float> {
+    params: Vec<Parameter<T>>, // Store parameters
+    lr: T,                  // Learning rate
+    _marker: PhantomData<T>, // If T is not used elsewhere
 }
 
 impl<T> SGD<T>
 where
-    T: Copy + Clone + FromPrimitive + Debug,
+    T: Float + Copy + Debug,
 {
-    /// Creates a new SGD optimizer instance.
-    ///
+    /// Creates a new SGD optimizer.
     /// # Arguments
-    ///
-    /// * `lr` - The learning rate.
-    pub fn new(lr: T) -> Self {
-        SGD { lr }
+    /// * `params` - A vector of parameters to optimize.
+    /// * `lr` - Learning rate.
+    pub fn new(params: Vec<Parameter<T>>, lr: T) -> Self {
+        SGD {
+            params,
+            lr,
+            _marker: PhantomData,
+        }
     }
 }
 
-impl<T> Optimizer<T> for SGD<T> 
+// Implement the Optimizer trait for SGD
+impl<T> Optimizer<T> for SGD<T>
 where
-    T: Copy + Clone + Debug + Zero + Mul<Output = T> + SubAssign + 'static,
+    // Copy the bounds from the Optimizer trait definition
+    T: Float + FromPrimitive + Zero + One + Pow<T, Output = T> + Pow<i32, Output = T> 
+    + AddAssign + Sub<Output = T> + Neg<Output = T> + Mul<Output = T> + Add<Output = T> 
+    + Div<Output = T> + SubAssign + IterSum + Default + Debug + Copy + 'static + Send + Sync,
 {
-    /// Performs a single optimization step (parameter update).
-    fn step(&mut self, params: &mut [&mut Tensor<T>]) {
-        for param in params.iter_mut() {
-            // Clone the gradient tensor if it exists to avoid borrow conflicts
-            if let Some(grad_tensor) = param.grad().map(|g_ref| g_ref.clone()) {
-                // We need to calculate update = lr * grad element-wise
-                // Get gradient data from the clone
-                let grad_data = grad_tensor.data(); // Immutable borrow on the clone
-                
-                // Prepare storage for update data (same shape as gradient/param)
-                let mut update_data_vec = Vec::with_capacity(grad_data.len());
-                
-                // Calculate update data: update_val = lr * grad_val
-                for grad_val in grad_data.iter() {
-                    // Requires T: Mul<Output = T>
-                    update_data_vec.push(self.lr * *grad_val);
-                }
-                // Grad borrow (on clone) is dropped here
+    /// Performs a single optimization step using SGD.
+    fn step(&mut self) -> Result<(), NeuraRustError> {
+        for param_wrapper in &self.params { // Iterate over stored params
+            let param_tensor = &param_wrapper.0; // Access Tensor inside Parameter
 
-                // Apply update using data_mut and element-wise subtraction
-                // Borrow param mutably *after* gradient processing
-                let mut param_data = param.data_mut();
-                assert_eq!(param_data.len(), update_data_vec.len(), "Shape mismatch during SGD step");
-                for (p_val, u_val) in param_data.iter_mut().zip(update_data_vec.iter()) {
-                    // Requires T: SubAssign
-                    *p_val -= *u_val;
-                }
-            }
+            // 1. Read gradient data using an immutable borrow
+            let grad_data_opt: Option<Vec<T>> = {
+                let param_data_immut = param_tensor.borrow_tensor_data();
+                param_data_immut.grad.as_ref().map(|g| g.data().to_vec())
+            };
+
+            // 2. If gradient exists, update param data using a mutable borrow
+            if let Some(grad_clone) = grad_data_opt {
+                 let mut param_data_mut = param_tensor.borrow_tensor_data_mut(); // Mutable borrow here
+                 let numel = param_data_mut.data.len();
+                 assert_eq!(grad_clone.len(), numel, "Gradient length mismatch");
+                 // Perform update: param = param - lr * grad
+                 for i in 0..numel {
+                     // Use the cloned gradient data
+                     param_data_mut.data[i] = param_data_mut.data[i] - self.lr * grad_clone[i];
+                 }
+             } // else: parameter has no gradient, skip update
+        }
+        Ok(())
+    }
+
+    /// Clears the gradients of all parameters managed by this SGD optimizer.
+    fn zero_grad(&mut self) {
+        for param_wrapper in &self.params { // Iterate over stored params
+            param_wrapper.0.zero_grad(); // Call zero_grad on the inner Tensor
         }
     }
 
-    /// Clears the gradients of all parameters managed by the optimizer.
-    fn zero_grad(&self, params: &mut [&mut Tensor<T>]) {
-        for param in params.iter_mut() {
-            param.zero_grad();
-        }
+    /// Returns a clone of the parameters managed by this optimizer.
+    fn get_params(&self) -> Vec<Parameter<T>> {
+        self.params.clone()
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use super::*; // Import SGD
-    use neurarust_core::tensor::Tensor; // Import Tensor from core
-    // use crate::Optimizer; // No longer needed in tests directly if we use concrete type
-    use num_traits::{Float, Zero, One, FromPrimitive};
-    use std::fmt::Debug;
-    use std::ops::{Mul, AddAssign, Neg};
-    use std::iter::Sum;
+    use super::*;
+    use neurarust_core::tensor::Tensor;
+    use std::ops::AddAssign;
+    
 
-    // Helper to check approximate data equality - Use relative tolerance based on T::epsilon()
-    fn check_data_approx<T>(tensor: &Tensor<T>, expected_data: &[T])
-    where
-        T: Float + Debug + FromPrimitive,
-    {
-        let tensor_data = tensor.data();
-        assert_eq!(tensor_data.len(), expected_data.len(), "Tensor length mismatch");
-        let tol = T::epsilon() * T::from_u32(100).unwrap_or_else(T::one);
-        for (a, b) in tensor_data.iter().zip(expected_data.iter()) {
-            assert!( (*a - *b).abs() < tol, "Data mismatch: expected {:?}, got {:?}. Diff: {:?}", expected_data, &*tensor_data, (*a - *b).abs());
-        }
-    }
-
-    // Helper function to generate a gradient on a tensor using backward()
-    // Creates a simple graph: loss = (tensor * constant_tensor).sum()
-    // backward() on loss populates tensor.grad() with values from constant_tensor.
-    fn generate_gradient<T>(
-        tensor: &Tensor<T>, 
-        grad_values: Vec<T>
-    )
+    // Helper to create Parameter for tests
+    fn create_param<T>(
+        data: Vec<T>, 
+        shape: Vec<usize>
+    ) -> Parameter<T> 
     where 
-        T: Mul<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + Neg<Output=T> + PartialEq,
-    {
-        assert_eq!(tensor.numel(), grad_values.len(), "Tensor numel must match grad_values length");
-        tensor.set_requires_grad(true);
-        let constant = Tensor::new(grad_values, tensor.shape()); // Constant tensor with desired grad values
-        
-        // Simple operation: multiply by constant and sum to get scalar loss
-        let mul_result = tensor * &constant;
-        let loss = mul_result.sum(); // sum() is defined in ops::reduction::sum
-
-        // Ensure loss requires grad (should inherit)
-        assert!(loss.requires_grad());
-
-        // Run backward to populate gradients
-        loss.backward(None); // Use default upstream grad of 1.0
-
-        // Check that the gradient was populated
-        assert!(tensor.grad().is_some(), "Gradient was not generated by backward pass");
-    }
-
-
-    #[test]
-    fn test_sgd_zero_grad() {
-        type TestFloat = f32;
-        let p1_data = vec![1.0 as TestFloat, 2.0];
-        let mut p1 = Tensor::new(p1_data, vec![2]);
-        let mut p2 = Tensor::new(vec![3.0 as TestFloat, 4.0], vec![2]); // No grad needed
-        
-        // Generate gradient on p1
-        let initial_grad_p1 = vec![0.1, 0.2];
-        generate_gradient(&p1, initial_grad_p1.clone());
-        assert!(p1.grad().is_some(), "p1 should have gradient after generate_gradient");
-        check_data_approx(&p1.grad().unwrap(), &initial_grad_p1);
-        assert!(p2.grad().is_none(), "p2 should not have gradient initially");
-
-        let optim: SGD<TestFloat> = SGD::new(0.1);
-        let mut params_slice = [&mut p1, &mut p2];
-        optim.zero_grad(&mut params_slice);
-
-        // Check state after zero_grad
-        // Tensor::zero_grad zeros the data, doesn't set Option to None
-        assert!(p1.grad().is_some(), "p1 gradient should still exist after zero_grad");
-        check_data_approx(&p1.grad().unwrap(), &[0.0, 0.0]); // Check if zeroed
-        assert!(p2.grad().is_none(), "p2 gradient should remain None after zero_grad");
+        T: Float + Debug + Default + Zero + AddAssign + Copy + Clone + 'static // Bounds for Parameter::new
+    { 
+        let tensor = Tensor::new_with_grad(data, shape).expect("Failed to create tensor");
+        Parameter::new(tensor)
     }
 
     #[test]
-    fn test_sgd_step() {
-        type TestFloat = f32;
-        let initial_p1_data = vec![1.0 as TestFloat, 2.0];
-        let initial_p2_data = vec![3.0 as TestFloat, 4.0];
-        let initial_p3_data = vec![5.0 as TestFloat];
+    fn test_sgd_step() -> Result<(), NeuraRustError> { 
+        let param1 = create_param(vec![1.0f32, 2.0, 3.0], vec![3]);
+        let param2 = create_param(vec![4.0f32], vec![1]);
 
-        let mut p1 = Tensor::new(initial_p1_data.clone(), vec![2]);
-        let mut p2 = Tensor::new(initial_p2_data.clone(), vec![1, 2]); // Different shape
-        let mut p3 = Tensor::new(initial_p3_data.clone(), vec![1]); // No gradient needed initially
+        let params = vec![param1.clone(), param2.clone()];
+        let mut optimizer = SGD::new(params, 0.1);
 
-        // Generate gradients using backward()
-        let grad_p1_data = vec![10.0, -20.0];
-        let grad_p2_data = vec![0.5, -0.5];
-        generate_gradient(&p1, grad_p1_data);
-        generate_gradient(&p2, grad_p2_data);
+        // Simulate gradients
+        let grad1 = Tensor::new(vec![0.5, -1.0, 0.1], vec![3])?;
+        let grad2 = Tensor::new(vec![2.0], vec![1])?;
+        param1.0.borrow_tensor_data_mut().grad = Some(grad1);
+        param2.0.borrow_tensor_data_mut().grad = Some(grad2);
 
-        // Create optimizer
-        let mut optim: SGD<TestFloat> = SGD::new(0.1);
+        // Perform optimizer step
+        optimizer.step()?; // Remove params arg
 
-        let mut params_slice = [&mut p1, &mut p2, &mut p3];
-        optim.step(&mut params_slice);
+        // Check updated parameters
+        let expected_param1 = vec![1.0 - 0.1 * 0.5, 2.0 - 0.1 * (-1.0), 3.0 - 0.1 * 0.1];
+        let expected_param2 = vec![4.0 - 0.1 * 2.0];
 
-        // Check p1: p1 = [1, 2] - 0.1 * [10, -20] = [0, 4]
-        let expected_p1_data = vec![0.0, 4.0];
-        check_data_approx(&p1, &expected_p1_data);
+        assert_eq!(param1.0.data().to_vec(), expected_param1);
+        assert_eq!(param2.0.data().to_vec(), expected_param2);
+        
+        Ok(())
+    }
 
-        // Check p2: p2 = [3, 4] - 0.1 * [0.5, -0.5] = [2.95, 4.05]
-        let expected_p2_data = vec![2.95, 4.05];
-        check_data_approx(&p2, &expected_p2_data);
+    #[test]
+    fn test_sgd_zero_grad() -> Result<(), NeuraRustError> {
+        let param1 = create_param(vec![1.0f32, 2.0], vec![2]);
+        let params = vec![param1.clone()];
+        let mut optimizer = SGD::new(params, 0.1);
 
-        // Check p3: no gradient, should not change
-        check_data_approx(&p3, &initial_p3_data);
+        // Add a gradient
+        let grad1 = Tensor::new(vec![0.1, -0.1], vec![2])?;
+        param1.0.borrow_tensor_data_mut().grad = Some(grad1);
+        assert!(param1.0.grad().is_some());
+
+        optimizer.zero_grad(); // Remove params arg
+        assert!(param1.0.grad().is_some()); // Grad tensor should still exist
+        assert_eq!(param1.0.grad().unwrap().data().to_vec(), vec![0.0, 0.0]);
+
+        Ok(())
     }
 } 

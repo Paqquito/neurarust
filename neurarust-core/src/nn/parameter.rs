@@ -1,15 +1,17 @@
 use crate::tensor::Tensor;
 use std::ops::{Deref, DerefMut};
-use std::fmt::{self, Debug};
+use std::fmt::{Debug};
 
-/// A wrapper around a Tensor indicating it is a learnable parameter of a Module.
-/// Parameters automatically have `requires_grad` set to `true`.
-#[derive(Clone)]
-pub struct Parameter<T>(pub(crate) Tensor<T>);
+/// A wrapper around a Tensor that indicates it is a trainable parameter.
+/// Stores the tensor itself and potentially metadata in the future.
+#[derive(Debug, Clone)]
+pub struct Parameter<T>(pub Tensor<T>);
 
-impl<T: Debug> Parameter<T> {
+impl<T> Parameter<T> {
     /// Creates a new parameter wrapping the given tensor.
-    pub fn new(tensor: Tensor<T>) -> Self {
+    pub fn new(tensor: Tensor<T>) -> Self 
+    where T: Debug
+    {
         tensor.set_requires_grad(true); // Ensure gradients are tracked
         Parameter(tensor)
     }
@@ -33,13 +35,5 @@ impl<T> Deref for Parameter<T> {
 impl<T> DerefMut for Parameter<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
-    }
-}
-
-// Optional: Implement Debug, Clone if needed
-impl<T: fmt::Debug> fmt::Debug for Parameter<T> {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Delegate formatting to the inner Tensor, perhaps with a Parameter prefix
-        write!(f, "Parameter({:?})", self.0)
     }
 } 

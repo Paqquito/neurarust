@@ -1,16 +1,16 @@
 use crate::tensor::Tensor;
 use std::fmt::Debug;
+use crate::error::NeuraRustError;
+use crate::nn::Parameter;
 
 /// The base trait for all neural network modules (layers, containers, etc.).
 pub trait Module<T>: Debug {
     /// Performs the forward pass of the module.
-    fn forward(&self, input: &Tensor<T>) -> Tensor<T>;
+    fn forward(&self, input: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>;
 
     /// Returns a list of all learnable parameters within the module.
-    /// Typically returns clones of the underlying Tensors wrapped in Parameter.
-    /// Note: We return Tensor<T> directly for now, as optimizers will likely operate on Tensors.
-    /// If Parameter needs specific handling later, this could return Vec<Parameter<T>>.
-    fn parameters(&self) -> Vec<Tensor<T>>;
+    /// Should return owned Parameters for optimizer updates.
+    fn parameters(&self) -> Vec<Parameter<T>>;
 }
 
 // Example of how a simple container might implement it (not needed yet)

@@ -1,7 +1,7 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
-use std::ops::{AddAssign};
+use std::ops::AddAssign;
 use num_traits::{One, Zero}; // For AddAssign+Clone in BackwardOp
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -9,6 +9,8 @@ use std::cell::RefCell;
 use std::fmt::Debug;
 use std::cmp::PartialEq;
 use std::collections::HashMap;
+use std::default::Default;
+use std::iter::Sum;
 
 // --- Forward Operation --- 
 
@@ -18,7 +20,7 @@ impl<T> Tensor<T> {
     /// For tensors with more dimensions, it transposes the inner matrices.
     pub fn transpose(&self) -> Tensor<T>
     where
-        T: Copy + Clone + 'static + AddAssign + One + Zero + Debug + PartialEq, // Add Zero+Debug+PartialEq needed by helpers
+        T: Copy + Clone + 'static + AddAssign + One + Zero + Debug + PartialEq + Default + Sum,
     {
         let input_td = self.borrow_tensor_data();
         let shape = &input_td.shape;
@@ -56,7 +58,11 @@ impl<T> Tensor<T> {
         drop(input_td);
 
         let requires_grad = self.requires_grad();
-        let result = Tensor::new(result_data, new_shape);
+        
+        // Call fallible Tensor::new and expect success (panic on internal error)
+        let result = Tensor::new(result_data, new_shape)
+            .expect("Internal error: Failed to create tensor in transpose");
+
         if requires_grad {
             result.set_requires_grad(true);
             let grad_fn = TransposeBackward {
@@ -82,7 +88,7 @@ struct TransposeBackward<T> {
 // --- Backward Implementation ---
 impl<T> BackwardOp<T> for TransposeBackward<T> 
 where
-    T: Copy + Clone + Debug + 'static + AddAssign + Zero + One + PartialEq,
+    T: Copy + Clone + Debug + 'static + AddAssign + Zero + One + PartialEq + Default + Sum,
 {
     fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) { 
         if let Some(input_rc) = self.input_ref.upgrade() {
@@ -113,17 +119,26 @@ mod tests {
     
 
     // Basic helper
+    fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where T: Copy + Clone + 'static + AddAssign + One + Zero + Debug + PartialEq + Default + Sum
+    {
+        Tensor::new(data, shape)
+            .expect("Test tensor creation failed")
+    }
+
     fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
-    where T: Copy + Clone + 'static + AddAssign + One + Zero + std::fmt::Debug + PartialEq
+    where T: Copy + Clone + 'static + AddAssign + One + Zero + Debug + PartialEq + Default + Sum
     {
         Tensor::new_with_grad(data, shape)
+            .expect("Test grad tensor creation failed")
     }
 
     #[test]
     fn test_transpose_2d() {
         let data = vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let shape = vec![2, 3];
-        let t = Tensor::new(data, shape);
+        let t = Tensor::new(data, shape)
+            .expect("Test tensor creation failed");
         let result = t.transpose();
         
         let expected_data = vec![1.0_f32, 4.0, 2.0, 5.0, 3.0, 6.0];
@@ -141,7 +156,8 @@ mod tests {
             7.0, 8.0, 9.0, 10.0,11.0,12.0  // Batch 1
         ];
         let shape = vec![2, 2, 3];
-        let t = Tensor::new(data, shape);
+        let t = Tensor::new(data, shape)
+            .expect("Test tensor creation failed");
         let result = t.transpose();
         
         let expected_data = vec![
@@ -158,7 +174,8 @@ mod tests {
     fn test_transpose_1d() {
         let data = vec![1.0_f32, 2.0, 3.0];
         let shape = vec![3];
-        let t = Tensor::new(data, shape);
+        let t = Tensor::new(data, shape)
+            .expect("Test tensor creation failed");
         let _ = t.transpose(); // Should panic
     }
 
@@ -169,7 +186,8 @@ mod tests {
         assert!(result.requires_grad());
         assert!(result.grad_fn().is_some());
 
-        let t2 = Tensor::new(vec![1.0_f32, 2.0, 3.0, 4.0], vec![2, 2]);
+        let t2 = Tensor::new(vec![1.0_f32, 2.0, 3.0, 4.0], vec![2, 2])
+            .expect("Test tensor creation failed");
         let result2 = t2.transpose();
         assert!(!result2.requires_grad());
         assert!(result2.grad_fn().is_none());
