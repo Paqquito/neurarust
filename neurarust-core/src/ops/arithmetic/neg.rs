@@ -9,6 +9,7 @@ use std::fmt::Debug;
 use std::collections::HashMap;
 use num_traits::Zero;
 use crate::error::NeuraRustError;
+use crate::tensor::utils::{calculate_strides, index_to_coord};
 
 // --- Forward Operation --- 
 
@@ -19,8 +20,24 @@ where
     T: Neg<Output = T> + AddAssign + Copy + Clone + 'static + Debug + Zero,
 {
     let a_td = a.borrow_tensor_data();
-    let result_data: Vec<T> = a_td.data.iter().map(|&x| -x).collect();
-    let result_shape = a_td.shape.clone();
+    let a_shape = a_td.shape.clone();
+    let a_strides = a_td.strides.clone();
+    let numel = a_shape.iter().product();
+    
+    // Create result data vec
+    let mut result_data = Vec::with_capacity(numel);
+    
+    // Iterate using logical indices and strides
+    for i in 0..numel {
+        // Note: Since output shape == input shape, we can use input strides/shape 
+        // for index_to_coord to get the logical multi-index.
+        let multi_index = index_to_coord(i, &a_strides, &a_shape);
+        let offset = a_td.get_offset(&multi_index); // Calculate offset using strides
+        result_data.push(-a_td.data[offset]); // Access data via offset and negate
+    }
+
+    // No need to clone shape again, already cloned
+    let result_shape = a_shape; 
     
     drop(a_td);
     
