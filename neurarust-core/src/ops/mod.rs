@@ -10,6 +10,9 @@ pub mod indexing;
 pub mod stack;
 pub mod math_elem;
 
+// Individual ops that might not fit cleanly into categories yet
+pub mod reshape;
+
 // Potentially re-export specific operations if needed
 // pub use arithmetic::add::add; 
 

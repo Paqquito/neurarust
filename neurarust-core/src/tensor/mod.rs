@@ -116,36 +116,6 @@ impl<T> Tensor<T> {
         self.data.borrow()
     }
 
-    /// Reshapes the tensor to the new shape, without copying data.
-    /// Panics if the total number of elements differs.
-    pub fn reshape(&self, new_shape: Vec<usize>) -> Tensor<T> where T: Clone {
-        let numel_new: usize = new_shape.iter().product();
-        let numel_old = self.numel();
-        assert_eq!(numel_old, numel_new,
-                   "Cannot reshape tensor with {} elements to shape {:?} (requires {} elements)",
-                   numel_old, new_shape, numel_new);
-        
-        // Create a new TensorData with the same data but new shape
-        // Note: This creates a new Rc/RefCell, breaking autograd tracking if not handled carefully.
-        // A proper reshape should ideally modify the shape in-place or create a view.
-        // For now, let's assume this reshape is mainly for non-gradient tensors or specific internal uses.
-        let data_clone = self.data().to_vec(); // Clone data for the new tensor
-        
-        // Calculate contiguous strides for the new shape
-        let new_strides = TensorData::<T>::calculate_contiguous_strides(&new_shape);
-        
-        let new_tensor_data = TensorData {
-            data: data_clone,
-            shape: new_shape,
-            strides: new_strides, // Add calculated strides
-            requires_grad: false, // Reshaped tensor does not track grad by default
-            grad: None,
-            grad_fn: None, // No grad_fn for basic reshape
-            _ctx: None,
-        };
-        Tensor { data: Rc::new(RefCell::new(new_tensor_data)) }
-    }
-
     /// Performs slicing/indexing on the tensor.
     /// 
     /// Returns a new tensor containing the selected elements.
