@@ -109,7 +109,7 @@ Beyond PyTorch parity, we aim to fully leverage Rust to offer:
 
 This roadmap outlines the planned development stages for NeuraRust, aiming for extensive feature parity with PyTorch over time. Status markers: ✅ (Done), 🚧 (In Progress / Partially Done), ⏳ (To Do).
 
-**Phase 0: Foundations & Core Tensor [🚧 In Progress]**
+**Phase 0: Foundations & Core Tensor [✅ Done]**
 *   🎯 **Goal:** Establish project structure, implement basic CPU `Tensor` with core functionalities.
 *   **0.1 Project Setup [✅ Done]**
     *   ✅ Workspace Setup: Defined workspace in root `Cargo.toml`, configured basic CI, added `rustfmt.toml` and standard `clippy` lints.
@@ -131,12 +131,12 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   ✅ Element-wise Arithmetic (`ops::arithmetic`): Forward pass implemented for `add`, `sub`, `mul`, `div`, `neg`. These handle basic tensor-tensor and tensor-scalar operations.
     *   ✅ Broadcasting Utilities (`tensor::utils`): Implemented `broadcast_shapes` helper and logic to determine compatible shapes for broadcasting.
     *   ✅ Add Operation with Broadcasting: Forward pass specifically handles broadcasting.
-    *   ✅ **Stride-Aware Indexing (Partial):** Added `TensorData::get_offset` method. Forward passes for `matmul`, `add`, and `mul` have been updated to use `get_offset` for data access, making them compatible with strides.
+    *   ✅ **Stride-Aware Indexing (Partial):** Added `TensorData::get_offset` method. Forward passes for `matmul`, `add`, `sub`, `mul`, `div`, `neg` have been updated/verified to use `get_offset` for data access, making them compatible with strides.
     *   ✅ Basic Backward Infrastructure: Defined `BackwardOp` trait and implemented `AddBackward` structure with a basic `backward` method signature and `reduce_gradient` utility (to handle gradient reduction for broadcasted ops), laying groundwork for Phase 1 Autograd.
 *   **0.4 Initial Testing [✅ Done]**
     *   ✅ Basic Unit Tests: Added tests covering `Tensor` creation, shape validation, basic arithmetic operations (forward pass), broadcasting utility functions, and new creation functions.
-*   **0.5 Overall Status & Key Issues [🚧 In Progress]**
-    *   **Status:** Project structure and foundational `Tensor` struct are implemented with explicit stride support. Basic element-wise operations (`add`, `mul`) and `matmul` correctly use strides for data access on CPU. Initial autograd infrastructure (`BackwardOp` trait) exists. Standalone creation functions added. **Core error handling significantly improved.**
+*   **0.5 Overall Status & Key Issues [✅ Done]**
+    *   **Status:** Project structure and foundational `Tensor` struct are implemented with explicit stride support. All basic element-wise operations (`add`, `sub`, `mul`, `div`, `neg`) and `matmul` correctly use strides for data access on CPU. Initial autograd infrastructure (`BackwardOp` trait) exists. Standalone creation functions added. Core error handling significantly improved. Codebase cleaned of most warnings and tests pass.
     *   ✅ **Critical Issue (Lack of strides): Resolved.** `TensorData` now stores strides, and basic operations use them for indexing.
     *   🚧 **View Semantics Imperfection:** While strides are *stored*, operations like `reshape`, `slice`, and `transpose` currently **still perform data copies**. Implementing true "views" (new Tensors sharing data but with modified shape/strides) using the existing strides is a key task **deferred to the beginning of Phase 1**.
     *   ✅ **Error Handling Improvement:** Addressed. Core functions like `Tensor::new`, `sum_axes`, `sqrt_op`, layer/loss forward passes now return `Result<T, NeuraRustError>`, handling common errors like shape mismatches or invalid indices gracefully. Further improvements will continue in subsequent phases.
