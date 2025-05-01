@@ -149,18 +149,13 @@ mod tests {
     use crate::tensor::Tensor;
     use num_traits::{Zero, One, Float};
     use crate::error::NeuraRustError;
-    use std::ops::AddAssign;
+    use std::ops::{AddAssign, Mul};
     use std::fmt::Debug;
-    use crate::tensor::ones; // Import ones
-    use std::iter::Sum;
-    use std::ops::{Mul};
-    use crate::autograd::BackwardOp;
-    
-    
-    
+    use crate::tensor::ones;
+    // Remove unused: use std::iter::Sum;
+    // Remove unused: use crate::autograd::BackwardOp;
 
-
-    // Helper to create tensors, add bounds needed by sqrt and backward
+    // Helpers to create tensors for tests
     fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
     where
          T: Float + Debug + Clone + AddAssign + Default + Zero + One + Sum + 'static + Mul<Output=T> + Copy + PartialEq + PartialOrd,

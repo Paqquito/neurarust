@@ -1,6 +1,7 @@
 use crate::tensor::Tensor;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
+use crate::tensor::utils::{index_to_coord};
 use std::ops::{Neg, AddAssign};
 use std::rc::{Rc, Weak};
 use std::marker::PhantomData;
@@ -9,7 +10,6 @@ use std::fmt::Debug;
 use std::collections::HashMap;
 use num_traits::Zero;
 use crate::error::NeuraRustError;
-use crate::tensor::utils::{calculate_strides, index_to_coord};
 
 // --- Forward Operation --- 
 

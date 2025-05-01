@@ -112,11 +112,9 @@ where
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
-    use num_traits::{Zero, One}; // Needed for create_test_tensor
-    use std::fmt::Debug; // Needed for create_test_tensor
-    use std::ops::{AddAssign, Add, Mul}; // Needed for create_test_tensor
-    use std::iter::Sum; // Needed for create_test_tensor
-    use crate::error::NeuraRustError;
+    use num_traits::{Zero, One};
+    use std::fmt::Debug;
+    use std::ops::{AddAssign};
 
     /* Commenting out unused test helper
     // Helper function for creating tensors in tests
