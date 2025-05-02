@@ -274,8 +274,9 @@ pub(crate) fn reshape_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 
     if original_numel != new_numel {
         return Err(NeuraRustError::ShapeMismatch {
-            expected: guard.shape.clone(), // Keep returning shapes
+            expected: guard.shape.clone(),
             actual: new_shape_vec,
+            operation: "reshape".to_string(),
         });
     }
 

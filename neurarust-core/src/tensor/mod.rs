@@ -5,15 +5,20 @@ use std::hash::{Hash, Hasher};
 // Use Arc and RwLock for thread-safe sharing and interior mutability
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
+// Import traits correctly
 use num_traits::{Zero, One};
+use std::iter::Sum;
+use std::ops::{Add, AddAssign}; // Import Add and AddAssign from std::ops
 
-// Import new types
+// Import necessary items
+use crate::autograd::BackwardOp; // Re-import BackwardOp
 use crate::device::StorageDevice;
 use crate::tensor_data::TensorData;
 use crate::error::NeuraRustError;
 use std::iter::Product;
 
 pub mod utils;
+// Removed module declaration `pub mod ops;` as it exists at crate root.
 
 /// Represents a multi-dimensional array (Tensor).
 /// Uses Arc<RwLock<TensorData<T>>> for thread-safe interior mutability
@@ -382,6 +387,125 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
 
     // Optional: Alias or stricter view-only version
     // pub fn view(&self, new_shape: Vec<usize>) -> Result<Self, NeuraRustError> where ... { self.reshape(new_shape) }
+
+    // --- Autograd Accessors/Mutators ---
+
+    /// Checks if this tensor requires gradient computation.
+    /// Acquires a read lock.
+    /// Panics if the lock is poisoned.
+    pub fn requires_grad(&self) -> bool {
+        self.read_data().requires_grad
+    }
+
+    /// Sets the `requires_grad` flag for this tensor.
+    /// Acquires a write lock.
+    /// Panics if the lock is poisoned.
+    ///
+    /// # Arguments
+    /// * `requires_grad`: The new value for the flag.
+    ///
+    /// # Returns
+    /// A `Result` which is `Ok(())` on success.
+    ///
+    /// # Safety
+    /// Setting `requires_grad` to `true` on a non-leaf tensor can lead to unexpected behavior.
+    pub fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError> {
+        let mut guard = self.write_data();
+        if requires_grad && guard.grad_fn.is_some() {
+            // Optionally add a warning or error for setting requires_grad on non-leaf nodes
+            eprintln!("Warning: Setting requires_grad=true on a non-leaf tensor. Gradients will not accumulate here during backward(). Did you mean to use .detach()?");
+        }
+        guard.requires_grad = requires_grad;
+        Ok(())
+    }
+
+    /// Returns a clone of the gradient tensor, if it exists.
+    /// Acquires a read lock.
+    /// Panics if the lock is poisoned.
+    /// The gradient tensor resides on the same device as the original tensor.
+    pub fn grad(&self) -> Option<Tensor<T>> {
+        // Clone the Option<Tensor<T>> found inside the lock
+        self.read_data().grad.clone()
+    }
+
+    /// Accumulates the given gradient into the tensor's `grad` field.
+    ///
+    /// If the tensor's `grad` field is currently `None`, it is initialized with `grad_to_add`.
+    /// If it exists, `grad_to_add` is added to the existing gradient.
+    /// Requires a write lock on the tensor data.
+    ///
+    /// # Arguments
+    /// * `grad_to_add`: The gradient tensor to accumulate.
+    ///
+    /// # Returns
+    /// `Ok(())` on success, or a `NeuraRustError` if:
+    /// * The lock is poisoned.
+    /// * The devices of the tensor and `grad_to_add` do not match.
+    /// * The shapes are not compatible for addition.
+    /// * The addition operation itself fails.
+    pub fn acc_grad(&self, grad_to_add: Tensor<T>) -> Result<(), NeuraRustError>
+    where
+        // Corrected and merged bounds
+        T: Add<Output = T> + AddAssign + Zero + One + Sum + PartialEq + Default + Send + Sync
+    {
+        let mut guard = self.write_data();
+
+        // Check device consistency
+        if guard.device != grad_to_add.device() {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: guard.device,
+                actual: grad_to_add.device(),
+                operation: "acc_grad".to_string(),
+            });
+        }
+
+        match guard.grad.take() { // Take ownership of the existing grad Option
+            Some(existing_grad) => {
+                // Use full path to add_op
+                let sum_grad = crate::ops::arithmetic::add::add_op(&existing_grad, &grad_to_add)?;
+                guard.grad = Some(sum_grad); // Put the result back
+            }
+            None => {
+                // If no gradient existed, the new gradient becomes the current gradient.
+                guard.grad = Some(grad_to_add.clone());
+            }
+        }
+        Ok(())
+    }
+
+    /// Returns a clone of the `Arc` pointing to the backward operation node (`grad_fn`)
+    /// associated with this tensor, if it exists.
+    /// Acquires a read lock.
+    /// Panics if the lock is poisoned.
+    /// Returns `None` if this tensor is a leaf node or does not require gradients.
+    pub fn grad_fn(&self) -> Option<Arc<dyn BackwardOp<T> + Send + Sync>> {
+        // Clone the Option<Arc<...>>
+        self.read_data().grad_fn.clone()
+    }
+
+    /// Sets the backward operation node (`grad_fn`) for this tensor.
+    /// This is typically called internally by operations that create this tensor
+    /// as part of the computation graph.
+    /// Acquires a write lock.
+    /// Panics if the lock is poisoned.
+    ///
+    /// # Arguments
+    /// * `grad_fn`: An `Option` containing an `Arc` to the `BackwardOp`.
+    ///              Set to `None` for leaf tensors.
+    ///
+    /// # Returns
+    /// `Ok(())` on success. Errors are currently unlikely.
+    ///
+    /// # Safety
+    /// Manually setting `grad_fn` improperly can break the computation graph.
+    /// This method is intended for internal framework use.
+    pub fn set_grad_fn(&self, grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>) -> Result<(), NeuraRustError> {
+        let mut guard = self.write_data();
+        // TODO: Potentially add validation? E.g., ensure requires_grad is true if grad_fn is Some?
+        // For now, allow direct setting.
+        guard.grad_fn = grad_fn;
+        Ok(())
+    }
 }
 
 // --- Traits Implementations ---

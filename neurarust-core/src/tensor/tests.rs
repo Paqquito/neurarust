@@ -502,7 +502,7 @@ fn test_reshape_numel_mismatch() {
     // Attempt to reshape to shape with different number of elements
     let result = tensor.reshape(vec![3, 5]); // 15 elements
     assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })), "Expected ShapeMismatch for wrong number of elements");
-    if let Err(NeuraRustError::ShapeMismatch { expected, actual }) = result {
+    if let Err(NeuraRustError::ShapeMismatch { expected, actual, .. }) = result {
          assert_eq!(expected, vec![2, 6]);
          assert_eq!(actual, vec![3, 5]);
      }

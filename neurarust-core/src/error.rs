@@ -1,12 +1,14 @@
 use thiserror::Error;
+use crate::device::StorageDevice; // Import StorageDevice
 
 /// Custom error type for the NeuraRust framework.
 #[derive(Error, Debug, PartialEq, Clone)] // PartialEq for easier testing, Clone added
 pub enum NeuraRustError {
-    #[error("Shape mismatch: expected {expected:?}, got {actual:?}")]
+    #[error("Shape mismatch: expected {expected:?}, got {actual:?} during operation {operation}")]
     ShapeMismatch {
         expected: Vec<usize>,
         actual: Vec<usize>,
+        operation: String, // Added operation field
     },
 
     #[error("Dimension mismatch: expected {expected}, got {actual}")]
@@ -74,8 +76,15 @@ pub enum NeuraRustError {
 
     #[error("Data is not available on the expected device: expected {expected:?}, actual {actual:?}")]
     DataNotAvailableError {
-        expected: crate::device::StorageDevice, // Use crate path
-        actual: crate::device::StorageDevice,   // Use crate path
+        expected: StorageDevice,
+        actual: StorageDevice,
+    },
+
+    #[error("Device mismatch for operation '{operation}': expected {expected:?}, got {actual:?}")]
+    DeviceMismatch {
+        expected: StorageDevice,
+        actual: StorageDevice,
+        operation: String,
     },
 
     // Add more specific errors as needed
