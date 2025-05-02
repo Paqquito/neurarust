@@ -1,15 +1,23 @@
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
-use thiserror::Error;
 use std::fmt::Debug;
+use thiserror::Error;
 // Import necessary traits for floating point numbers
-use num_traits::{Float, Zero, One, Signed};
 use approx::{AbsDiffEq, RelativeEq, UlpsEq};
+use num_traits::{Float, One, Signed, Zero};
 use std::sync::Arc;
+
+// Import traits for tensor operations used in calculate_loss
+// use crate::ops::binary_ops::Broadcast; // Incorrect trait
+// use crate::ops::arithmetic::ArithmeticOps; // Incorrect trait
+// use crate::ops::reduction::ReductionOps; // Incorrect trait
+use crate::ops::arithmetic::mul::mul_op; // Use the mul_op function
+use crate::ops::reduction::sum::sum_axes; // Use the sum_axes function
 
 /// Error type specifically for gradient checking failures.
 #[derive(Error, Debug, Clone, PartialEq)]
-pub enum GradCheckError<T: Float + Debug> { // T must be Float for epsilon checks
+pub enum GradCheckError<T: Float + Debug> {
+    // T must be Float for epsilon checks
     #[error("Gradient check failed for input tensor at index {input_index}, element index {element_index}: Analytical grad {analytical_grad:?} != Numerical grad {numerical_grad:?}. Difference: {difference:?}")]
     GradientMismatch {
         input_index: usize,
@@ -76,10 +84,21 @@ pub fn check_grad<T, F>(
 ) -> Result<(), GradCheckError<T>>
 where
     T: Float // Basic requirement for epsilon
-       + Debug + Copy + Send + Sync + Default + PartialOrd + Signed + Zero + One
-       + std::ops::AddAssign + std::iter::Sum // For internal ops like sum_axes
-       + AbsDiffEq<Epsilon = T> + RelativeEq<Epsilon = T> + UlpsEq<Epsilon = T> // For approx comparison
-       + 'static,
+        + Debug
+        + Copy
+        + Send
+        + Sync
+        + Default
+        + PartialOrd
+        + Signed
+        + Zero
+        + One
+        + std::ops::AddAssign
+        + std::iter::Sum // For internal ops like sum_axes
+        + AbsDiffEq<Epsilon = T>
+        + RelativeEq<Epsilon = T>
+        + UlpsEq<Epsilon = T> // For approx comparison
+        + 'static,
     F: Fn(&[Tensor<T>]) -> Result<Tensor<T>, NeuraRustError>,
 {
     // --- Constants ---
@@ -120,7 +139,9 @@ where
     }
 
     if output.requires_grad() {
-        output.backward(Some(output_grad.clone())).map_err(GradCheckError::BackwardPassError)?;
+        output
+            .backward(Some(output_grad.clone()))
+            .map_err(GradCheckError::BackwardPassError)?;
     } // else: no backward pass possible, analytical grads will be None
 
     // Store analytical gradients
@@ -129,7 +150,7 @@ where
         analytical_grads.push(input.grad()); // grad() clones the Option<Tensor>
     }
 
-    // --- 3. Iterate through Inputs --- 
+    // --- 3. Iterate through Inputs ---
     for (i, original_input) in inputs.iter().enumerate() {
         if !original_input.requires_grad() {
             continue; // Skip inputs that don't require grad
@@ -145,165 +166,204 @@ where
             }
         };
 
-        // --- 4. Iterate through Elements --- 
+        // --- 4. Iterate through Elements ---
         let numel = original_input.numel();
 
         // We need mutable access to the *data* to perturb it.
         // Approach 1: Clone the tensor, then get mutable access to the *cloned* data.
+
+        // --- Get a truly independent copy of the original input data for reference ---
+        let original_input_data_copy = original_input
+            .read_data()
+            .data
+            .cpu_data()
+            .map_err(|e| GradCheckError::TensorError(e))?
+            .clone(); // Clone the Arc<Vec<T>>
+                      // We might need to clone the Vec itself if the Arc is shared, but let's try this first.
+                      // Let's assume cpu_data() gives us Arc<Vec<T>>.
+                      // For safety, clone the Vec data itself to ensure independence
+        let original_data_vec = original_input_data_copy.as_ref().clone();
 
         for elem_idx in 0..numel {
             // --- 5.a & 5.b: Create Perturbed Inputs (+/- eps) ---
 
             // Helper closure to create a perturbed tensor
             let create_perturbed_input = |perturbation: T| -> Result<Tensor<T>, GradCheckError<T>> {
-                // Make immutable, assigned once
-                let perturbed_input = original_input.clone();
-                // Get mutable access to the *cloned* tensor's data buffer (CPU only for now)
-                let mut data_guard = perturbed_input.write_data(); // Get write lock on TensorData
-                if data_guard.device != crate::device::StorageDevice::CPU {
-                    return Err(GradCheckError::TensorError(NeuraRustError::UnsupportedOperation(
-                        "Gradient checking perturbation only supported on CPU.".to_string()
+                // --- 1. Get original properties (before locking original_input) ---
+                let original_shape = original_input.shape(); // Clone shape
+                let original_device = original_input.device();
+                // Assuming contiguous for now, recalculate strides for the new TensorData
+                let new_strides = crate::tensor_data::TensorData::<T>::calculate_contiguous_strides(
+                    &original_shape,
+                );
+                if !original_input.read_data().is_contiguous() {
+                    return Err(GradCheckError::TensorError(
+                        NeuraRustError::UnsupportedOperation(
+                            "Gradient checking on non-contiguous tensors not yet supported."
+                                .to_string(),
+                        ),
+                    ));
+                }
+                if original_device != crate::device::StorageDevice::CPU {
+                    return Err(GradCheckError::TensorError(
+                        NeuraRustError::UnsupportedOperation(
+                            "Gradient checking perturbation only supported on CPU.".to_string(),
+                        ),
+                    ));
+                }
+
+                // --- 2. Create the new perturbed data buffer ---
+                // Clone the original vector data for modification
+                let mut new_data_vec = original_data_vec.clone();
+
+                // Calculate linear index (assuming contiguous)
+                let linear_idx = elem_idx; // Offset is 0 for the vec copy
+                if linear_idx >= new_data_vec.len() {
+                    return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
+                        format!(
+                            "Calculated linear index {} out of bounds for buffer len {}.",
+                            linear_idx,
+                            new_data_vec.len()
+                        ),
                     )));
                 }
-                let buffer_arc = Arc::clone(&data_guard.data);
-                // Need mutable access to the Vec<T> inside the Buffer::Cpu
-                // This requires Arc::get_mut which only works if ref count is 1.
-                // Since we just cloned, the TensorData Arc has count 1, but the Buffer Arc might not.
-                // Solution: If Buffer Arc is shared, we MUST clone the Buffer itself.
-                let mut cpu_buffer = match Arc::try_unwrap(buffer_arc) {
-                    Ok(buffer) => {
-                        // We have unique ownership of the Buffer
-                        match buffer {
-                             crate::buffer::Buffer::Cpu(vec_arc) => {
-                                 // Try to get mutable access to the Vec
-                                 match Arc::try_unwrap(vec_arc) {
-                                     Ok(vec_data) => vec_data, // We got the Vec<T>
-                                     Err(returned_arc) => {
-                                         // Vec is still shared, clone it
-                                         returned_arc.as_ref().clone()
-                                     }
-                                 }
-                            }
-                             // Correct match for Gpu variant
-                             crate::buffer::Buffer::Gpu { .. } => {
-                                return Err(GradCheckError::TensorError(NeuraRustError::UnsupportedOperation(
-                                    "Gradient checking perturbation only supported on CPU.".to_string()
-                                )));
-                             }
-                         }
-                    },
-                    Err(returned_arc) => {
-                        // Buffer Arc is shared, clone the underlying data
-                        match returned_arc.as_ref() {
-                             crate::buffer::Buffer::Cpu(vec_arc) => {
-                                 vec_arc.as_ref().clone() // Clone the Vec<T>
-                             }
-                             // Correct match for Gpu variant
-                             crate::buffer::Buffer::Gpu { .. }=> {
-                                 return Err(GradCheckError::TensorError(NeuraRustError::UnsupportedOperation(
-                                    "Gradient checking perturbation only supported on CPU.".to_string()
-                                )));
-                             }
-                        }
-                    }
+
+                // Apply perturbation based on the ORIGINAL data
+                let original_value_from_copy = original_data_vec[linear_idx]; // Reference value
+                new_data_vec[linear_idx] = original_value_from_copy + perturbation;
+                // DEBUG: Print perturbed value (Remove)
+                // println!("Perturbing input {} elem {} from {:?} to {:?}", i, elem_idx, original_value_from_copy, new_data_vec[linear_idx]);
+
+                // --- 3. Create NEW TensorData and Tensor ---
+                // Create a new CPU buffer with the modified data
+                let new_buffer = crate::buffer::Buffer::new_cpu(new_data_vec);
+
+                // Create completely new TensorData
+                let new_tensor_data = crate::tensor_data::TensorData {
+                    data: Arc::new(new_buffer),
+                    device: original_device, // Should be CPU
+                    offset: 0,
+                    shape: original_shape, // Use cloned original shape
+                    strides: new_strides,  // Use recalculated strides
+                    // Initialize autograd fields - perturbed inputs are leaves
+                    requires_grad: true, // Need this true for func call, even if not leaf conceptually?
+                    // Let's set it true, func might expect it.
+                    grad: None,
+                    grad_fn: None,
                 };
 
-                // Now we have a mutable `cpu_buffer: Vec<T>`
-                // Calculate the linear index corresponding to elem_idx (assuming contiguous for simplicity now)
-                // TODO: Handle strides correctly if inputs can be non-contiguous!
-                if !data_guard.is_contiguous() {
-                     return Err(GradCheckError::TensorError(NeuraRustError::UnsupportedOperation(
-                        "Gradient checking on non-contiguous tensors not yet supported.".to_string()
-                    )));
-                }
-                // For contiguous, linear index is elem_idx + offset (offset should be 0 if we clone data)
-                let linear_idx = data_guard.offset + elem_idx; // Check if offset matters after clone
-                if linear_idx >= cpu_buffer.len() {
-                    return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
-                        format!("Calculated linear index {} out of bounds for buffer len {}.", linear_idx, cpu_buffer.len())
-                    )));
-                }
+                // Create the final Tensor pointing to the new TensorData
+                let perturbed_tensor = Tensor {
+                    data: Arc::new(std::sync::RwLock::new(new_tensor_data)),
+                };
 
-                // Apply perturbation
-                cpu_buffer[linear_idx] = cpu_buffer[linear_idx] + perturbation;
-
-                // Put the potentially cloned buffer back into TensorData
-                data_guard.data = Arc::new(crate::buffer::Buffer::Cpu(Arc::new(cpu_buffer)));
-                // Ensure requires_grad is true for the perturbed inputs when calling func
-                data_guard.requires_grad = true;
-                data_guard.grad_fn = None; // Perturbed inputs are treated as leaves
-                data_guard.grad = None;
-
-                drop(data_guard); // Release write lock
-                Ok(perturbed_input)
+                Ok(perturbed_tensor)
             };
 
             let input_plus_eps = create_perturbed_input(epsilon)?;
+            // println!("Input +eps ptr: {:p}", input_plus_eps.id_ptr()); // <-- DEBUG PTR (Remove)
             let input_minus_eps = create_perturbed_input(-epsilon)?;
+            // println!("Input -eps ptr: {:p}", input_minus_eps.id_ptr()); // <-- DEBUG PTR (Remove)
+
+            // --- Define Loss Calculation Closure First ---
+            let calculate_loss = |output_tensor: Tensor<T>| -> Result<T, GradCheckError<T>> {
+                // Note: mul_op handles internal broadcasting.
+                let product = mul_op(&output_tensor, output_grad) // Use the mul_op function
+                    .map_err(|e| GradCheckError::TensorError(e))?;
+
+                // Sum all elements of the product tensor using sum_axes
+                let total_loss_tensor =
+                    sum_axes(&product, &[], false) // Use the sum_axes function
+                        .map_err(|e| GradCheckError::TensorError(e))?;
+
+                // The result of sum_axes is a scalar tensor, get its value using get(&[])
+                let loss_value = total_loss_tensor
+                    .get(&[])
+                    .map_err(|e| GradCheckError::TensorError(e))?;
+                // DEBUG: Print calculated loss (inside the closure) (Remove)
+                // println!("--> Loss calculated inside closure: {:?}", loss_value);
+                Ok(loss_value)
+            };
 
             // --- 5.c & 5.d: Call func with perturbed inputs ---
-            // Need to substitute the perturbed tensor into the input slice
             let mut inputs_for_plus: Vec<Tensor<T>> = inputs.iter().cloned().collect();
             inputs_for_plus[i] = input_plus_eps;
-            let output_plus_eps = func(&inputs_for_plus).map_err(GradCheckError::ForwardPassError)?;
+            // println!("Calling func for +eps for input {}, elem {}", i, elem_idx); // DEBUG (Remove)
+            let output_plus_eps =
+                func(&inputs_for_plus).map_err(GradCheckError::ForwardPassError)?;
+            // --- Removed Println for Data ---
+            // match output_plus_eps.read_data().data.cpu_data() {
+            //     Ok(data_arc) => println!("Output +eps data: {:?}", data_arc.as_slice()),
+            //     Err(e) => println!("Output +eps data: Error getting CPU data - {:?}", e),
+            // }
+            // ---------------------------
+            // println!("Called func for +eps. Calling calculate_loss for +eps."); // DEBUG (Remove)
+            let loss_plus_eps = calculate_loss(output_plus_eps)?;
+            // println!("Calculated loss_plus_eps: {:?}", loss_plus_eps); // DEBUG (Remove)
 
             let mut inputs_for_minus: Vec<Tensor<T>> = inputs.iter().cloned().collect();
             inputs_for_minus[i] = input_minus_eps;
-            let output_minus_eps = func(&inputs_for_minus).map_err(GradCheckError::ForwardPassError)?;
+            // println!("Calling func for -eps for input {}, elem {}", i, elem_idx); // DEBUG (Remove)
+            let output_minus_eps =
+                func(&inputs_for_minus).map_err(GradCheckError::ForwardPassError)?;
+            // --- Removed Println for Data ---
+            // match output_minus_eps.read_data().data.cpu_data() {
+            //     Ok(data_arc) => println!("Output -eps data: {:?}", data_arc.as_slice()),
+            //     Err(e) => println!("Output -eps data: Error getting CPU data - {:?}", e),
+            // }
+            // ---------------------------
+            // println!("Called func for -eps. Calling calculate_loss for -eps."); // DEBUG (Remove)
+            let loss_minus_eps = calculate_loss(output_minus_eps)?;
+            // println!("Calculated loss_minus_eps: {:?}", loss_minus_eps); // DEBUG (Remove)
 
-            // --- 5.e & 5.f: Calculate scalar losses ---
-            // loss = sum(output * output_grad)
-            // Need mul_op and sum_all_op (sum_axes with no axes)
-            // Map NeuraRustError to GradCheckError::TensorError
-            let loss_plus_eps_tensor = crate::ops::arithmetic::mul::mul_op(&output_plus_eps, output_grad)
-                .map_err(GradCheckError::TensorError)?;
-            let loss_plus_eps_scalar = crate::ops::reduction::sum_axes(&loss_plus_eps_tensor, &[], false)
-                .map_err(GradCheckError::TensorError)?;
-
-            let loss_minus_eps_tensor = crate::ops::arithmetic::mul::mul_op(&output_minus_eps, output_grad)
-                .map_err(GradCheckError::TensorError)?;
-            let loss_minus_eps_scalar = crate::ops::reduction::sum_axes(&loss_minus_eps_tensor, &[], false)
-                .map_err(GradCheckError::TensorError)?;
-
-            // Extract scalar values (assuming CPU)
-            let loss_plus = loss_plus_eps_scalar.read_data().data.cpu_data()
-                .map_err(GradCheckError::TensorError)?.clone()[0]; // Map error
-            let loss_minus = loss_minus_eps_scalar.read_data().data.cpu_data()
-                .map_err(GradCheckError::TensorError)?.clone()[0]; // Map error
-
-            // --- 5.g: Calculate numerical gradient ---
-            let numerical_grad = (loss_plus - loss_minus) / (two * epsilon);
+            // --- 5.g: Calculate Numerical Gradient ---
+            // Note: Sections 5.e & 5.f (manual diff_sum calc) are removed as loss is calculated via closure.
+            let numerical_grad = (loss_plus_eps - loss_minus_eps) / (two * epsilon);
+            // DEBUG: Print numerical gradient (Remove)
+            // Use loss_plus_eps and loss_minus_eps in the format string
+            // println!("Input {}, Elem {}: Numerical Grad = ({:?} - {:?}) / (2 * {:?}) = {:?}", i, elem_idx, loss_plus_eps, loss_minus_eps, epsilon, numerical_grad);
 
             // --- 5.h: Get analytical gradient ---
             // Assuming analytical_grad_tensor is contiguous for now
             if !analytical_grad_tensor.is_contiguous() {
-                 return Err(GradCheckError::TensorError(NeuraRustError::UnsupportedOperation(
+                return Err(GradCheckError::TensorError(NeuraRustError::UnsupportedOperation(
                     "Gradient checking on non-contiguous analytical gradients not yet supported.".to_string()
                 )));
             }
-            let analytical_data_arc = analytical_grad_tensor.read_data().data.cpu_data()
-                .map_err(|e| GradCheckError::AnalyticalGradAccessError { input_index: i, source: e })?.clone(); // Map error specifically
-            // TODO: Handle strides for analytical grad access if non-contiguous
+            let analytical_data_arc = analytical_grad_tensor
+                .read_data()
+                .data
+                .cpu_data()
+                .map_err(|e| GradCheckError::AnalyticalGradAccessError {
+                    input_index: i,
+                    source: e,
+                })?
+                .clone(); // Map error specifically
+                          // TODO: Handle strides for analytical grad access if non-contiguous
             let analytical_linear_idx = analytical_grad_tensor.read_data().offset + elem_idx;
-             if analytical_linear_idx >= analytical_data_arc.len() {
-                 return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
-                    format!("Calculated analytical linear index {} out of bounds for buffer len {}.", analytical_linear_idx, analytical_data_arc.len())
-                 )));
-             }
+            if analytical_linear_idx >= analytical_data_arc.len() {
+                return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
+                    format!(
+                        "Calculated analytical linear index {} out of bounds for buffer len {}.",
+                        analytical_linear_idx,
+                        analytical_data_arc.len()
+                    ),
+                )));
+            }
             let analytical_grad = analytical_data_arc[analytical_linear_idx];
 
             // --- 5.i: Compare gradients ---
             if !numerical_grad.abs_diff_eq(&analytical_grad, tolerance) {
-                 return Err(GradCheckError::GradientMismatch {
-                     input_index: i,
-                     element_index: elem_idx,
-                     analytical_grad,
-                     numerical_grad,
-                     difference: (analytical_grad - numerical_grad).abs(),
-                 });
+                return Err(GradCheckError::GradientMismatch {
+                    input_index: i,
+                    element_index: elem_idx,
+                    analytical_grad,
+                    numerical_grad,
+                    difference: (analytical_grad - numerical_grad).abs(),
+                });
             }
         }
     }
 
     Ok(())
-} 
+}

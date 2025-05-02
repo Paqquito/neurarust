@@ -1,19 +1,19 @@
 // neurarust-core/src/ops/arithmetic/add.rs
 
-use crate::tensor::Tensor;
-use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord};
-use std::ops::{Add, AddAssign};
-use std::fmt::Debug;
-use num_traits::{Zero, One};
-use std::iter::Sum;
-use std::default::Default;
-use crate::error::NeuraRustError;
-use std::cmp::PartialEq;
-use crate::device::StorageDevice;
 use crate::autograd::{backward_op::BackwardOp, graph::NodeId};
+use crate::device::StorageDevice;
+use crate::error::NeuraRustError;
+use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord};
+use crate::tensor::Tensor;
+use num_traits::{One, Zero};
+use std::cmp::PartialEq;
+use std::default::Default;
+use std::fmt::Debug;
+use std::iter::Sum;
+use std::ops::{Add, AddAssign};
 use std::sync::Arc;
 
-// --- Forward Operation --- 
+// --- Forward Operation ---
 
 /// Performs element-wise addition for two Tensors with broadcasting.
 /// Requires both tensors to be on the same device (currently CPU only).
@@ -24,9 +24,22 @@ use std::sync::Arc;
 pub fn add_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
     // Add Send + Sync required by Tensor structure and autograd methods
-    T: Add<Output = T> + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + PartialEq + PartialOrd + Send + Sync,
+    T: Add<Output = T>
+        + AddAssign
+        + Copy
+        + Clone
+        + Debug
+        + Default
+        + Zero
+        + One
+        + Sum
+        + 'static
+        + PartialEq
+        + PartialOrd
+        + Send
+        + Sync,
 {
-    // --- Autograd Setup --- 
+    // --- Autograd Setup ---
     // Determine if the output requires gradient tracking
     let requires_grad = a.requires_grad() || b.requires_grad();
     // Store necessary info for backward pass if needed (IDs and original shapes)
@@ -49,68 +62,78 @@ where
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
-    // --- Device Check --- 
+    // --- Device Check ---
     // Ensure both tensors are on the same device (and implicitly CPU for now)
     if a_guard.device != b_guard.device {
-        return Err(NeuraRustError::UnsupportedOperation(
-            format!("Cannot add tensors on different devices: {:?} and {:?}", a_guard.device, b_guard.device)
-        ));
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Cannot add tensors on different devices: {:?} and {:?}",
+            a_guard.device, b_guard.device
+        )));
     }
     let device = a_guard.device; // Device for the output tensor
-    // Ensure the operation is supported on this device (currently only CPU)
+                                 // Ensure the operation is supported on this device (currently only CPU)
     if device != StorageDevice::CPU {
-         return Err(NeuraRustError::UnsupportedOperation(
-            format!("Addition is currently only supported on CPU, not {:?}", device)
-        ));
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Addition is currently only supported on CPU, not {:?}",
+            device
+        )));
     }
-    // --- Get CPU Data Buffers --- 
+    // --- Get CPU Data Buffers ---
     // We know they are on CPU, so unwrap the result of cpu_data()
     // Note: cpu_data() returns Result<&Arc<Vec<T>>, _>, so we dereference it
-    // and clone the Arc for safe access later. 
+    // and clone the Arc for safe access later.
     let a_data_arc = a_guard.data.cpu_data()?.clone(); // Clone the Arc<Vec<T>>
     let b_data_arc = b_guard.data.cpu_data()?.clone(); // Clone the Arc<Vec<T>>
 
-    // --- Shape and Broadcasting --- 
+    // --- Shape and Broadcasting ---
     let a_shape = &a_guard.shape;
     let b_shape = &b_guard.shape;
-    
-    let output_shape = broadcast_shapes(a_shape, b_shape)
-        .map_err(|_e| NeuraRustError::BroadcastError { 
-            shape1: a_shape.clone(), 
-            shape2: b_shape.clone()
+
+    let output_shape =
+        broadcast_shapes(a_shape, b_shape).map_err(|_e| NeuraRustError::BroadcastError {
+            shape1: a_shape.clone(),
+            shape2: b_shape.clone(),
         })?;
 
-    // --- Calculation --- 
+    // --- Calculation ---
     let numel_result = output_shape.iter().product();
     let mut result_data_vec = Vec::with_capacity(numel_result);
-    
+
     let result_strides = calculate_strides(&output_shape);
     let rank_diff_a = output_shape.len().saturating_sub(a_guard.shape.len());
     let rank_diff_b = output_shape.len().saturating_sub(b_guard.shape.len());
-    
+
     let mut input_a_coords = vec![0; a_guard.shape.len()];
     let mut input_b_coords = vec![0; b_guard.shape.len()];
 
     for i in 0..numel_result {
         let output_coords = index_to_coord(i, &result_strides, &output_shape);
-        
+
         for dim_idx in 0..a_guard.shape.len() {
             let output_coord_idx = rank_diff_a + dim_idx;
-            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
+            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
         }
         // Get offset using the guard's metadata
         let offset_a = a_guard.get_offset(&input_a_coords);
         // Access data using the cloned Arc<Vec<T>>
-        let val_a = a_data_arc[offset_a]; 
-        
+        let val_a = a_data_arc[offset_a];
+
         for dim_idx in 0..b_guard.shape.len() {
             let output_coord_idx = rank_diff_b + dim_idx;
-            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
+            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
         }
         // Get offset using the guard's metadata
         let offset_b = b_guard.get_offset(&input_b_coords);
         // Access data using the cloned Arc<Vec<T>>
-        let val_b = b_data_arc[offset_b]; 
+        let val_b = b_data_arc[offset_b];
 
         result_data_vec.push(val_a + val_b);
     }
@@ -119,11 +142,11 @@ where
     drop(a_guard);
     drop(b_guard);
 
-    // --- Create Result Tensor --- 
+    // --- Create Result Tensor ---
     // The result tensor is created on the same device as the inputs (CPU here)
     let result_tensor = Tensor::new(result_data_vec, output_shape.clone())?;
 
-    // --- Autograd Linkage (The General Pattern) --- 
+    // --- Autograd Linkage (The General Pattern) ---
     // If any input requires grad, the output also requires grad
     // and needs a `grad_fn` to link it back to the inputs in the computation graph.
     if requires_grad {
@@ -145,7 +168,7 @@ where
         result_tensor.set_requires_grad(true)?;
         result_tensor.set_grad_fn(Some(backward_op_arc))?;
     }
-    // --- End Autograd Linkage --- 
+    // --- End Autograd Linkage ---
 
     Ok(result_tensor)
 }
@@ -158,7 +181,7 @@ where
 //     fn add_assign(&mut self, other: &'a Tensor<T>) { ... }
 // }
 
-// --- Backward Operation --- 
+// --- Backward Operation ---
 
 /// Backward operation context for the element-wise addition operation.
 /// Stores the NodeIds of the input tensors and their shapes to handle broadcasting.
@@ -186,7 +209,18 @@ unsafe impl<T: Debug + Copy + Send + Sync + 'static> Sync for AddBackward<T> {}
 impl<T> BackwardOp<T> for AddBackward<T>
 where
     // Add necessary bounds required by reduce_gradient_to_shape (which uses sum_axes, reshape)
-    T: Debug + Copy + Send + Sync + Zero + AddAssign + 'static + Default + PartialEq + std::iter::Sum + num_traits::One + PartialOrd,
+    T: Debug
+        + Copy
+        + Send
+        + Sync
+        + Zero
+        + AddAssign
+        + 'static
+        + Default
+        + PartialEq
+        + std::iter::Sum
+        + num_traits::One
+        + PartialOrd,
 {
     /// Returns the NodeIds of the input tensors involved in the addition.
     fn inputs(&self) -> Vec<NodeId<T>> {
@@ -217,7 +251,18 @@ fn reduce_gradient_to_shape<T>(
     target_shape: &[usize],
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Debug + Copy + Send + Sync + Zero + AddAssign + 'static + Default + PartialEq + std::iter::Sum + num_traits::One + PartialOrd,
+    T: Debug
+        + Copy
+        + Send
+        + Sync
+        + Zero
+        + AddAssign
+        + 'static
+        + Default
+        + PartialEq
+        + std::iter::Sum
+        + num_traits::One
+        + PartialOrd,
 {
     // Add necessary trait bounds used by sum_axes and reshape
     // T needs Default, PartialEq, Sum, One, PartialOrd (from sum_axes test constraints)
@@ -227,75 +272,118 @@ where
     } else {
         // Basic implementation: If target_shape is scalar [], sum all elements.
         if target_shape.is_empty() {
-             // Use correct path for sum_axes. Keep keep_dims=false for scalar output.
-             crate::ops::reduction::sum_axes(gradient, &[], false)
+            // Use correct path for sum_axes. Keep keep_dims=false for scalar output.
+            crate::ops::reduction::sum_axes(gradient, &[], false)
         } else {
-             let current_shape = gradient.shape();
-             let rank_diff = current_shape.len().saturating_sub(target_shape.len());
-             let mut axes_to_reduce: Vec<usize> = (0..rank_diff).collect(); // Reduce leading dims
+            let current_shape = gradient.shape();
+            let rank_diff = current_shape.len().saturating_sub(target_shape.len());
+            let mut axes_to_reduce: Vec<usize> = (0..rank_diff).collect(); // Reduce leading dims
 
-             for i in 0..target_shape.len() {
-                 if target_shape[i] == 1 && current_shape[rank_diff + i] > 1 {
-                     axes_to_reduce.push(rank_diff + i); // Reduce broadcasted dims
-                 } else if target_shape[i] != current_shape[rank_diff + i] && target_shape[i] != 1 {
-                      return Err(NeuraRustError::InternalError(format!(
-                         "Cannot reduce gradient shape {:?} to {:?}: Incompatible dimensions found.",
-                         current_shape, target_shape
-                      )));
-                 }
-             }
+            for i in 0..target_shape.len() {
+                if target_shape[i] == 1 && current_shape[rank_diff + i] > 1 {
+                    axes_to_reduce.push(rank_diff + i); // Reduce broadcasted dims
+                } else if target_shape[i] != current_shape[rank_diff + i] && target_shape[i] != 1 {
+                    return Err(NeuraRustError::InternalError(format!(
+                        "Cannot reduce gradient shape {:?} to {:?}: Incompatible dimensions found.",
+                        current_shape, target_shape
+                    )));
+                }
+            }
 
-             if axes_to_reduce.is_empty() {
-                 if current_shape == target_shape {
-                      Ok(gradient.clone())
-                 } else {
-                      return Err(NeuraRustError::InternalError(format!(
+            if axes_to_reduce.is_empty() {
+                if current_shape == target_shape {
+                    Ok(gradient.clone())
+                } else {
+                    return Err(NeuraRustError::InternalError(format!(
                          "Cannot reduce gradient shape {:?} to {:?}: No reduction axes found but shapes differ.",
                          current_shape, target_shape
                       )));
-                 }
-             } else {
-                 // Use correct path for sum_axes. keep_dims=false is needed before reshape.
-                 let reduced_grad = crate::ops::reduction::sum_axes(gradient, &axes_to_reduce, false)?;
+                }
+            } else {
+                // Use correct path for sum_axes. keep_dims=false is needed before reshape.
+                let reduced_grad =
+                    crate::ops::reduction::sum_axes(gradient, &axes_to_reduce, false)?;
 
-                 let final_shape: Vec<usize> = target_shape.to_vec();
-                 let reduced_numel: usize = reduced_grad.shape().iter().product();
-                 let target_numel: usize = target_shape.iter().product();
-                 if reduced_numel != target_numel {
-                      return Err(NeuraRustError::InternalError(format!(
+                let final_shape: Vec<usize> = target_shape.to_vec();
+                let reduced_numel: usize = reduced_grad.shape().iter().product();
+                let target_numel: usize = target_shape.iter().product();
+                if reduced_numel != target_numel {
+                    return Err(NeuraRustError::InternalError(format!(
                          "Gradient reduction produced incompatible shape {:?} (numel {}) for target {:?} (numel {}). Reduction axes: {:?}.",
                          reduced_grad.shape(), reduced_numel, target_shape, target_numel, axes_to_reduce
                      )));
-                 }
+                }
 
-                 // Use correct path for reshape_op from ops::view
-                 crate::ops::view::reshape_op(&reduced_grad, final_shape)
-             }
+                // Use correct path for reshape_op from ops::view
+                crate::ops::view::reshape_op(&reduced_grad, final_shape)
+            }
         }
     }
 }
 
-// --- Tests --- 
+// --- Tests ---
 
 #[cfg(test)]
 mod tests {
-    use super::*; 
+    use super::*;
+    use crate::error::NeuraRustError;
     use crate::Tensor;
-    use num_traits::{Zero, One};
-    use std::ops::{Add, AddAssign};
+    use num_traits::{Float, One, Signed, Zero};
+    use std::default::Default;
     use std::fmt::Debug;
     use std::iter::Sum;
-    use crate::error::NeuraRustError;
-    use std::default::Default;
+    use std::ops::{Add, AddAssign};
+    // Import grad check utility
+    use crate::autograd::grad_check::check_grad;
+    // Import approx for float comparisons in direct grad checks (optional)
+    use approx::assert_relative_eq;
 
-    // Helpers remain the same
-    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Add<Output=T> + Default + Sum>(
-        data: Vec<T>, 
-        shape: Vec<usize>
-    ) -> Tensor<T> { 
+    // Helper to create a basic tensor for testing forward ops
+    fn create_test_tensor<
+        T: Clone
+            + Debug
+            + PartialEq
+            + Zero
+            + One
+            + AddAssign
+            + Copy
+            + Add<Output = T>
+            + Default
+            + Sum
+            + PartialOrd
+            + Send
+            + Sync
+            + 'static,
+    >(
+        data: Vec<T>,
+        shape: Vec<usize>,
+    ) -> Tensor<T> {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
-    // REMOVED: fn create_test_tensor_with_grad(...)
+
+    // Helper to create a tensor that requires gradient
+    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Clone
+            + Debug
+            + PartialEq
+            + Zero
+            + One
+            + AddAssign
+            + Copy
+            + Add<Output = T>
+            + Default
+            + Sum
+            + PartialOrd
+            + Send
+            + Sync
+            + 'static,
+    {
+        let t = Tensor::new(data, shape).expect("Test tensor creation failed");
+        t.set_requires_grad(true)
+            .expect("Failed to set requires_grad");
+        t
+    }
 
     #[test]
     fn test_add_tensors_ok() {
@@ -303,11 +391,11 @@ mod tests {
         let t2 = create_test_tensor(vec![5_i32, 6, 7, 8], vec![2, 2]);
         let expected_data = vec![6_i32, 8, 10, 12];
         let expected_shape = vec![2, 2];
-        
+
         let result = add_op(&t1, &t2); // Use add_op now
         assert!(result.is_ok());
         let res_tensor = result.unwrap();
-        
+
         // Compare data: borrow_data_buffer returns Arc<Buffer<T>>
         // Need to access cpu_data() within it.
         let res_buffer_arc = res_tensor.borrow_data_buffer();
@@ -321,18 +409,18 @@ mod tests {
     fn test_add_tensors_shape_mismatch() {
         let t1 = create_test_tensor(vec![1_i32, 2, 3, 4], vec![2, 2]);
         let t_non_broadcast = create_test_tensor(vec![5, 6, 7, 8, 9, 10], vec![2, 3]);
-        
+
         let result = add_op(&t1, &t_non_broadcast); // Use add_op
         assert!(result.is_err());
         match result.err().unwrap() {
             NeuraRustError::BroadcastError { shape1, shape2 } => {
                 assert_eq!(shape1, vec![2, 2]);
                 assert_eq!(shape2, vec![2, 3]);
-            },
+            }
             _ => panic!("Incorrect error type returned"),
         }
     }
-    
+
     #[test]
     fn test_add_broadcasting() {
         let t1 = create_test_tensor(vec![1_i32, 2], vec![1, 2]); // Shape [1, 2]
@@ -351,20 +439,124 @@ mod tests {
         let t_mat = create_test_tensor(vec![1_f32, 2.0, 3.0, 4.0], vec![2, 2]);
         let t_scalar = Tensor::scalar(10.0_f32);
         let expected_scalar_add = vec![11.0_f32, 12.0, 13.0, 14.0];
-        
+
         let result_scalar = add_op(&t_mat, &t_scalar).expect("Scalar add failed");
         assert_eq!(result_scalar.shape(), vec![2, 2]);
         // Updated data access
         let scalar_res_buffer_arc = result_scalar.borrow_data_buffer();
-        let scalar_res_cpu_data = scalar_res_buffer_arc.cpu_data().expect("Scalar add result not on CPU");
-        assert_eq!(scalar_res_cpu_data.as_slice(), expected_scalar_add.as_slice());
-         
+        let scalar_res_cpu_data = scalar_res_buffer_arc
+            .cpu_data()
+            .expect("Scalar add result not on CPU");
+        assert_eq!(
+            scalar_res_cpu_data.as_slice(),
+            expected_scalar_add.as_slice()
+        );
+
         let result_scalar_rev = add_op(&t_scalar, &t_mat).expect("Scalar add reverse failed");
         assert_eq!(result_scalar_rev.shape(), vec![2, 2]);
         // Updated data access
         let scalar_rev_res_buffer_arc = result_scalar_rev.borrow_data_buffer();
-        let scalar_rev_res_cpu_data = scalar_rev_res_buffer_arc.cpu_data().expect("Scalar add reverse result not on CPU");
-        assert_eq!(scalar_rev_res_cpu_data.as_slice(), expected_scalar_add.as_slice());
+        let scalar_rev_res_cpu_data = scalar_rev_res_buffer_arc
+            .cpu_data()
+            .expect("Scalar add reverse result not on CPU");
+        assert_eq!(
+            scalar_rev_res_cpu_data.as_slice(),
+            expected_scalar_add.as_slice()
+        );
+    }
+
+    // --- Autograd Tests ---
+
+    #[test]
+    fn test_add_backward_simple() {
+        // Requires Float for grad check
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let b = create_test_tensor_with_grad::<f64>(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
+
+        // Define the forward function for check_grad
+        let add_func = |inputs: &[Tensor<f64>]| add_op(&inputs[0], &inputs[1]);
+
+        // Define output gradient (tensor of ones)
+        let output_grad = Tensor::ones(vec![2, 2]).expect("Failed to create output grad");
+
+        // Perform gradient check
+        check_grad(
+            add_func,
+            &[a.clone(), b.clone()], // Provide clones to the checker
+            &output_grad,
+            1e-5, // Epsilon (back to original)
+            1e-8, // Tolerance
+        )
+        .expect("Gradient check failed for simple addition");
+
+        // Optional: Direct check of analytical gradients
+        let c = add_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
+
+        let a_grad = a.grad().unwrap();
+        let b_grad = b.grad().unwrap();
+
+        let expected_grad_data = vec![1.0, 1.0, 1.0, 1.0];
+        let a_grad_data = a_grad.read_data().data.cpu_data().unwrap().clone();
+        let b_grad_data = b_grad.read_data().data.cpu_data().unwrap().clone();
+
+        assert_eq!(a_grad.shape(), vec![2, 2]);
+        assert_eq!(b_grad.shape(), vec![2, 2]);
+        a_grad_data
+            .iter()
+            .zip(expected_grad_data.iter())
+            .for_each(|(ag, eg)| assert_relative_eq!(*ag, *eg));
+        b_grad_data
+            .iter()
+            .zip(expected_grad_data.iter())
+            .for_each(|(bg, eg)| assert_relative_eq!(*bg, *eg));
+    }
+
+    #[test]
+    fn test_add_backward_broadcast() {
+        // Test broadcasting: a=[2,1], b=[1,3] -> output=[2,3]
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0], vec![2, 1]);
+        let b = create_test_tensor_with_grad::<f64>(vec![10.0, 20.0, 30.0], vec![1, 3]);
+
+        let add_func = |inputs: &[Tensor<f64>]| add_op(&inputs[0], &inputs[1]);
+
+        // Output gradient (shape [2, 3])
+        let output_grad = Tensor::ones(vec![2, 3]).expect("Failed to create output grad");
+
+        check_grad(
+            add_func,
+            &[a.clone(), b.clone()],
+            &output_grad,
+            1e-5, // Epsilon (back to original)
+            1e-8, // Tolerance
+        )
+        .expect("Gradient check failed for broadcast addition");
+
+        // Optional: Direct check of analytical gradients (with reduction)
+        let c = add_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
+
+        let a_grad = a.grad().unwrap();
+        let b_grad = b.grad().unwrap();
+
+        // Expected grad for 'a': sum(output_grad) over axis 1 -> shape [2, 1]
+        let expected_a_grad_data = vec![3.0, 3.0]; // [1+1+1, 1+1+1]
+                                                   // Expected grad for 'b': sum(output_grad) over axis 0 -> shape [1, 3]
+        let expected_b_grad_data = vec![2.0, 2.0, 2.0]; // [1+1, 1+1, 1+1]
+
+        let a_grad_data = a_grad.read_data().data.cpu_data().unwrap().clone();
+        let b_grad_data = b_grad.read_data().data.cpu_data().unwrap().clone();
+
+        assert_eq!(a_grad.shape(), vec![2, 1]);
+        assert_eq!(b_grad.shape(), vec![1, 3]);
+        a_grad_data
+            .iter()
+            .zip(expected_a_grad_data.iter())
+            .for_each(|(ag, eg)| assert_relative_eq!(*ag, *eg));
+        b_grad_data
+            .iter()
+            .zip(expected_b_grad_data.iter())
+            .for_each(|(bg, eg)| assert_relative_eq!(*bg, *eg));
     }
 
     // REMOVED: Backward tests
@@ -372,4 +564,4 @@ mod tests {
     // fn test_add_backward() -> Result<(), NeuraRustError> { ... }
     // #[test]
     // fn test_add_backward_broadcast() -> Result<(), NeuraRustError> { ... }
-} 
+}
