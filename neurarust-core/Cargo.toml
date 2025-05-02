@@ -2,12 +2,17 @@
 name = "neurarust-core"
 version = "0.1.0"
 edition = "2021"
+license = "MIT OR Apache-2.0"
+description = "Core tensor library for NeuraRust"
 
 [dependencies]
 thiserror = "1.0"
+log = "0.4"
 num-traits = "0.2"
 # Add approx for float comparisons in tests (and grad check)
 approx = "0.5" # <-- AJOUTER CETTE LIGNE
+rand = "0.8" # For random tensor creation
+rand_distr = "0.4" # For specific random distributions (randn)
 
 # Optional: Add ndarray for potential BLAS backend or more complex ops later
 # ndarray = { version = "0.15", features = ["blas"] }

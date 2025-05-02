@@ -289,10 +289,10 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   ✅ **Add Tests:** Used `check_grad` utility, switched to f64 for numerical stability.
     *   ⏳ **Implement/Adapt `reduce_gradient` Utility:** (Not needed for current approach).
 
-*   **1.9 Autograd Integration for Other Core Ops [🚧 In Progress]**
+*   **1.9 Autograd Integration for Other Core Ops [✅ Done]**
     *   🎯 Goal: Implement backward passes for remaining essential ops. *(Moved from 1.3)*
     *   ✅ **Implement `PowBackward`, `ReluBackward`:** Define, implement `BackwardOp`, modify forward ops, test.
-    *   ⏳ **Implement `MatmulBackward` (2D):** Define, implement `BackwardOp` (matrix math), modify forward op (`matmul_op`), test.
+    *   ✅ **Implement `MatmulBackward` (2D):** Define, implement `BackwardOp` (matrix math), modify forward op (`matmul_op`), test.
 
 *   **1.10 Tensor API & Data Type Expansion [⏳ To Do]**
     *   🎯 Goal: Enhance `Tensor` usability and type support. *(Content from original 1.4)*
