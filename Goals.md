@@ -201,17 +201,17 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   Test `contiguous()` copies only when necessary and produces a contiguous tensor on the correct device. ✅
         *   Test that data modifications via one view are reflected when accessing via another view (requires working `get`/`set` or similar). -> *(TODO: Pending set/in-place ops)*
 
-*   **1.2 Basic Autograd Infrastructure [⏳ To Do]**
+*   **1.2 Basic Autograd Infrastructure [🚧 In Progress]**
     *   🎯 Goal: Re-establish the foundational components for automatic differentiation, **handling thread-safety and device awareness.**
-    *   ⏳ **Add `TensorData` Fields:**
+    *   ✅ **Add `TensorData` Fields:**
         *   Add `requires_grad: bool` (default `false`).
         *   Add `grad: Option<Tensor<T>>` (holds the gradient tensor, must be on same device).
         *   Add `grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>` (using `Arc` for shared ownership of backward node, requires trait bounds).
-    *   ⏳ **Define `BackwardOp<T>` Trait:**
+    *   ✅ **Define `BackwardOp<T>` Trait:**
         *   `pub trait BackwardOp<T: 'static + ...>: Debug + Send + Sync { ... }` (add relevant bounds for `T`).
         *   `fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError>;` (Must handle device consistency).
         *   `fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>>;` (Returns stable IDs of input tensors).
-    *   ⏳ **Implement `Tensor` Autograd Accessors/Mutators:**
+    *   ✅ **Implement `Tensor` Autograd Accessors/Mutators:**
         *   `fn requires_grad(&self) -> bool;` (read lock).
         *   `fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError>;` (write lock, handle potential graph modifications).
         *   `fn grad(&self) -> Option<Tensor<T>>;` (read lock, clones `Tensor` if `Some`).

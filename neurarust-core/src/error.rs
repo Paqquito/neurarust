@@ -87,5 +87,8 @@ pub enum NeuraRustError {
         operation: String,
     },
 
+    #[error("Cycle detected in the computation graph during backward pass.")]
+    CycleDetected,
+
     // Add more specific errors as needed
 } 
