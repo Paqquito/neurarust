@@ -243,6 +243,16 @@ impl<
         Ok(())
     }
 
+    /// Clears the gradient tensor (`grad` field) for this tensor.
+    /// Sets the `grad` field to `None`.
+    /// Acquires a write lock on the tensor data.
+    pub fn clear_grad(&self) {
+        // Acquire write lock and set grad to None.
+        // Note: This might panic if the RwLock is poisoned.
+        let mut guard = self.write_data();
+        guard.grad = None;
+    }
+
      // Static helper potentially called by backward
      // Takes RwLock<TensorData> to avoid needing Tensor instance from NodeId
      fn accumulate_grad_static(
