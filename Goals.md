@@ -162,7 +162,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   Calculate new `shape` (swap dims) and new `strides` (swap strides).
         *   Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
         *   Implement `Tensor::transpose(...)`.
-    *   ⏳ **Implement `permute` Operation:**
+    *   ✅ **Implement `permute` Operation:**
         *   Define `permute_op(tensor: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>>`.
         *   Acquire read lock, validate `dims` is a valid permutation for the rank.
         *   Calculate new `shape` and new `strides` by reordering according to `dims`.

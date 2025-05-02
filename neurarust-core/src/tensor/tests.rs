@@ -370,4 +370,129 @@ fn test_permute_invalid_dims() {
     // Invalid permutation (dim out of bounds)
     let result_oob = tensor.permute(&[0, 2]);
     assert!(matches!(result_oob, Err(NeuraRustError::InvalidPermutation { .. })), "Expected InvalidPermutation for out-of-bounds dim");
+}
+
+#[test]
+fn test_is_contiguous() {
+    // Standard contiguous tensor
+    let data1 = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor1 = create_test_tensor(data1, vec![2, 3]); // Strides [3, 1]
+    assert!(tensor1.is_contiguous(), "Standard 2x3 tensor should be contiguous");
+
+    // Scalar
+    let tensor_scalar = create_test_tensor(vec![5.0], vec![]);
+    assert!(tensor_scalar.is_contiguous(), "Scalar tensor should be contiguous");
+
+    // Tensor with dimension size 1
+    let tensor_dim1 = create_test_tensor((0..4).map(|x| x as f32).collect(), vec![4, 1]); // Strides [1, 1]
+    assert!(tensor_dim1.is_contiguous(), "Tensor with dim size 1 can be contiguous");
+    let tensor_dim1_b = create_test_tensor((0..4).map(|x| x as f32).collect(), vec![1, 4]); // Strides [4, 1]
+    assert!(tensor_dim1_b.is_contiguous(), "Tensor with dim size 1 (leading) should be contiguous");
+
+    // Non-contiguous: Transpose
+    let view_transposed = tensor1.transpose(0, 1).expect("Transpose failed"); // Shape [3, 2], Strides [1, 3]
+    assert!(!view_transposed.is_contiguous(), "Transposed tensor should not be contiguous");
+
+    // Non-contiguous: Slice with step > 1 (if slicing supported steps)
+    // For now, test slice that results in non-contiguous strides implicitly
+    let data2 = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor2 = create_test_tensor(data2, vec![2, 3, 4]); // Strides [12, 4, 1]
+    // Slice [:, :, 0:4:2] -> Not possible with current slice, but imagine strides [12, 4, 2]
+    // Let's use permute to create a non-contiguous case
+    let view_permuted = tensor2.permute(&[2, 0, 1]).expect("Permute failed"); // Shape [4, 2, 3], Strides [1, 12, 4]
+    assert!(!view_permuted.is_contiguous(), "Permuted tensor [2,0,1] should not be contiguous");
+
+    // Slice that *remains* contiguous
+    let view_contig_slice = tensor2.slice(&[(0, 1), (0, 3), (0, 4)]).expect("Slice failed"); // Shape [1, 3, 4], Strides [12, 4, 1], Offset 0
+    // Even though it's a view, its logical layout matches C order for its shape
+    assert!(view_contig_slice.is_contiguous(), "Slice resulting in shape [1, 3, 4] should be contiguous");
+
+    let view_contig_slice2 = tensor2.slice(&[(0, 2), (1, 3), (0, 4)]).expect("Slice failed"); // Shape [2, 2, 4], Strides[12, 4, 1], Offset 4
+    // This slice is NOT contiguous because the stride for the first dimension (12)
+    // is not equal to the product of the remaining dimensions (2 * 4 = 8).
+    assert!(!view_contig_slice2.is_contiguous(), "Slice shape [2, 2, 4] from [2, 3, 4] should NOT be contiguous");
+
+    // Slice that becomes non-contiguous
+    let view_noncontig_slice = tensor2.slice(&[(0, 2), (0, 3), (1, 3)]).expect("Slice failed"); // Shape [2, 3, 2], Strides[12, 4, 1], Offset 1
+    assert!(!view_noncontig_slice.is_contiguous(), "Slice shape [2, 3, 2] from [2, 3, 4] (offset 1) should not be contiguous");
+
+    // Tensor with zero dimension
+    let tensor_zero_dim = create_test_tensor(Vec::<f32>::new(), vec![2, 0, 3]);
+    assert!(tensor_zero_dim.is_contiguous(), "Tensor with zero dimension should be contiguous");
+}
+
+#[test]
+fn test_reshape_contiguous() {
+    // Shape [2, 6], Strides [6, 1]
+    let data = (0..12).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 6]);
+    assert!(tensor.is_contiguous());
+
+    // Reshape to [3, 4]
+    let view = tensor.reshape(vec![3, 4]).expect("Reshape contiguous failed");
+
+    // Expected Shape: [3, 4], Strides: [4, 1]
+    assert_eq!(view.shape(), vec![3, 4], "Reshaped shape mismatch");
+    assert_eq!(view.strides(), vec![4, 1], "Reshaped strides mismatch");
+
+    // Verify data sharing and offset
+    assert!(Arc::ptr_eq(&tensor.borrow_data_buffer(), &view.borrow_data_buffer()), "Reshape view should share data");
+    assert_eq!(view.read_data().offset, 0, "Reshape should not change offset for contiguous input");
+
+    // Check values
+    assert_eq!(view.get(&[0, 0]).unwrap(), 0.0); // Original [0, 0]
+    assert_eq!(view.get(&[1, 1]).unwrap(), 5.0); // Original [0, 5]
+    assert_eq!(view.get(&[2, 3]).unwrap(), 11.0); // Original [1, 5]
+}
+
+#[test]
+fn test_reshape_to_scalar() {
+    let tensor = create_test_tensor(vec![42.0], vec![1, 1]);
+    assert!(tensor.is_contiguous());
+    let view = tensor.reshape(vec![]).expect("Reshape to scalar failed");
+    assert_eq!(view.shape(), vec![], "Reshaped shape mismatch");
+    assert_eq!(view.strides(), vec![], "Reshaped strides mismatch");
+    assert_eq!(view.get(&[]).unwrap(), 42.0);
+}
+
+#[test]
+fn test_reshape_from_scalar() {
+    let tensor = create_test_tensor(vec![42.0], vec![]);
+    assert!(tensor.is_contiguous());
+    let view = tensor.reshape(vec![1, 1, 1]).expect("Reshape from scalar failed");
+    assert_eq!(view.shape(), vec![1, 1, 1], "Reshaped shape mismatch");
+    assert_eq!(view.strides(), vec![1, 1, 1], "Reshaped strides mismatch");
+    assert_eq!(view.get(&[0, 0, 0]).unwrap(), 42.0);
+}
+
+#[test]
+fn test_reshape_non_contiguous_error() {
+    // Create a non-contiguous tensor via transpose
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3]);
+    let transposed_view = tensor.transpose(0, 1).expect("Transpose failed");
+    assert!(!transposed_view.is_contiguous());
+
+    // Attempt to reshape the non-contiguous view
+    let result = transposed_view.reshape(vec![6]);
+    assert!(matches!(result, Err(NeuraRustError::UnsupportedOperation(_))), "Expected UnsupportedOperation for reshaping non-contiguous tensor");
+    // Check error message content if needed
+    if let Err(NeuraRustError::UnsupportedOperation(msg)) = result {
+        assert!(msg.contains("contiguous"), "Error message should mention contiguity");
+    }
+}
+
+#[test]
+fn test_reshape_numel_mismatch() {
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3]);
+
+    // Attempt reshape with wrong number of elements
+    let result = tensor.reshape(vec![2, 2]);
+    assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })), "Expected ShapeMismatch for wrong number of elements");
+
+    if let Err(NeuraRustError::ShapeMismatch { expected, actual }) = result {
+        assert_eq!(expected, vec![2, 3]);
+        assert_eq!(actual, vec![2, 2]);
+    }
 } 

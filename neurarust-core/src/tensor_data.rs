@@ -108,4 +108,30 @@ impl<T> TensorData<T> {
         // Add the base offset of this tensor view
         self.offset + relative_offset
     }
+
+    /// Checks if the tensor is contiguous in memory.
+    /// A tensor is contiguous if its elements are laid out in the standard
+    /// row-major order (C order) without gaps, considering its strides.
+    pub fn is_contiguous(&self) -> bool {
+        if self.shape.is_empty() { return true; } // Scalar is contiguous
+
+        // Check if the strides match the standard C-contiguous strides
+        // Comment out unused variable
+        // let expected_strides = Self::calculate_contiguous_strides(&self.shape);
+
+        // More robust check considering dimensions of size 1:
+        let mut current_stride = 1;
+        for i in (0..self.shape.len()).rev() {
+            let shape_i = self.shape[i];
+            if shape_i == 0 { return true; } // Tensor with 0 elements is contiguous
+            if shape_i != 1 {
+                if self.strides[i] != current_stride {
+                    return false;
+                }
+                current_stride *= shape_i;
+            }
+            // If shape_i is 1, its stride doesn't break contiguity, just continue.
+        }
+        true
+    }
 } 

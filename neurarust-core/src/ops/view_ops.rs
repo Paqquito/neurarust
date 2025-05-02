@@ -223,4 +223,69 @@ pub(crate) fn permute_op<T: Clone + Debug + Default + Send + Sync + 'static>(
     Ok(new_tensor)
 }
 
+/// Performs the reshape operation. Currently only supports creating a view
+/// for contiguous tensors. For non-contiguous tensors, call `.contiguous()` first.
+///
+/// # Arguments
+/// * `tensor`: The input tensor.
+/// * `new_shape_vec`: The desired new shape.
+///
+/// # Returns
+/// A new Tensor representing the reshaped view, or an error.
+pub(crate) fn reshape_op<T: Clone + Debug + Default + Send + Sync + 'static>(
+    tensor: &Tensor<T>,
+    new_shape_vec: Vec<usize>,
+) -> Result<Tensor<T>, NeuraRustError> {
+    // 1. Acquire read lock
+    let tensor_data_arc = Arc::clone(&tensor.data);
+    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for reshape".to_string()))?;
+
+    // 2. Validate shape compatibility (same number of elements)
+    let original_numel: usize = guard.shape.iter().product();
+    let new_numel: usize = new_shape_vec.iter().product();
+
+    if original_numel != new_numel {
+        return Err(NeuraRustError::ShapeMismatch {
+            expected: guard.shape.clone(), // Or just numel?
+            actual: new_shape_vec,       // Let's return shapes for clarity
+        });
+        // TODO: Consider a more specific ReshapeNumelMismatchError?
+    }
+
+    // 3. Check for contiguity
+    if !guard.is_contiguous() {
+        // As per roadmap: Initially require contiguous. User must call .contiguous() first.
+        return Err(NeuraRustError::UnsupportedOperation(
+            "Reshape view is only supported for contiguous tensors. Call .contiguous() first.".to_string()
+        ));
+        // TODO (Advanced): Implement check for non-contiguous tensors where reshape is still possible as a view.
+    }
+
+    // 4. Calculate new contiguous strides for the new shape
+    let new_strides = TensorData::<T>::calculate_contiguous_strides(&new_shape_vec);
+
+    // 5. Get other necessary info
+    let buffer_arc = Arc::clone(&guard.data);
+    let device = guard.device;
+    let offset = guard.offset; // Reshape of contiguous tensor starts at the same offset
+
+    drop(guard);
+
+    // 6. Create new TensorData using new_view
+    let new_td = TensorData::new_view(
+        buffer_arc,
+        device,
+        offset,
+        new_shape_vec.clone(), // Use the validated new shape
+        new_strides,
+    );
+
+    // 7. Wrap in Tensor
+    let new_tensor = Tensor {
+        data: Arc::new(RwLock::new(new_td))
+    };
+
+    Ok(new_tensor)
+}
+
 // Placeholder for Debug trait implementation if needed 

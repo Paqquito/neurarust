@@ -185,6 +185,14 @@ impl<T> Tensor<T> {
 
     // --- View Operations ---
 
+    /// Checks if the tensor is contiguous in memory.
+    /// Acquires a read lock.
+    /// Panics if the lock is poisoned.
+    /// See `TensorData::is_contiguous` for details.
+    pub fn is_contiguous(&self) -> bool {
+        self.read_data().is_contiguous()
+    }
+
     /// Creates a view of the tensor by slicing along specified dimensions.
     /// This operation does not copy data; the new tensor shares the same underlying buffer.
     ///
@@ -253,6 +261,39 @@ impl<T> Tensor<T> {
     {
         crate::ops::view_ops::permute_op(self, dims)
     }
+
+    /// Returns a view of the tensor with the specified shape.
+    ///
+    /// This operation attempts to return a view without copying data. Currently,
+    /// this is only possible if the original tensor is contiguous.
+    /// If the tensor is not contiguous, this method will return an error.
+    /// Call `.contiguous().reshape(...)` to ensure the operation succeeds by potentially copying data first.
+    ///
+    /// The total number of elements must remain the same.
+    ///
+    /// # Arguments
+    /// * `new_shape`: The desired new shape.
+    ///
+    /// # Returns
+    /// A new Tensor representing the reshaped view, or an error.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Assuming tensor is contiguous 2x6
+    /// let reshaped_tensor = tensor.reshape(vec![3, 4])?; // Shape becomes 3x4
+    /// // Assuming tensor is non-contiguous
+    /// // tensor.reshape(vec![3, 4]); -> Returns Error
+    /// // tensor.contiguous()?.reshape(vec![3, 4])?; -> Ok
+    /// ```
+    pub fn reshape(&self, new_shape: Vec<usize>) -> Result<Self, NeuraRustError>
+    where
+        T: Clone + Debug + Default + Send + Sync + 'static, // Match trait bounds of reshape_op
+    {
+        crate::ops::view_ops::reshape_op(self, new_shape)
+    }
+
+    // Optional: Alias or stricter view-only version
+    // pub fn view(&self, new_shape: Vec<usize>) -> Result<Self, NeuraRustError> where ... { self.reshape(new_shape) }
 }
 
 // --- Traits Implementations ---
