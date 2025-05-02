@@ -2,23 +2,18 @@
 name = "neurarust-core"
 version = "0.1.0"
 edition = "2021"
-license = "MIT OR Apache-2.0"
-description = "Core tensor library for NeuraRust"
 
 [dependencies]
-num-traits = "0.2"
-rand = "0.8"
-# neurarust-optim = { path = "../neurarust-optim" } # Removed to break cycle
 thiserror = "1.0"
-ndarray = "0.15" # Potentially useful for testing/comparison, optional?
-# Add approx for floating point comparisons in tests
-approx = { version = "0.5", optional = true }
+num-traits = "0.2"
+# Add approx for float comparisons in tests (and grad check)
+approx = "0.5" # <-- AJOUTER CETTE LIGNE
+
+# Optional: Add ndarray for potential BLAS backend or more complex ops later
+# ndarray = { version = "0.15", features = ["blas"] }
+# blas-src = { version = "0.8", features = ["openblas"] }
+# openblas-src = { version = "0.10", features = ["cblas"] }
 
 [dev-dependencies]
-# We might want approx specifically for dev tests
-approx = "0.5"
-
-[features]
-default = []
-# Example feature for conditional compilation later (e.g., GPU support)
-# gpu = ["dep:cuda-bindings"]
+# Keep approx here too if tests directly use it
+# approx = "0.5"

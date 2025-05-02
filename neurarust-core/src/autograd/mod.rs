@@ -4,5 +4,8 @@
 pub mod backward_op;
 pub mod graph;
 
+// Declare the new module
+pub mod grad_check;
+
 // Re-export the core BackwardOp trait for easier access
 pub use backward_op::BackwardOp; 
