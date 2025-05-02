@@ -577,27 +577,6 @@ fn test_contiguous_on_permute() {
     assert_eq!(*contiguous_data, expected_data, "Contiguous tensor data mismatch");
 }
 
-// Recursive helper to build expected data by iterating through permuted view's logical order
-// Add necessary bounds
-fn build_expected_permuted_data<T>(
-    original_tensor: &Tensor<T>,
-    permuted_tensor: &Tensor<T>,
-    expected_buffer: &mut Vec<T>,
-    current_indices: &mut Vec<usize>,
-    current_dim: usize,
-) where T: Clone + Debug + Copy + Default + PartialEq + Send + Sync + 'static // Added bounds
-{
-    if current_dim == permuted_tensor.ndim() {
-        // Base case: get value using permuted view indices
-        expected_buffer.push(permuted_tensor.get(current_indices).unwrap());
-    } else {
-        for i in 0..permuted_tensor.shape()[current_dim] {
-            current_indices[current_dim] = i;
-            build_expected_permuted_data(original_tensor, permuted_tensor, expected_buffer, current_indices, current_dim + 1);
-        }
-    }
-}
-
 #[test]
 fn test_contiguous_on_slice() {
     // Shape [2, 3, 4], Strides [12, 4, 1]
