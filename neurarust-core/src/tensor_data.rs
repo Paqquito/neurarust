@@ -1,19 +1,23 @@
 // src/tensor_data.rs
 use std::fmt::Debug; // Removed unnecessary braces
 // Use Arc for the buffer for thread-safe sharing
-use std::sync::Arc;
+use std::sync::Arc; // Removed unused RwLock import
 
 // Import new types
+use crate::autograd::BackwardOp; // Import BackwardOp
 use crate::buffer::Buffer;
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError; // Import error type
+use crate::tensor::Tensor; // Import Tensor for Option<Tensor<T>>
 
 /// Holds the actual data buffer reference and metadata for a tensor.
 /// Uses Arc<Buffer<T>> for shared ownership of the data buffer.
 /// The Tensor struct itself will wrap this in an Arc<RwLock<...>>
-/// for thread-safe interior mutability of metadata (like shape, strides for views).
-#[derive(Debug, PartialEq, Eq)] // Keep derive (PartialEq/Eq work due to Buffer impl)
-pub struct TensorData<T> {
+/// for thread-safe interior mutability of metadata (like shape, strides, grad info).
+// Note: Removed PartialEq/Eq derive. Comparing grad_fn (trait object) is complex and not usually needed.
+// Equality might be redefined later if specific comparison logic is required.
+#[derive(Debug)]
+pub struct TensorData<T: 'static + Debug + Copy> { // Add T bounds needed by BackwardOp
     // Data buffer. Shared via Arc. Views will clone this Arc.
     pub data: Arc<Buffer<T>>,
     // The device where the data buffer resides.
@@ -22,11 +26,24 @@ pub struct TensorData<T> {
     pub offset: usize,
     pub shape: Vec<usize>,
     pub strides: Vec<usize>,
+
+    // --- Autograd Fields ---
+    /// Does this tensor require gradient computation?
+    pub requires_grad: bool,
+    /// Stores the computed gradient for this tensor after backward().
+    /// Must reside on the same device as the tensor data.
+    pub grad: Option<Tensor<T>>,
+    /// Reference to the backward operation that produced this tensor.
+    /// This forms the edge in the computation graph.
+    /// Uses Arc for shared ownership across potential multiple outputs or graph references.
+    pub grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>,
 }
 
-impl<T> TensorData<T> {
+// Note: Added T bounds here as well
+impl<T: 'static + Debug + Copy> TensorData<T> {
     // Public constructor - Takes ownership of data vec, wraps in CPU Buffer and Arc,
     // calculates contiguous strides. Assumes CPU for now.
+    // Initializes autograd fields to default (non-differentiable).
     pub fn new(data_vec: Vec<T>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         let numel: usize = shape.iter().product();
         let data_len = data_vec.len();
@@ -46,12 +63,18 @@ impl<T> TensorData<T> {
             offset: 0, // New tensors always start at offset 0
             shape,
             strides,
+            // Initialize autograd fields
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
         })
     }
 
     // Constructor for creating views (internal/advanced usage later)
     // Takes an existing Arc<Buffer>, offset, shape, strides, device
-    // Note: Needs careful validation externally that shape/strides/offset are valid for the buffer
+    // Views created this way DO NOT track gradients initially.
+    // If a view needs to be part of the graph, the operation creating it
+    // (e.g., slice_op) will set requires_grad and grad_fn later.
     #[allow(dead_code)] // Might be used later for views
     pub(crate) fn new_view(
         buffer_arc: Arc<Buffer<T>>,
@@ -69,6 +92,10 @@ impl<T> TensorData<T> {
             offset,
             shape,
             strides,
+            // Initialize autograd fields (views don't require grad by default)
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
         }
     }
 

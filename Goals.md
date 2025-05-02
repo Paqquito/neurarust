@@ -145,7 +145,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
 **Phase 1: Views, Autograd & Expanded CPU Ops [⏳ To Do]**
 *   🎯 **Goal:** Implement view semantics, a functional dynamic autograd system, and significantly expand CPU tensor operations & API, **ensuring compatibility with the new `Arc<RwLock>`, `Buffer`, and `StorageDevice` structures.**
 
-*   **1.1 View Semantics & Core Shape Ops [⏳ To Do]**
+*   **1.1 View Semantics & Core Shape Ops [✅ Done]**
     *   🎯 Goal: Implement non-copying views for shape manipulation, essential for performance and memory.
     *   ✅ **Refine `TensorData::new_view`:** Ensure it's accessible (e.g., `pub(crate)`) and correctly takes `Arc<Buffer<T>>`, `device`, `offset`, `shape`, `strides` to create `TensorData` instances representing views.
     *   ✅ **Implement `slice` Operation:** -> ✅ **Done**
@@ -175,7 +175,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   If contiguous: Calculate new *contiguous* `strides` for `new_shape`. Create view using `new_view` (cloned buffer, original device/offset, `new_shape`, new strides).
         *   If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly). -> *(Currently returns Err)*
         *   Implement `Tensor::reshape(...)` and potentially `Tensor::view(...)` (alias or stricter view-only version).
-    *   ✅ **Implement `contiguous()` Method:**
+    *   ✅ **Implement `contiguous()` Method:** -> ✅ **Done**
         *   Implement `Tensor::contiguous(&self) -> Result<Tensor<T>>`.
         *   Call `is_contiguous()`. If true, return `self.clone()`.
         *   If false:
@@ -192,14 +192,14 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   Calculate expected contiguous strides for `self.shape`.
         *   Compare `self.strides` with expected strides (handle 0/1 dim sizes).
         *   Implement `Tensor::is_contiguous(&self)` calling the `TensorData` method via read lock.
-    *   ⏳ **Testing:**
-        *   Unit tests for each view op (`slice`, `transpose`, `permute`, `reshape`/`view`).
-        *   Test edge cases (empty tensors, 0/1 sized dimensions).
-        *   Verify views share the underlying buffer (`Arc::ptr_eq` on `borrow_data_buffer()`).
-        *   Verify correct `shape`, `strides`, `offset`, `device` for views.
-        *   Test `is_contiguous()` correctly identifies contiguous/non-contiguous tensors.
-        *   Test `contiguous()` copies only when necessary and produces a contiguous tensor on the correct device.
-        *   Test that data modifications via one view are reflected when accessing via another view (requires working `get`/`set` or similar).
+    *   ✅ **Testing:** -> ✅ **Done (Except Shared Modification)**
+        *   Unit tests for each view op (`slice`, `transpose`, `permute`, `reshape`/`view`). ✅
+        *   Test edge cases (empty tensors, 0/1 sized dimensions). ✅
+        *   Verify views share the underlying buffer (`Arc::ptr_eq` on `borrow_data_buffer()`). ✅
+        *   Verify correct `shape`, `strides`, `offset`, `device` for views. ✅
+        *   Test `is_contiguous()` correctly identifies contiguous/non-contiguous tensors. ✅
+        *   Test `contiguous()` copies only when necessary and produces a contiguous tensor on the correct device. ✅
+        *   Test that data modifications via one view are reflected when accessing via another view (requires working `get`/`set` or similar). -> *(TODO: Pending set/in-place ops)*
 
 *   **1.2 Basic Autograd Infrastructure [⏳ To Do]**
     *   🎯 Goal: Re-establish the foundational components for automatic differentiation, **handling thread-safety and device awareness.**
