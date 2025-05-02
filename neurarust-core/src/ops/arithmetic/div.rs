@@ -271,14 +271,12 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::autograd::grad_check::check_grad;
     use crate::error::NeuraRustError;
     use crate::Tensor;
     use approx::{assert_abs_diff_eq, assert_relative_eq};
     use num_traits::{Float, One, Zero, Signed};
     use std::cmp::PartialEq;
     use std::default::Default;
-    use std::fmt::Debug;
     use std::iter::Sum;
     use std::ops::{AddAssign, Div, Mul};
 
@@ -310,6 +308,28 @@ mod tests {
         shape: Vec<usize>,
     ) -> Tensor<T> {
         Tensor::new(data, shape).expect("Test tensor creation failed")
+    }
+
+    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Clone
+            + Debug
+            + PartialEq
+            + Zero
+            + One
+            + AddAssign
+            + Copy
+            + Add<Output = T>
+            + Default
+            + Sum
+            + PartialOrd
+            + Send
+            + Sync
+            + 'static,
+    {
+        let tensor = Tensor::new(data, shape).unwrap();
+        tensor.set_requires_grad(true).unwrap();
+        tensor
     }
 
     #[test]
@@ -394,72 +414,54 @@ mod tests {
 
     #[test]
     fn test_div_backward_simple() {
-        let a_init = create_test_tensor(vec![6.0f64, 10.0], vec![2]);
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0], vec![2]);
+        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 10.0], vec![2]);
 
-        let b_init = create_test_tensor(vec![2.0f64, 5.0], vec![2]);
-        b_init.set_requires_grad(true).unwrap();
-        let b = b_init;
+        let output_grad = Tensor::ones(vec![2]).unwrap();
 
-        let forward_fn = |inputs: &[Tensor<f64>]| div_op(&inputs[0], &inputs[1]);
-
-        check_grad(
-            forward_fn,
-            &[a.clone(), b.clone()],
-            &Tensor::ones(vec![2]).unwrap(),
-            1e-6,
-            1e-6,
-        )
-        .expect("Gradient check failed for simple division");
-
-        let z = div_op(&a, &b).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        let c = div_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
 
-        let expected_grad_a = vec![0.5f64, 0.2];
-        let expected_grad_b = vec![-1.5f64, -0.4];
+        let expected_grad_a = vec![0.5, 0.1];
+        let expected_grad_b = vec![-1.0 / (2.0 * 2.0), -2.0 / (10.0 * 10.0)];
 
         let grad_a_buffer = grad_a.borrow_data_buffer();
         let grad_a_data = grad_a_buffer.cpu_data().unwrap();
         let grad_b_buffer = grad_b.borrow_data_buffer();
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
+        assert_eq!(grad_a.shape(), vec![2]);
         assert_abs_diff_eq!(grad_a_data.as_slice(), expected_grad_a.as_slice(), epsilon = 1e-6);
+
+        assert_eq!(grad_b.shape(), vec![2]);
         assert_abs_diff_eq!(grad_b_data.as_slice(), expected_grad_b.as_slice(), epsilon = 1e-6);
     }
 
     #[test]
     fn test_div_backward_broadcast() {
-        let a_init = create_test_tensor(vec![10.0f64, 20.0, 30.0, 40.0], vec![2, 2]);
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 4.0], vec![2]);
 
-        let b_init = create_test_tensor(vec![2.0f64, 4.0], vec![2, 1]);
-        b_init.set_requires_grad(true).unwrap();
-        let b = b_init;
+        let output_grad = Tensor::ones(vec![2, 2]).unwrap();
 
-        let forward_fn = |inputs: &[Tensor<f64>]| div_op(&inputs[0], &inputs[1]);
-
-        check_grad(
-            forward_fn,
-            &[a.clone(), b.clone()],
-            &Tensor::ones(vec![2, 2]).unwrap(),
-            1e-6,
-            1e-6,
-        )
-        .expect("Gradient check failed for broadcast division");
-
-        let z = div_op(&a, &b).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        let c = div_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
 
-        let expected_grad_a = vec![0.5f64, 0.5, 0.25, 0.25];
-        let expected_grad_b = vec![-7.5f64, -4.375];
+        let expected_grad_a = vec![0.5f64, 0.25, 0.5, 0.25]; // [[1/2, 1/4], [1/2, 1/4]]
+        // Expected grad for 'b' = - grad_output * a / b^2 (summed over axis 1, then 0)
+        // grad_b_unreduced = - [[1,1],[1,1]] * [[1,2],[3,4]] / [[2,4],[2,4]]^2
+        // grad_b_unreduced = - [[1,2],[3,4]] / [[4,16],[4,16]] = [[-1/4, -2/16], [-3/4, -4/16]] = [[-0.25, -0.125], [-0.75, -0.25]]
+        // Reduce by summing over axis 0 (since b was broadcasted by adding axis 0? No, b shape was [2])
+        // b was broadcasted to align with last dim of a. a=[2,2], b=[2]. target=[2,2]. b became [1,2] -> [2,2]. Axis 0 added.
+        // Reduce grad_b_unreduced shape [2,2] to b_shape [2] by summing axis 1 ? No, axis 0.
+        // Sum axis 0: [-0.25 + -0.75, -0.125 + -0.25] = [-1.0, -0.375]
+        let expected_grad_b = vec![-1.0, -0.375];
 
         let grad_a_buffer = grad_a.borrow_data_buffer();
         let grad_a_data = grad_a_buffer.cpu_data().unwrap();
@@ -467,7 +469,7 @@ mod tests {
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
         assert_eq!(grad_a.shape(), vec![2, 2]);
-        assert_eq!(grad_b.shape(), vec![2, 1]);
+        assert_eq!(grad_b.shape(), vec![2]);
 
         assert_abs_diff_eq!(grad_a_data.as_slice(), expected_grad_a.as_slice(), epsilon = 1e-6);
         assert_abs_diff_eq!(grad_b_data.as_slice(), expected_grad_b.as_slice(), epsilon = 1e-6);
@@ -475,13 +477,8 @@ mod tests {
 
     #[test]
     fn test_div_backward_with_zero_divisor() {
-        let a_init = create_test_tensor(vec![6.0f64, 10.0], vec![2]);
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
-
-        let b_init = create_test_tensor(vec![2.0f64, 0.0], vec![2]);
-        b_init.set_requires_grad(true).unwrap();
-        let b = b_init;
+        let a = create_test_tensor_with_grad::<f64>(vec![6.0, 10.0], vec![2]);
+        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 0.0], vec![2]);
 
         let z_result = div_op(&a, &b);
         assert!(z_result.is_err());

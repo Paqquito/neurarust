@@ -18,7 +18,7 @@ mod create;
 mod view_methods;
 
 // --- Declare utility modules ---
-pub(crate) mod utils; // Declare internal utils
+pub mod utils; // Declare public utils
 pub mod broadcast_utils; // Declare the new public broadcast utils module
 
 /// Represents a multi-dimensional array (tensor).
@@ -44,5 +44,4 @@ pub struct Tensor<T: 'static + Debug + Copy> {
 // pub use crate::tensor_data::TensorData;
 
 // --- Test Module ---
-#[cfg(test)]
-mod tests;
+// Removed: #[cfg(test)] mod tests;

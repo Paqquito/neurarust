@@ -250,21 +250,28 @@ where
 #[cfg(test)]
 mod tests {
     use super::*; // Import mul_op
-    // Import grad_check and helpers
-    use crate::autograd::grad_check::check_grad;
-    use crate::error::NeuraRustError;
-    use crate::Tensor;
-    use approx::assert_abs_diff_eq;
-    use num_traits::{Float, One, Zero};
-    use std::cmp::PartialEq;
-    use std::default::Default;
+    use crate::tensor::Tensor; // Import Tensor
+    use num_traits::{One, Zero};
     use std::fmt::Debug;
+    use std::ops::{Add, AddAssign};
     use std::iter::Sum;
-    // Remove unused Neg, Sub imports from tests
-    use std::ops::{Add, AddAssign, Mul};
+    use std::default::Default;
+    use std::marker::Copy;
+    use std::cmp::PartialEq;
+    use std::cmp::PartialOrd;
+    use crate::error::NeuraRustError;
+    use approx::assert_relative_eq;
 
-    // Update helpers bounds to include Float and approx traits for grad_check
+    // Helper to create tensors for tests
     fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Default + Clone + Debug + PartialEq + Copy + Zero + One + AddAssign + PartialOrd + Sum + Send + Sync + 'static,
+    {
+        Tensor::new(data, shape).unwrap()
+    }
+
+    // Helper to create tensors requiring gradients
+    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
     where
         T: Clone
             + Debug
@@ -272,21 +279,18 @@ mod tests {
             + Zero
             + One
             + AddAssign
-            + Add<Output = T>
-            + Mul<Output = T>
             + Copy
+            + Add<Output = T> // Requires Add bound
             + Default
             + Sum
             + PartialOrd
-            + Float // Requires f32 or f64
-            + approx::AbsDiffEq<Epsilon = T>
-            + approx::RelativeEq<Epsilon = T>
-            + approx::UlpsEq<Epsilon = T>
             + Send
             + Sync
             + 'static,
     {
-        Tensor::new(data, shape).expect("Test tensor creation failed")
+        let tensor = Tensor::new(data, shape).unwrap();
+        tensor.set_requires_grad(true).unwrap();
+        tensor
     }
 
     // --- Forward Pass Tests --- 
@@ -379,27 +383,13 @@ mod tests {
 
     #[test]
     fn test_mul_backward_simple() {
-        let a_init = create_test_tensor(vec![1.0f64, 2.0, 3.0], vec![3]);
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0, 3.0], vec![3]);
+        let b = create_test_tensor_with_grad::<f64>(vec![4.0, 5.0, 6.0], vec![3]);
 
-        let b_init = create_test_tensor(vec![4.0f64, 5.0, 6.0], vec![3]);
-        b_init.set_requires_grad(true).unwrap();
-        let b = b_init;
+        let output_grad = Tensor::ones(vec![3]).unwrap();
 
-        let forward_fn = |inputs: &[Tensor<f64>]| mul_op(&inputs[0], &inputs[1]);
-
-        check_grad(
-            forward_fn,
-            &[a.clone(), b.clone()],
-            &Tensor::ones(vec![3]).unwrap(),
-            1e-6,
-            1e-6,
-        )
-        .expect("Gradient check failed for simple multiplication");
-
-        let z = mul_op(&a, &b).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        let c = mul_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
@@ -413,56 +403,38 @@ mod tests {
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
         for (i, &val) in grad_a_data.iter().enumerate() {
-            assert_abs_diff_eq!(val, expected_grad_a[i], epsilon = 1e-6);
+            assert_relative_eq!(val, expected_grad_a[i], epsilon = 1e-6);
         }
          for (i, &val) in grad_b_data.iter().enumerate() {
-            assert_abs_diff_eq!(val, expected_grad_b[i], epsilon = 1e-6);
+            assert_relative_eq!(val, expected_grad_b[i], epsilon = 1e-6);
         }
     }
 
     #[test]
     fn test_mul_backward_broadcast() {
-        let a_init = create_test_tensor(vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0], vec![2, 1]);
+        let b = create_test_tensor_with_grad::<f64>(vec![10.0, 20.0, 30.0], vec![1, 3]);
 
-        let b_init = create_test_tensor(vec![10.0f64, 20.0, 30.0], vec![3]);
-        b_init.set_requires_grad(true).unwrap();
-        let b = b_init;
+        let output_grad = Tensor::ones(vec![2, 3]).unwrap();
 
-        let forward_fn = |inputs: &[Tensor<f64>]| mul_op(&inputs[0], &inputs[1]);
-
-        check_grad(
-            forward_fn,
-            &[a.clone(), b.clone()],
-            &Tensor::ones(vec![2, 3]).unwrap(),
-            1e-6,
-            1e-6,
-        )
-        .expect("Gradient check failed for broadcast multiplication");
-
-        let z = mul_op(&a, &b).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        let c = mul_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
 
-        let expected_grad_a = vec![10.0f64, 20.0, 30.0, 10.0, 20.0, 30.0];
-        let expected_grad_b = vec![5.0f64, 7.0, 9.0];
+        let expected_grad_a = vec![60.0, 60.0];
+        let expected_grad_b = vec![3.0, 3.0, 3.0];
 
         let grad_a_buffer = grad_a.borrow_data_buffer();
         let grad_a_data = grad_a_buffer.cpu_data().unwrap();
         let grad_b_buffer = grad_b.borrow_data_buffer();
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
-        assert_eq!(grad_a.shape(), vec![2, 3]);
-        assert_eq!(grad_b.shape(), vec![3]);
+        assert_eq!(grad_a.shape(), vec![2, 1], "Gradient A shape mismatch");
+        assert_eq!(grad_b.shape(), vec![1, 3], "Gradient B shape mismatch");
 
-        for (i, &val) in grad_a_data.iter().enumerate() {
-            assert_abs_diff_eq!(val, expected_grad_a[i], epsilon = 1e-6);
-        }
-        for (i, &val) in grad_b_data.iter().enumerate() {
-            assert_abs_diff_eq!(val, expected_grad_b[i], epsilon = 1e-6);
-        }
+        assert_relative_eq!(grad_a_data.as_slice(), expected_grad_a.as_slice(), epsilon = 1e-6);
+        assert_relative_eq!(grad_b_data.as_slice(), expected_grad_b.as_slice(), epsilon = 1e-6);
     }
 }

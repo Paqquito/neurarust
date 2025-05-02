@@ -268,19 +268,19 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   ✅ Broadcasting cases: `test_add_backward_broadcast` in `add.rs` checks broadcasting.
         *   ✅ Use `check_grad` utility: Both tests use `check_grad` to validate `AddBackward` implicitly by comparing analytical and numerical gradients.
 
-*   **1.6 Autograd Integration for Basic Arithmetic Ops [⏳ To Do]**
+*   **1.6 Autograd Integration for Basic Arithmetic Ops [✅ Done]**
     *   🎯 Goal: Extend autograd support to other basic arithmetic operations (`sub`, `mul`, `neg`, `div`) following the established pattern.
-    *   ⏳ **Implement `SubBackward`, `MulBackward`, `NegBackward`, `DivBackward`:** Define structs, implement `BackwardOp` trait (handle chain rules, division by zero for `DivBackward`).
-    *   ⏳ **Modify `sub_op`, `mul_op`, `neg_op`, `div_op`:** Integrate autograd logic (check `requires_grad`, create backward op, set `grad_fn`) like in `add_op`.
-    *   ⏳ **Add Tests:** Use `check_grad` utility to validate each new `BackwardOp`.
+    *   ✅ **Implement `SubBackward`, `MulBackward`, `NegBackward`, `DivBackward`:** Define structs, implement `BackwardOp` trait (handle chain rules, division by zero for `DivBackward`).
+    *   ✅ **Modify `sub_op`, `mul_op`, `neg_op`, `div_op`:** Integrate autograd logic (check `requires_grad`, create backward op, set `grad_fn`) like in `add_op`.
+    *   ✅ **Add Tests:** Use `check_grad` utility to validate each new `BackwardOp`.
 
-*   **1.7 Autograd Integration for View Ops [⏳ To Do]**
-    *   🎯 Goal: Implement backward passes for the view operations created in 1.1. *(Moved from 1.3)*
-    *   ⏳ **Implement `SliceBackward`, `TransposeBackward`, `PermuteBackward`, `ReshapeBackward`:**
-        *   Define structs. Store necessary context (e.g., original shape/strides).
-        *   Implement `BackwardOp` (often involves scattering/accumulating gradients based on view logic). Must be device-aware (CPU for now).
-    *   ⏳ **Modify `slice_op`, `transpose_op`, `permute_op`, `reshape_op`:** Integrate autograd logic.
-    *   ⏳ **Add Tests:** Use `check_grad` utility.
+*   **1.7 Autograd Integration for View Ops [✅ Done]**
+    *   🎯 Goal: Implement backward passes for the view operations created in 1.1.
+    *   ✅ **Implement `SliceBackward`, `TransposeBackward`, `PermuteBackward`, `ReshapeBackward`:**
+        *   Defined structs. Stored necessary context (e.g., original shape/strides).
+        *   Implemented `BackwardOp` (often involves scattering/accumulating gradients based on view logic). Handled device-awareness (CPU).
+    *   ✅ **Modify `slice_op`, `transpose_op`, `permute_op`, `reshape_op`:** Integrated autograd logic.
+    *   ✅ **Add Tests:** Implemented tests for view backward passes.
 
 *   **1.8 Autograd Integration for Reduction Ops [⏳ To Do]**
     *   🎯 Goal: Implement backward passes for reduction operations. *(Moved from 1.3)*

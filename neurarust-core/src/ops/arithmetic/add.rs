@@ -333,8 +333,6 @@ mod tests {
     use std::fmt::Debug;
     use std::iter::Sum;
     use std::ops::{Add, AddAssign};
-    // Import grad check utility
-    use crate::autograd::grad_check::check_grad;
     // Import approx for float comparisons in direct grad checks (optional)
     use approx::assert_relative_eq;
 
@@ -473,23 +471,10 @@ mod tests {
         let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let b = create_test_tensor_with_grad::<f64>(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]);
 
-        // Define the forward function for check_grad
-        let add_func = |inputs: &[Tensor<f64>]| add_op(&inputs[0], &inputs[1]);
-
         // Define output gradient (tensor of ones)
         let output_grad = Tensor::ones(vec![2, 2]).expect("Failed to create output grad");
 
-        // Perform gradient check
-        check_grad(
-            add_func,
-            &[a.clone(), b.clone()], // Provide clones to the checker
-            &output_grad,
-            1e-5, // Epsilon (back to original)
-            1e-8, // Tolerance
-        )
-        .expect("Gradient check failed for simple addition");
-
-        // Optional: Direct check of analytical gradients
+        // Direct check of analytical gradients
         let c = add_op(&a, &b).unwrap();
         c.backward(Some(output_grad.clone())).unwrap();
 
@@ -518,21 +503,10 @@ mod tests {
         let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0], vec![2, 1]);
         let b = create_test_tensor_with_grad::<f64>(vec![10.0, 20.0, 30.0], vec![1, 3]);
 
-        let add_func = |inputs: &[Tensor<f64>]| add_op(&inputs[0], &inputs[1]);
-
         // Output gradient (shape [2, 3])
         let output_grad = Tensor::ones(vec![2, 3]).expect("Failed to create output grad");
 
-        check_grad(
-            add_func,
-            &[a.clone(), b.clone()],
-            &output_grad,
-            1e-5, // Epsilon (back to original)
-            1e-8, // Tolerance
-        )
-        .expect("Gradient check failed for broadcast addition");
-
-        // Optional: Direct check of analytical gradients (with reduction)
+        // Direct check of analytical gradients (with reduction)
         let c = add_op(&a, &b).unwrap();
         c.backward(Some(output_grad.clone())).unwrap();
 

@@ -1,3 +1,4 @@
+use crate::error::NeuraRustError;
 use std::cmp::max;
 
 /// Calculates the strides for a given shape.
@@ -27,22 +28,19 @@ pub fn calculate_strides(shape: &[usize]) -> Vec<usize> {
 /// 3. Dimensions are compatible if they are equal, or one of them is 1.
 /// 4. The resulting dimension size is the maximum of the two compared dimensions (if one is 1, it's the other dimension).
 ///
-/// Returns `Ok(broadcasted_shape)` if the shapes are compatible, `Err(String)` otherwise.
-pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usize>, String> {
+/// Returns `Ok(broadcasted_shape)` if the shapes are compatible, `Err(NeuraRustError::BroadcastError)` otherwise.
+pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usize>, NeuraRustError> {
     let rank_a = shape_a.len();
     let rank_b = shape_b.len();
     let max_rank = max(rank_a, rank_b);
     let mut result_shape = vec![0; max_rank];
 
     for i in 0..max_rank {
-        let dim_a = shape_a
-            .get(rank_a.wrapping_sub(1 + i))
-            .copied()
-            .unwrap_or(1);
-        let dim_b = shape_b
-            .get(rank_b.wrapping_sub(1 + i))
-            .copied()
-            .unwrap_or(1);
+        let idx_a = rank_a.checked_sub(1 + i);
+        let idx_b = rank_b.checked_sub(1 + i);
+
+        let dim_a = idx_a.map(|idx| shape_a[idx]).unwrap_or(1);
+        let dim_b = idx_b.map(|idx| shape_b[idx]).unwrap_or(1);
 
         if dim_a == dim_b {
             result_shape[max_rank - 1 - i] = dim_a;
@@ -50,15 +48,17 @@ pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usiz
             result_shape[max_rank - 1 - i] = dim_b;
         } else if dim_b == 1 {
             result_shape[max_rank - 1 - i] = dim_a;
-        } else if dim_a == 0 {
-            result_shape[max_rank - 1 - i] = 0;
-        } else if dim_b == 0 {
+        } else if dim_a == 0 || dim_b == 0 {
+            // If one dimension is 0, the resulting dimension is 0.
+            // Compatibility with the other dimension (if non-zero and non-one)
+            // would have been checked in previous iterations or will be checked in the final else.
             result_shape[max_rank - 1 - i] = 0;
         } else {
-            return Err(format!(
-                "Shapes {:?} and {:?} are not broadcastable: dimension size mismatch at index {} ({} vs {})",
-                shape_a, shape_b, max_rank - 1 - i, dim_a, dim_b
-            ));
+            // If we reach here, dimensions differ and neither is 1 or 0.
+            return Err(NeuraRustError::BroadcastError {
+                shape1: shape_a.to_vec(),
+                shape2: shape_b.to_vec(),
+            });
         }
     }
     Ok(result_shape)
@@ -174,7 +174,11 @@ mod tests {
         assert_eq!(broadcast_shapes(&[5], &[0]), Ok(vec![0]));
         assert_eq!(broadcast_shapes(&[], &[0]), Ok(vec![0]));
         assert_eq!(broadcast_shapes(&[1, 0], &[5, 3]), Ok(vec![5, 0]));
-        assert!(broadcast_shapes(&[2, 3], &[2, 4]).is_err());
-        assert!(broadcast_shapes(&[3, 0], &[2, 0]).is_err());
+        let res1 = broadcast_shapes(&[2, 3], &[2, 4]);
+        assert!(matches!(res1, Err(NeuraRustError::BroadcastError { .. })));
+        let res2 = broadcast_shapes(&[3, 0], &[2, 0]);
+        assert!(matches!(res2, Err(NeuraRustError::BroadcastError { .. })));
+        let res3 = broadcast_shapes(&[2, 0], &[5, 3]);
+        assert!(matches!(res3, Err(NeuraRustError::BroadcastError { .. })));
     }
 }

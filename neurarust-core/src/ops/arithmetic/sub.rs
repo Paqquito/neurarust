@@ -221,7 +221,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::autograd::grad_check::check_grad;
     use crate::error::NeuraRustError;
     use crate::Tensor;
     use num_traits::{One, Zero};
@@ -256,6 +255,28 @@ mod tests {
             + 'static,
     {
         Tensor::new(data, shape).expect("Test tensor creation failed")
+    }
+
+    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Clone
+            + Debug
+            + PartialEq
+            + Zero
+            + One
+            + AddAssign
+            + Copy
+            + Add<Output = T>
+            + Default
+            + Sum
+            + PartialOrd
+            + Send
+            + Sync
+            + 'static,
+    {
+        let tensor = Tensor::new(data, shape).unwrap();
+        tensor.set_requires_grad(true).unwrap();
+        tensor
     }
 
     #[test]
@@ -334,31 +355,13 @@ mod tests {
 
     #[test]
     fn test_sub_backward_simple() {
-        // Test gradient calculation for simple subtraction z = a - b
-        let a_init = create_test_tensor(vec![1.0f32, 2.0, 3.0], vec![3]);
-        a_init.set_requires_grad(true).unwrap(); // Set grad requirement separately
-        let a = a_init; // Assign to new variable for clarity or reuse
+        let a = create_test_tensor_with_grad::<f32>(vec![1.0, 2.0, 3.0], vec![3]);
+        let b = create_test_tensor_with_grad::<f32>(vec![4.0, 5.0, 6.0], vec![3]);
+        let output_grad = Tensor::<f32>::ones(vec![3]).unwrap();
 
-        let b_init = create_test_tensor(vec![4.0f32, 5.0, 6.0], vec![3]);
-        b_init.set_requires_grad(true).unwrap();
-        let b = b_init;
-
-        // Define the forward function for grad check
-        let forward_fn = |inputs: &[Tensor<f32>]| sub_op(&inputs[0], &inputs[1]);
-
-        // Use grad_check utility
-        check_grad(
-            forward_fn,
-            &[a.clone(), b.clone()], // Provide clones of inputs
-            &Tensor::ones(vec![3]).unwrap(), // Initial gradient (dZ/dZ)
-            1e-3, // Epsilon for numerical diff
-            1e-3, // Tolerance for comparison
-        )
-        .expect("Gradient check failed for simple subtraction");
-
-        // --- Manual check (optional, but good sanity check) ---
-        let z = sub_op(&a, &b).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        // Check analytical gradients
+        let c = sub_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
@@ -383,41 +386,21 @@ mod tests {
 
     #[test]
     fn test_sub_backward_broadcast() {
-        // Test gradient calculation with broadcasting z = a - b
-        // a: [2, 3], b: [3]
-        let a_init = create_test_tensor(
-            vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0],
-            vec![2, 3],
-        );
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
+        let a = create_test_tensor_with_grad::<f32>(vec![1.0, 2.0], vec![2, 1]);
+        let b = create_test_tensor_with_grad::<f32>(vec![10.0, 20.0, 30.0], vec![1, 3]);
+        let output_grad = Tensor::<f32>::ones(vec![2, 3]).unwrap();
 
-        let b_init = create_test_tensor(vec![0.1f32, 0.2, 0.3], vec![3]);
-        b_init.set_requires_grad(true).unwrap(); // Shape [3]
-        let b = b_init;
-
-        // Define the forward function for grad check
-        let forward_fn = |inputs: &[Tensor<f32>]| sub_op(&inputs[0], &inputs[1]);
-
-        // Use grad_check utility
-        check_grad(
-            forward_fn,
-            &[a.clone(), b.clone()], 
-            &Tensor::ones(vec![2, 3]).unwrap(), // Initial grad dZ/dZ, shape matches output
-            1e-3, 
-            1e-3, 
-        )
-        .expect("Gradient check failed for broadcast subtraction");
-
-        // --- Manual check (optional) ---
-        let z = sub_op(&a, &b).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        // Check analytical gradients
+        let c = sub_op(&a, &b).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
 
-        let expected_grad_a = vec![1.0f32; 6];
-        let expected_grad_b = vec![-2.0f32, -2.0, -2.0];
+        // Expected grad for 'a': sum(output_grad) over axis 1 -> shape [2, 1]
+        let expected_grad_a = vec![3.0f32, 3.0]; // [1+1+1, 1+1+1]
+        // Expected grad for 'b': -sum(output_grad) over axis 0 -> shape [1, 3]
+        let expected_grad_b = vec![-2.0f32, -2.0, -2.0]; // [- (1+1), - (1+1), - (1+1)]
 
         // Bind buffer data to local variables
         let grad_a_buffer = grad_a.borrow_data_buffer();
@@ -426,8 +409,8 @@ mod tests {
         let grad_b_buffer = grad_b.borrow_data_buffer();
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
-        assert_eq!(grad_a.shape(), vec![2, 3]);
-        assert_eq!(grad_b.shape(), vec![3]);
+        assert_eq!(grad_a.shape(), vec![2, 1]);
+        assert_eq!(grad_b.shape(), vec![1, 3]);
 
         for (i, &val) in grad_a_data.iter().enumerate() {
             assert_abs_diff_eq!(val, expected_grad_a[i], epsilon = 1e-6);

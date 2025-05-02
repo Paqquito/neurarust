@@ -3,8 +3,10 @@ use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use std::fmt::Debug; // Keep Debug for T bound and contiguous helper
-use std::iter::Product;
+use std::iter::{Product, Sum}; // Added Sum
 use std::marker::Copy; // Keep Copy for T bound and contiguous helper
+use std::ops::AddAssign; // Added AddAssign
+use num_traits::{One, Zero}; // Added One, Zero
 use std::sync::{Arc, RwLockReadGuard}; // Keep Arc for contiguous helper, RwLockReadGuard for helper signature // Keep Product for T bound in contiguous
 
 // Helper function for recursive multidimensional iteration used by contiguous()
@@ -33,7 +35,7 @@ fn copy_non_contiguous_recursive<T: Clone + Debug + Copy + 'static>(
     }
 }
 
-impl<T: 'static + Debug + Copy> Tensor<T> {
+impl<T: 'static + Debug + Copy + Default + Send + Sync + Zero + One + AddAssign + Sum + PartialEq + PartialOrd> Tensor<T> {
     /// Checks if the tensor is contiguous in memory.
     pub fn is_contiguous(&self) -> bool {
         self.read_data().is_contiguous()
@@ -74,7 +76,7 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
     /// Returns a contiguous version of the tensor.
     pub fn contiguous(&self) -> Result<Self, NeuraRustError>
     where
-        T: Default + Send + Sync + Product,
+        T: Product,
     {
         if self.is_contiguous() {
             Ok(self.clone()) // Use Self::clone() which is defined in traits.rs

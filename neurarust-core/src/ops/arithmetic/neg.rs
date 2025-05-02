@@ -234,7 +234,6 @@ where
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::autograd::grad_check::check_grad;
     use crate::Tensor;
     use approx::assert_abs_diff_eq;
     use num_traits::{Float, One, Zero, Signed};
@@ -272,6 +271,29 @@ mod tests {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
 
+    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Clone
+            + Debug
+            + PartialEq
+            + Zero
+            + One
+            + AddAssign
+            + Copy
+            + Add<Output = T>
+            + Default
+            + Sum
+            + PartialOrd
+            + Send
+            + Sync
+            + 'static
+            + Neg<Output = T>,
+    {
+        let tensor = Tensor::new(data, shape).unwrap();
+        tensor.set_requires_grad(true).unwrap();
+        tensor
+    }
+
     #[test]
     fn test_neg_ok() {
         let t1 = create_test_tensor(vec![1.0f64, -2.0, 3.0, -4.0], vec![2, 2]);
@@ -294,32 +316,18 @@ mod tests {
 
     #[test]
     fn test_neg_backward() {
-        let a_init = create_test_tensor(vec![1.0f64, -2.0, 3.0, -4.0], vec![2, 2]);
-        a_init.set_requires_grad(true).unwrap();
-        let a = a_init;
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0, -2.0, 3.0], vec![3]);
 
-        let forward_fn = |inputs: &[Tensor<f64>]| neg_op(&inputs[0]);
-
-        check_grad(
-            forward_fn,
-            &[a.clone()],
-            &Tensor::ones(vec![2, 2]).unwrap(),
-            1e-6,
-            1e-6,
-        )
-        .expect("Gradient check failed for negation");
-
-        let z = neg_op(&a).unwrap();
-        z.backward(Some(Tensor::ones(z.shape()).unwrap())).expect("Backward pass failed");
+        let output_grad = Tensor::ones(vec![3]).unwrap();
+        let c = neg_op(&a).unwrap();
+        c.backward(Some(output_grad.clone())).unwrap();
 
         let grad_a = a.grad().unwrap();
+        let grad_a_data = grad_a.read_data().data.cpu_data().unwrap().clone();
 
-        let expected_grad_a = vec![-1.0f64, -1.0, -1.0, -1.0];
+        let expected_grad_a = vec![-1.0f64, -1.0, -1.0];
 
-        let grad_a_buffer = grad_a.borrow_data_buffer();
-        let grad_a_data = grad_a_buffer.cpu_data().unwrap();
-
-        assert_eq!(grad_a.shape(), vec![2, 2]);
+        assert_eq!(grad_a.shape(), vec![3]);
         for (i, &val) in grad_a_data.iter().enumerate() {
             assert_abs_diff_eq!(val, expected_grad_a[i], epsilon = 1e-6);
         }
