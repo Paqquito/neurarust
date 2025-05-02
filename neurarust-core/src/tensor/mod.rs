@@ -14,7 +14,7 @@ mod traits; // Keep traits module declared
 // mod traits;
 // Add other existing modules here if they exist (e.g., based on previous structure or file listing)
 mod accessors;
-mod create;
+mod create; // Keep private
 mod view_methods;
 
 // --- Declare utility modules ---
@@ -39,9 +39,14 @@ pub struct Tensor<T: 'static + Debug + Copy> {
     pub(crate) data: Arc<RwLock<TensorData<T>>>,
 }
 
-// --- Public Exports ---
-// Remove this re-export as it causes name collision
-// pub use crate::tensor_data::TensorData;
-
 // --- Test Module ---
 // Removed: #[cfg(test)] mod tests;
+
+// --- Re-exports ---
+// pub use tensor_data::TensorData; // Commented out
+// pub use storage::{Buffer, Storage, StorageDevice}; // Commented out
+// pub use create::{zeros, ones, full}; // Commented out
+
+// pub use methods::{Tensor, TensorMethods}; // Commented out
+
+// pub use crate::error::NeuraRustError; // Commented out
