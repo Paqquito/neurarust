@@ -1,9 +1,13 @@
-pub mod transpose;
-pub mod matmul;
+// src/ops/linalg/mod.rs
 
-// Re-export only matmul
-pub use matmul::matmul;
-// REMOVED: pub use transpose::transpose; // Transpose is a method, not a free function
+// Comment out or remove module declarations for which files don't exist
+// pub mod transpose;
+// pub mod matmul;
+
+// TODO: Re-introduce these modules when their implementation starts
+
+// Re-export only matmul (commented out as module is commented out)
+// pub use matmul::matmul_op;
 
 // MatmulBackward struct and impl moved to matmul.rs
 // Tests related to matmul moved to matmul.rs

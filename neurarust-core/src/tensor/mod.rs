@@ -182,6 +182,32 @@ impl<T> Tensor<T> {
     pub fn scalar(value: T) -> Self where T: Clone {
         Tensor::new(vec![value], vec![]).expect("Scalar creation failed")
     }
+
+    // --- View Operations ---
+
+    /// Creates a view of the tensor by slicing along specified dimensions.
+    /// This operation does not copy data; the new tensor shares the same underlying buffer.
+    ///
+    /// # Arguments
+    /// * `ranges`: A slice of tuples `(start, end)` defining the slice for each dimension.
+    ///             The length must match the tensor's rank. `end` is exclusive.
+    ///
+    /// # Returns
+    /// A new Tensor representing the view, or an error if the ranges are invalid.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Assuming tensor is 2x3
+    /// // Slice to get the first row: tensor.slice(&[(0, 1), (0, 3)])?;
+    /// // Slice to get the sub-matrix [[elem_11, elem_12]]: tensor.slice(&[(1, 2), (1, 3)])?;
+    /// ```
+    pub fn slice(&self, ranges: &[crate::ops::view_ops::SliceArg]) -> Result<Self, NeuraRustError>
+    where
+        T: Clone + Debug + Default + Send + Sync + 'static, // Match trait bounds of slice_op
+    {
+        // Call the internal slice_op function from the view_ops module
+        crate::ops::view_ops::slice_op(self, ranges)
+    }
 }
 
 // --- Traits Implementations ---
@@ -289,6 +315,7 @@ mod tests {
     use std::iter::Sum; // Keep Sum for helper
     use std::cmp::PartialEq; // Keep PartialEq for helper
     use std::default::Default; // Keep Default for helper
+    use std::sync::Arc; // For Arc::ptr_eq
 
     // Helper needs Copy trait because test_tensor_creation uses .clone() on f32 data
     fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
@@ -407,5 +434,71 @@ mod tests {
         assert_eq!(t.shape(), shape);
         assert_eq!(t.numel(), 6);
         for i in 0..3 { for j in 0..1 { for k in 0..2 { assert_relative_eq!(t.get(&[i, j, k]).unwrap(), fill_val); } } }
+    }
+
+    #[test]
+    fn test_simple_slice() {
+        let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+        let tensor = create_test_tensor(data, vec![2, 3, 4]);
+        let ranges = vec![(0, 1), (0, 3), (0, 4)];
+        let view = tensor.slice(&ranges).expect("Simple slice failed");
+
+        assert_eq!(view.shape(), vec![1, 3, 4], "View shape mismatch");
+        assert_eq!(view.get(&[0, 0, 0]).unwrap(), 0.0, "Value mismatch at [0,0,0]");
+        assert_eq!(view.get(&[0, 2, 3]).unwrap(), 11.0, "Value mismatch at [0,2,3]");
+    }
+
+    #[test]
+    fn test_slice_shares_data() {
+        let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+        let tensor = create_test_tensor(data, vec![2, 3, 4]);
+        let ranges = vec![(1, 2), (1, 3), (0, 2)];
+        let view = tensor.slice(&ranges).expect("Slice for data sharing test failed");
+
+        let original_buffer_ptr = Arc::as_ptr(&tensor.borrow_data_buffer());
+        let view_buffer_ptr = Arc::as_ptr(&view.borrow_data_buffer());
+
+        assert!(Arc::ptr_eq(&tensor.borrow_data_buffer(), &view.borrow_data_buffer()), "View does not share the same data buffer Arc");
+        assert_eq!(original_buffer_ptr, view_buffer_ptr, "View does not point to the same buffer allocation");
+    }
+
+    #[test]
+    fn test_slice_metadata() {
+        let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+        let tensor = create_test_tensor(data, vec![2, 3, 4]); // Shape [2, 3, 4], Strides [12, 4, 1], Offset 0
+        let ranges = vec![(1, 2), (1, 3), (0, 2)]; // Slice: [1, 1:3, 0:2] -> Shape [1, 2, 2]
+        let view = tensor.slice(&ranges).expect("Slice for metadata test failed");
+
+        let view_data = view.read_data();
+
+        assert_eq!(view_data.shape, vec![1, 2, 2], "View shape mismatch");
+        assert_eq!(view_data.strides, vec![12, 4, 1], "View strides should be inherited");
+        assert_eq!(view_data.offset, 16, "View offset calculation incorrect");
+
+        // Drop guard before calling view.get() which also locks
+        drop(view_data);
+        assert_eq!(view.get(&[0, 0, 0]).unwrap(), 16.0, "First element value mismatch");
+    }
+
+    #[test]
+    fn test_slice_invalid_range() {
+        let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+        let tensor = create_test_tensor(data, vec![2, 3, 4]);
+
+        // Range end > dimension size
+        let ranges_invalid_end = vec![(0, 1), (0, 4), (0, 4)]; // Dim 1 size is 3, end is 4
+        let result_invalid_end = tensor.slice(&ranges_invalid_end);
+        assert!(matches!(result_invalid_end, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for end > dim size");
+
+        // Range start >= end
+        let ranges_invalid_start = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 start == end
+        let result_invalid_start = tensor.slice(&ranges_invalid_start);
+        assert!(matches!(result_invalid_start, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for start >= end");
+
+        // Incorrect number of ranges
+        let ranges_wrong_ndim = vec![(0, 1), (0, 1)]; // Only 2 ranges for 3 dims
+        let result_wrong_ndim = tensor.slice(&ranges_wrong_ndim);
+        // Use DimensionMismatch as per the updated slice_op
+        assert!(matches!(result_wrong_ndim, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of ranges");
     }
 }
