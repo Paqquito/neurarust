@@ -1,6 +1,6 @@
 use crate::tensor::Tensor;
 use crate::error::NeuraRustError;
-use std::ops::{AddAssign};
+use std::ops::AddAssign;
 use num_traits::Zero;
 use std::fmt::Debug;
 use std::iter::Sum;

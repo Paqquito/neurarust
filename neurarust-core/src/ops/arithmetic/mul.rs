@@ -113,7 +113,7 @@ where
 #[cfg(test)]
 mod tests {
     use super::*; // Import the new `mul_op` function
-    use crate::{tensor::Tensor}; 
+    use crate::Tensor; // Changed import style for consistency
     use num_traits::{Zero, One};
     use std::ops::{Mul, AddAssign};
     use crate::error::NeuraRustError; // Import NeuraRustError
