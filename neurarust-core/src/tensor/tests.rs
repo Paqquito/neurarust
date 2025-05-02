@@ -157,8 +157,8 @@ fn test_full_creation() {
 fn test_simple_slice() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
-    // Use SliceArg type for clarity
-    let ranges: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 3), (0, 4)];
+    // Use SliceArg type for clarity, update path
+    let ranges: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (0, 3), (0, 4)];
     let view = tensor.slice(&ranges).expect("Simple slice failed");
 
     assert_eq!(view.shape(), vec![1, 3, 4], "View shape mismatch");
@@ -170,7 +170,8 @@ fn test_simple_slice() {
 fn test_slice_shares_data() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
-    let ranges: Vec<crate::ops::view_ops::SliceArg> = vec![(1, 2), (1, 3), (0, 2)];
+    // Update path
+    let ranges: Vec<crate::ops::view::SliceArg> = vec![(1, 2), (1, 3), (0, 2)];
     let view = tensor.slice(&ranges).expect("Slice for data sharing test failed");
 
     let original_buffer_ptr = Arc::as_ptr(&tensor.borrow_data_buffer());
@@ -184,7 +185,8 @@ fn test_slice_shares_data() {
 fn test_slice_metadata() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]); // Shape [2, 3, 4], Strides [12, 4, 1], Offset 0
-    let ranges: Vec<crate::ops::view_ops::SliceArg> = vec![(1, 2), (1, 3), (0, 2)]; // Slice: [1, 1:3, 0:2] -> Shape [1, 2, 2]
+    // Update path
+    let ranges: Vec<crate::ops::view::SliceArg> = vec![(1, 2), (1, 3), (0, 2)]; // Slice: [1, 1:3, 0:2] -> Shape [1, 2, 2]
     let view = tensor.slice(&ranges).expect("Slice for metadata test failed");
 
     let view_data = view.read_data();
@@ -204,23 +206,27 @@ fn test_slice_invalid_range() {
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
 
     // Range end > dimension size
-    let ranges_invalid_end: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 4), (0, 4)]; // Dim 1 size is 3, end is 4
+    // Update path
+    let ranges_invalid_end: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (0, 4), (0, 4)]; // Dim 1 size is 3, end is 4
     let result_invalid_end = tensor.slice(&ranges_invalid_end);
     assert!(matches!(result_invalid_end, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for end > dim size");
 
     // Range start > end
-    let ranges_invalid_start: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (3, 2), (0, 4)]; // Dim 1 start > end
+    // Update path
+    let ranges_invalid_start: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (3, 2), (0, 4)]; // Dim 1 start > end
     let result_invalid_start = tensor.slice(&ranges_invalid_start);
     assert!(matches!(result_invalid_start, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for start > end");
 
     // Test start == end (should work)
-    let ranges_zero_size: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 becomes size 0
+    // Update path
+    let ranges_zero_size: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 becomes size 0
     let result_zero_size = tensor.slice(&ranges_zero_size);
     assert!(result_zero_size.is_ok(), "Slice with start == end should be Ok");
     assert_eq!(result_zero_size.unwrap().shape(), vec![1, 0, 4], "Slice start == end shape mismatch");
 
     // Incorrect number of ranges
-    let ranges_wrong_ndim: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 1)]; // Only 2 ranges for 3 dims
+    // Update path
+    let ranges_wrong_ndim: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (0, 1)]; // Only 2 ranges for 3 dims
     let result_wrong_ndim = tensor.slice(&ranges_wrong_ndim);
     assert!(matches!(result_wrong_ndim, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of ranges");
 }
@@ -431,18 +437,23 @@ fn test_is_contiguous() {
     assert!(tensor_permuted_id.is_contiguous(), "Identity-permuted tensor view should be contiguous");
 
     // Sliced tensor (contiguous if slice covers full inner dimensions and starts at 0)
-    let slice_contig1: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 2), (0, 3), (0, 4)]; // Full slice
+    // Update path
+    let slice_contig1: Vec<crate::ops::view::SliceArg> = vec![(0, 2), (0, 3), (0, 4)]; // Full slice
     assert!(tensor_std.slice(&slice_contig1).unwrap().is_contiguous(), "Full slice should be contiguous");
-    let slice_contig2: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 3), (0, 4)]; // First outer slice
+    // Update path
+    let slice_contig2: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (0, 3), (0, 4)]; // First outer slice
     assert!(tensor_std.slice(&slice_contig2).unwrap().is_contiguous(), "Slice of first outer dim should be contiguous");
 
-    let slice_noncontig1: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 2), (0, 3), (1, 4)]; // Slice inner dim not at start
+    // Update path
+    let slice_noncontig1: Vec<crate::ops::view::SliceArg> = vec![(0, 2), (0, 3), (1, 4)]; // Slice inner dim not at start
     assert!(!tensor_std.slice(&slice_noncontig1).unwrap().is_contiguous(), "Slice inner dim not at start should not be contiguous");
-    let slice_noncontig2: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 2), (1, 3), (0, 4)]; // Slice middle dim not at start
+    // Update path
+    let slice_noncontig2: Vec<crate::ops::view::SliceArg> = vec![(0, 2), (1, 3), (0, 4)]; // Slice middle dim not at start
     assert!(!tensor_std.slice(&slice_noncontig2).unwrap().is_contiguous(), "Slice middle dim not at start should not be contiguous");
 
     // Slice resulting in dim size 1
-    let slice_dim1: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 1), (0, 4)]; // Shape [1, 1, 4]
+    // Update path
+    let slice_dim1: Vec<crate::ops::view::SliceArg> = vec![(0, 1), (0, 1), (0, 4)]; // Shape [1, 1, 4]
     assert!(tensor_std.slice(&slice_dim1).unwrap().is_contiguous(), "Slice resulting in dim size 1 should be contiguous");
 }
 

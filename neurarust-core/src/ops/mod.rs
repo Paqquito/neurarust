@@ -4,7 +4,7 @@ pub mod linalg;
 pub mod loss;
 pub mod math_elem;
 pub mod reduction;
-pub mod view_ops;
+pub mod view;
 // pub mod activation; // REMOVED
 // pub mod indexing; // REMOVED
 // pub mod stack; // REMOVED

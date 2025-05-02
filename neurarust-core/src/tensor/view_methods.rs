@@ -40,11 +40,11 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
     }
 
     /// Creates a view of the tensor by slicing along specified dimensions.
-    pub fn slice(&self, ranges: &[crate::ops::view_ops::SliceArg]) -> Result<Self, NeuraRustError>
+    pub fn slice(&self, ranges: &[crate::ops::view::SliceArg]) -> Result<Self, NeuraRustError>
     where
         T: Default + Send + Sync,
     {
-        crate::ops::view_ops::slice_op(self, ranges)
+        crate::ops::view::slice_op(self, ranges)
     }
 
     /// Creates a view of the tensor with two dimensions transposed.
@@ -52,7 +52,7 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
     where
         T: Default + Send + Sync,
     {
-        crate::ops::view_ops::transpose_op(self, dim1, dim2)
+        crate::ops::view::transpose_op(self, dim1, dim2)
     }
 
     /// Creates a view of the tensor with dimensions permuted according to the specified order.
@@ -60,7 +60,7 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
     where
         T: Default + Send + Sync,
     {
-        crate::ops::view_ops::permute_op(self, dims)
+        crate::ops::view::permute_op(self, dims)
     }
 
     /// Creates a view of the tensor with a different shape.
@@ -68,7 +68,7 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
     where
         T: Default + Send + Sync,
     {
-        crate::ops::view_ops::reshape_op(self, new_shape)
+        crate::ops::view::reshape_op(self, new_shape)
     }
 
     /// Returns a contiguous version of the tensor.
