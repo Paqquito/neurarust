@@ -2,7 +2,7 @@
 
 // Comment out or remove module declarations for which files don't exist
 // pub mod transpose;
-// pub mod matmul;
+pub mod matmul;
 
 // TODO: Re-introduce these modules when their implementation starts
 

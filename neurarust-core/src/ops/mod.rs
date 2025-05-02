@@ -1,4 +1,5 @@
 // Déclare les sous-modules d'opérations
+pub mod activation;
 pub mod arithmetic;
 pub mod linalg;
 pub mod loss;
