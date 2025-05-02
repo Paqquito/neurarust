@@ -39,7 +39,7 @@ impl<T> Buffer<T> {
         }
     }
 
-    // --- CPU Specific Methods --- 
+    // --- CPU Specific Methods ---
 
     /// Creates a new CPU buffer from a vector.
     pub fn new_cpu(data: Vec<T>) -> Self {
@@ -52,13 +52,13 @@ impl<T> Buffer<T> {
         match self {
             Buffer::Cpu(data_arc) => Ok(data_arc),
             Buffer::Gpu { .. } => Err(NeuraRustError::DataNotAvailableError {
-                 expected: StorageDevice::CPU, 
-                 actual: self.device() 
+                expected: StorageDevice::CPU,
+                actual: self.device(),
             }),
         }
     }
 
-    // --- GPU Specific Methods (Placeholders) --- 
+    // --- GPU Specific Methods (Placeholders) ---
     // pub fn gpu_buffer(&self) -> Result<GpuBufferHandle, NeuraRustError> { ... }
 }
 
@@ -67,21 +67,32 @@ impl<T> Clone for Buffer<T> {
     fn clone(&self) -> Self {
         match self {
             Buffer::Cpu(arc_vec) => Buffer::Cpu(Arc::clone(arc_vec)),
-            Buffer::Gpu { device, len } => Buffer::Gpu { device: *device, len: *len }, // Clone metadata
+            Buffer::Gpu { device, len } => Buffer::Gpu {
+                device: *device,
+                len: *len,
+            }, // Clone metadata
         }
     }
 }
 
-// Equality check might be complex, especially for GPU. 
+// Equality check might be complex, especially for GPU.
 // For now, let's compare based on CPU data pointers or GPU metadata.
 impl<T> PartialEq for Buffer<T> {
     fn eq(&self, other: &Self) -> bool {
         match (self, other) {
             (Buffer::Cpu(arc_a), Buffer::Cpu(arc_b)) => Arc::ptr_eq(arc_a, arc_b),
-            (Buffer::Gpu { device: dev_a, len: len_a }, Buffer::Gpu { device: dev_b, len: len_b }) => 
-                dev_a == dev_b && len_a == len_b, // Simple metadata check for now
+            (
+                Buffer::Gpu {
+                    device: dev_a,
+                    len: len_a,
+                },
+                Buffer::Gpu {
+                    device: dev_b,
+                    len: len_b,
+                },
+            ) => dev_a == dev_b && len_a == len_b, // Simple metadata check for now
             _ => false, // Buffers on different devices are not equal
         }
     }
 }
-impl<T> Eq for Buffer<T> {} 
+impl<T> Eq for Buffer<T> {}

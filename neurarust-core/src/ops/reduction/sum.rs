@@ -1,14 +1,14 @@
-use crate::tensor::Tensor;
+use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
-use std::ops::AddAssign;
+use crate::tensor::Tensor;
+use num_traits::One;
 use num_traits::Zero;
+use std::cmp::PartialEq;
+use std::cmp::PartialOrd; // Added for create_test_tensor
+use std::default::Default;
 use std::fmt::Debug;
 use std::iter::Sum;
-use std::cmp::PartialEq;
-use std::default::Default;
-use num_traits::One;
-use std::cmp::PartialOrd; // Added for create_test_tensor
-use crate::device::StorageDevice;
+use std::ops::AddAssign;
 
 /// Calculates the sum of elements along specified axes.
 /// Requires the tensor to be on CPU.
@@ -18,35 +18,52 @@ pub fn sum_axes<T>(
     keep_dims: bool,
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Clone + Zero + AddAssign + Debug + Copy + Send + Sync + 'static + Default + PartialEq + PartialOrd + One + Sum,
+    T: Clone
+        + Zero
+        + AddAssign
+        + Debug
+        + Copy
+        + Send
+        + Sync
+        + 'static
+        + Default
+        + PartialEq
+        + PartialOrd
+        + One
+        + Sum,
 {
     // Acquire read lock
     let input_guard = input.read_data();
 
-    // --- Device Check --- 
-    let device = input_guard.device; 
+    // --- Device Check ---
+    let device = input_guard.device;
     if device != StorageDevice::CPU {
-         return Err(NeuraRustError::UnsupportedOperation(
-            format!("Summation is currently only supported on CPU, not {:?}", device)
-        ));
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Summation is currently only supported on CPU, not {:?}",
+            device
+        )));
     }
-    // --- Get CPU Data Buffer --- 
-    let input_data_arc = input_guard.data.cpu_data()?.clone(); 
+    // --- Get CPU Data Buffer ---
+    let input_data_arc = input_guard.data.cpu_data()?.clone();
 
-    // --- Shape and Axis Validation --- 
+    // --- Shape and Axis Validation ---
     let input_shape = input_guard.shape.clone();
     let input_rank = input_shape.len();
 
-    // --- Handle Sum All Case --- 
+    // --- Handle Sum All Case ---
     if axes.is_empty() {
         // Sum all elements using the cpu data arc
         let sum_val = input_data_arc.iter().map(|x| *x).sum::<T>();
-        let output_shape = if keep_dims { vec![1; input_rank] } else { vec![] };
+        let output_shape = if keep_dims {
+            vec![1; input_rank]
+        } else {
+            vec![]
+        };
         // Result tensor on CPU
         return Tensor::new(vec![sum_val], output_shape);
     }
 
-    // --- Validate Axes --- 
+    // --- Validate Axes ---
     let mut processed_axes = Vec::with_capacity(axes.len());
     for &axis in axes {
         if axis >= input_rank {
@@ -62,7 +79,7 @@ where
     processed_axes.sort_unstable();
     processed_axes.dedup();
 
-    // --- Calculate Output Shape --- 
+    // --- Calculate Output Shape ---
     let mut output_shape = Vec::new();
     // Use the cloned input_shape here too
     for (dim, &size) in input_shape.iter().enumerate() {
@@ -73,13 +90,21 @@ where
         }
     }
     // Handle edge cases for output shape (sum all with keep_dims, sum to scalar)
-    if output_shape.is_empty() && !processed_axes.is_empty() { // Avoid overriding sum-all case handled above
-         if keep_dims { output_shape = vec![1; input_rank]; }
-         else { output_shape = vec![]; } // Sum to scalar
+    if output_shape.is_empty() && !processed_axes.is_empty() {
+        // Avoid overriding sum-all case handled above
+        if keep_dims {
+            output_shape = vec![1; input_rank];
+        } else {
+            output_shape = vec![];
+        } // Sum to scalar
     }
 
-    // --- Perform Summation --- 
-    let output_numel: usize = if output_shape.is_empty() { 1 } else { output_shape.iter().product() };
+    // --- Perform Summation ---
+    let output_numel: usize = if output_shape.is_empty() {
+        1
+    } else {
+        output_shape.iter().product()
+    };
     let mut result_data = vec![T::zero(); output_numel];
 
     let mut current_input_indices = vec![0; input_rank];
@@ -87,7 +112,8 @@ where
     let input_offset = input_guard.offset;
 
     // Iterate through all elements of the input tensor
-    for _i in 0..input_guard.numel() { // Use guard.numel()
+    for _i in 0..input_guard.numel() {
+        // Use guard.numel()
         // Calculate input offset using strides
         let mut current_relative_offset = 0;
         for dim_idx in 0..input_rank {
@@ -114,24 +140,29 @@ where
                 }
             }
         }
-         
+
         // Calculate flat index for result_data
         let mut output_flat_idx = 0;
-        if !output_shape.is_empty() { // Avoid index calculation for scalar output
+        if !output_shape.is_empty() {
+            // Avoid index calculation for scalar output
             let mut stride_product = 1;
             for j in (0..output_shape.len()).rev() {
                 output_flat_idx += output_indices[j] * stride_product;
-                 // Calculate output strides on the fly if needed, or assume contiguity for output
-                 if j > 0 { stride_product *= output_shape[j]; }
+                // Calculate output strides on the fly if needed, or assume contiguity for output
+                if j > 0 {
+                    stride_product *= output_shape[j];
+                }
             }
         } // else output_flat_idx remains 0 for scalar output
 
-        if output_flat_idx < result_data.len() { // Bounds check
-             result_data[output_flat_idx] += val;
+        if output_flat_idx < result_data.len() {
+            // Bounds check
+            result_data[output_flat_idx] += val;
         }
 
         // Increment input indices (N-dimensional counter logic)
-        if input_guard.numel() > 0 && _i < input_guard.numel() - 1 { // Avoid increment on last element
+        if input_guard.numel() > 0 && _i < input_guard.numel() - 1 {
+            // Avoid increment on last element
             let mut dim_to_increment = input_rank;
             while dim_to_increment > 0 {
                 dim_to_increment -= 1;
@@ -154,24 +185,33 @@ where
 // --- Tests ---
 #[cfg(test)]
 mod tests {
-    use super::*; 
-    use crate::Tensor;
-    use num_traits::{Zero, One};
-    use std::ops::AddAssign;
-    use std::fmt::Debug;
-    use std::iter::Sum;
+    use super::*;
     use crate::error::NeuraRustError;
+    use crate::Tensor;
     use approx::assert_relative_eq;
-    use std::default::Default;
+    use num_traits::{One, Zero};
     use std::cmp::PartialEq;
     use std::cmp::PartialOrd;
+    use std::default::Default;
+    use std::fmt::Debug;
+    use std::iter::Sum;
+    use std::ops::AddAssign;
 
-    fn create_test_tensor<T>(
-        data: Vec<T>, 
-        shape: Vec<usize>
-    ) -> Tensor<T> 
-    where 
-        T: Clone + Zero + AddAssign + Debug + Copy + Send + Sync + 'static + Default + PartialEq + PartialOrd + One + Sum,
+    fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    where
+        T: Clone
+            + Zero
+            + AddAssign
+            + Debug
+            + Copy
+            + Send
+            + Sync
+            + 'static
+            + Default
+            + PartialEq
+            + PartialOrd
+            + One
+            + Sum,
     {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
@@ -181,7 +221,7 @@ mod tests {
         let t = create_test_tensor(vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let result = sum_axes(&t, &[], false).unwrap();
         assert_eq!(result.shape(), vec![]); // Scalar shape
-        // Updated data access
+                                            // Updated data access
         let res_buffer_arc = result.borrow_data_buffer();
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_relative_eq!(res_cpu_data[0], 21.0);
@@ -210,10 +250,13 @@ mod tests {
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
     }
-    
+
     #[test]
     fn test_sum_axes_multiple() {
-        let t = create_test_tensor(vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0], vec![2, 2, 2]);
+        let t = create_test_tensor(
+            vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0, 7.0, 8.0],
+            vec![2, 2, 2],
+        );
         // Sum over axes 0 and 2
         let result = sum_axes(&t, &[0, 2], false).unwrap();
         assert_eq!(result.shape(), vec![2]);
@@ -239,7 +282,9 @@ mod tests {
         assert_eq!(result_all.shape(), vec![1, 1]);
         // Updated data access
         let res_all_buffer_arc = result_all.borrow_data_buffer();
-        let res_all_cpu_data = res_all_buffer_arc.cpu_data().expect("Result all not on CPU");
+        let res_all_cpu_data = res_all_buffer_arc
+            .cpu_data()
+            .expect("Result all not on CPU");
         assert_relative_eq!(res_all_cpu_data[0], 10.0);
     }
 
@@ -256,4 +301,4 @@ mod tests {
             _ => panic!("Expected IndexOutOfBounds error"),
         }
     }
-} 
+}

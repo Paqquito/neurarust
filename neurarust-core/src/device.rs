@@ -15,4 +15,4 @@ impl Default for StorageDevice {
     fn default() -> Self {
         StorageDevice::CPU
     }
-} 
+}

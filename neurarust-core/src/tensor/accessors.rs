@@ -1,14 +1,14 @@
 // src/tensor/accessors.rs
 
 use super::Tensor;
-use crate::tensor_data::TensorData;
-use crate::error::NeuraRustError;
-use crate::device::StorageDevice;
+use crate::autograd::graph::NodeId;
 use crate::buffer::Buffer; // Needed for borrow_data_buffer
-use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
+use crate::device::StorageDevice;
+use crate::error::NeuraRustError;
+use crate::tensor_data::TensorData;
 use std::fmt::Debug;
 use std::marker::Copy;
-use crate::autograd::graph::NodeId;
+use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 
 // Note: T bounds for the impl block cover all methods inside
 impl<T: 'static + Debug + Copy> Tensor<T> {
@@ -106,4 +106,4 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
         // system, we ensure the corresponding Tensors (and thus Arcs) are kept alive.
         std::sync::Arc::as_ptr(&self.data)
     }
-} 
+}

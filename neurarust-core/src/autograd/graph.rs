@@ -14,9 +14,7 @@ pub type NodeId<T> = *const RwLock<TensorData<T>>;
 /// Performs a topological sort of the computation graph starting from `start_node`.
 /// Returns the nodes in reverse topological order (suitable for backward pass).
 /// Uses Depth First Search (DFS) and detects cycles.
-pub fn topological_sort<T>(
-    start_node: NodeId<T>,
-) -> Result<Vec<NodeId<T>>, NeuraRustError>
+pub fn topological_sort<T>(start_node: NodeId<T>) -> Result<Vec<NodeId<T>>, NeuraRustError>
 where
     T: 'static + Debug + Copy + Send + Sync,
 {
@@ -59,14 +57,19 @@ where
 
         // 5. Finished visiting this node and all its dependencies
         recursion_stack.remove(&node_id); // Remove from current recursion path
-        visited.insert(node_id);          // Mark as fully visited
-        sorted_nodes.push(node_id);       // Add to the sorted list (Post-order)
+        visited.insert(node_id); // Mark as fully visited
+        sorted_nodes.push(node_id); // Add to the sorted list (Post-order)
 
         Ok(())
     }
 
     // Start the DFS from the root node of the backward pass
-    dfs(start_node, &mut visited, &mut recursion_stack, &mut sorted_nodes)?;
+    dfs(
+        start_node,
+        &mut visited,
+        &mut recursion_stack,
+        &mut sorted_nodes,
+    )?;
 
     // The result `sorted_nodes` is already in reverse topological order due to post-order DFS
     Ok(sorted_nodes)
@@ -83,7 +86,9 @@ mod tests {
 
     // Mock BackwardOp for testing
     #[derive(Debug)]
-    struct MockOp { inputs: Vec<NodeId<f32>> }
+    struct MockOp {
+        inputs: Vec<NodeId<f32>>,
+    }
     // UNSAFE: Only for tests! Mark MockOp as Send + Sync despite raw pointers.
     // This is acceptable because tests run sequentially and don't share across threads.
     unsafe impl Send for MockOp {}
@@ -101,7 +106,7 @@ mod tests {
     // Helper to create a mock tensor with a grad_fn
     fn mock_tensor_with_grad_fn(op: MockOp) -> Tensor<f32> {
         let t = Tensor::scalar(0.0); // Content doesn't matter
-        // The cast to Arc<dyn ... Send + Sync> works now because MockOp is marked Send+Sync
+                                     // The cast to Arc<dyn ... Send + Sync> works now because MockOp is marked Send+Sync
         t.set_grad_fn(Some(Arc::new(op))).unwrap();
         t
     }
@@ -114,15 +119,21 @@ mod tests {
     fn test_topological_sort_linear() {
         let t1 = Tensor::scalar(1.0);
         let t2 = Tensor::scalar(2.0);
-        let t3 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t1), get_node_id(&t2)] });
-        let t4 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t3)] });
+        let t3 = mock_tensor_with_grad_fn(MockOp {
+            inputs: vec![get_node_id(&t1), get_node_id(&t2)],
+        });
+        let t4 = mock_tensor_with_grad_fn(MockOp {
+            inputs: vec![get_node_id(&t3)],
+        });
 
         let order = topological_sort(get_node_id(&t4)).unwrap();
 
         // Expected reverse topological order: t1, t2, t3, t4 (order of t1/t2 might swap)
         assert_eq!(order.len(), 4);
-        assert!( (order[0] == get_node_id(&t1) && order[1] == get_node_id(&t2)) ||
-                   (order[0] == get_node_id(&t2) && order[1] == get_node_id(&t1)) );
+        assert!(
+            (order[0] == get_node_id(&t1) && order[1] == get_node_id(&t2))
+                || (order[0] == get_node_id(&t2) && order[1] == get_node_id(&t1))
+        );
         assert_eq!(order[2], get_node_id(&t3));
         assert_eq!(order[3], get_node_id(&t4));
     }
@@ -131,9 +142,15 @@ mod tests {
     fn test_topological_sort_branch() {
         let t1 = Tensor::scalar(1.0);
         let t2 = Tensor::scalar(2.0);
-        let t3 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t1)] });
-        let t4 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t1), get_node_id(&t2)] });
-        let t5 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t3), get_node_id(&t4)] });
+        let t3 = mock_tensor_with_grad_fn(MockOp {
+            inputs: vec![get_node_id(&t1)],
+        });
+        let t4 = mock_tensor_with_grad_fn(MockOp {
+            inputs: vec![get_node_id(&t1), get_node_id(&t2)],
+        });
+        let t5 = mock_tensor_with_grad_fn(MockOp {
+            inputs: vec![get_node_id(&t3), get_node_id(&t4)],
+        });
 
         let order = topological_sort(get_node_id(&t5)).unwrap();
 
@@ -150,20 +167,24 @@ mod tests {
         assert_eq!(order[4], get_node_id(&t5)); // t5 must be last
     }
 
-     #[test]
-     fn test_topological_sort_cycle() {
+    #[test]
+    fn test_topological_sort_cycle() {
         let _t1 = Tensor::scalar(1.0);
         let t2 = mock_tensor_with_grad_fn(MockOp { inputs: vec![] }); // Placeholder grad_fn
-        let t3 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t2)] }); 
+        let t3 = mock_tensor_with_grad_fn(MockOp {
+            inputs: vec![get_node_id(&t2)],
+        });
 
         // Manually create a cycle: t2's grad_fn depends on t3
-        let op_for_t2 = MockOp { inputs: vec![get_node_id(&t3)] }; 
+        let op_for_t2 = MockOp {
+            inputs: vec![get_node_id(&t3)],
+        };
         t2.set_grad_fn(Some(Arc::new(op_for_t2))).unwrap();
 
         let result = topological_sort(get_node_id(&t3));
         assert!(matches!(result, Err(NeuraRustError::CycleDetected)));
     }
-    
+
     #[test]
     fn test_topological_sort_single_node() {
         let t1 = Tensor::scalar(1.0); // No grad_fn
@@ -171,4 +192,4 @@ mod tests {
         assert_eq!(order.len(), 1);
         assert_eq!(order[0], get_node_id(&t1));
     }
-} 
+}

@@ -13,8 +13,8 @@
 // Tests related to matmul moved to matmul.rs
 // Remove leftover imports and test module from previous structure
 
-// --- Matmul Backward Operation --- 
+// --- Matmul Backward Operation ---
 // (struct and impl moved)
 
-// --- Tests --- 
+// --- Tests ---
 // (tests moved)

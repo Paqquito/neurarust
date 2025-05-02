@@ -1,12 +1,12 @@
 // neurarust-core/src/ops/view_ops.rs
 
-use crate::tensor::Tensor;
 use crate::error::NeuraRustError;
+use crate::tensor::Tensor;
 use crate::tensor_data::TensorData; // Needed for TensorData::new_view
-// use crate::buffer::Buffer;          // Not directly used in this file
-// use crate::device::StorageDevice;  // Not directly used in this file
-use std::sync::{Arc, RwLock};
+                                    // use crate::buffer::Buffer;          // Not directly used in this file
+                                    // use crate::device::StorageDevice;  // Not directly used in this file
 use std::fmt::Debug;
+use std::sync::{Arc, RwLock};
 
 // Define a type alias or struct for slice arguments for clarity.
 // Using a tuple (start, end) for each dimension for now.
@@ -28,7 +28,11 @@ pub(crate) fn slice_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 ) -> Result<Tensor<T>, NeuraRustError> {
     // Access the pub(crate) field directly
     let tensor_data_arc = Arc::clone(&tensor.data);
-    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for slicing".to_string()))?;
+    let guard = tensor_data_arc.read().map_err(|_| {
+        NeuraRustError::InternalError(
+            "Failed to acquire read lock on TensorData for slicing".to_string(),
+        )
+    })?;
 
     if ranges.len() != guard.shape.len() {
         return Err(NeuraRustError::DimensionMismatch {
@@ -48,20 +52,22 @@ pub(crate) fn slice_op<T: Default + Send + Sync + 'static + Debug + Copy>(
         // - end must be <= dim_size
         // - Allow start == end == 0 if dim_size == 0
 
-        if start > end { // Only check start > end
+        if start > end {
+            // Only check start > end
             return Err(NeuraRustError::SliceError {
                 message: format!(
                     "Invalid slice range start > end ({}:{}) for dimension {} with size {}",
                     start, end, i, dim_size
-                )
+                ),
             });
         }
-        if end > dim_size { // Check end <= dim_size
-             return Err(NeuraRustError::SliceError {
-                 message: format!(
+        if end > dim_size {
+            // Check end <= dim_size
+            return Err(NeuraRustError::SliceError {
+                message: format!(
                     "Invalid slice range end > size ({}:{}) for dimension {} with size {}",
                     start, end, i, dim_size
-                 )
+                ),
             });
         }
         // The case start == end is allowed (results in dim size 0)
@@ -70,7 +76,7 @@ pub(crate) fn slice_op<T: Default + Send + Sync + 'static + Debug + Copy>(
         new_shape.push(end - start);
         // Only add offset if the dimension is not empty, otherwise stride is irrelevant
         if dim_size > 0 {
-             new_offset += start * guard.strides[i];
+            new_offset += start * guard.strides[i];
         }
     }
 
@@ -82,17 +88,11 @@ pub(crate) fn slice_op<T: Default + Send + Sync + 'static + Debug + Copy>(
     // if TensorData::new_view were to lock something itself (unlikely here, but good practice).
     drop(guard);
 
-    let new_td = TensorData::new_view(
-        buffer_arc,
-        device,
-        new_offset,
-        new_shape,
-        strides,
-    );
+    let new_td = TensorData::new_view(buffer_arc, device, new_offset, new_shape, strides);
 
     // Construct the Tensor directly using its field
     let new_tensor = Tensor {
-        data: Arc::new(RwLock::new(new_td))
+        data: Arc::new(RwLock::new(new_td)),
     };
 
     Ok(new_tensor)
@@ -114,7 +114,11 @@ pub(crate) fn transpose_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 ) -> Result<Tensor<T>, NeuraRustError> {
     // 1. Acquire read lock
     let tensor_data_arc = Arc::clone(&tensor.data);
-    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for transpose".to_string()))?;
+    let guard = tensor_data_arc.read().map_err(|_| {
+        NeuraRustError::InternalError(
+            "Failed to acquire read lock on TensorData for transpose".to_string(),
+        )
+    })?;
 
     let rank = guard.shape.len();
 
@@ -155,7 +159,7 @@ pub(crate) fn transpose_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 
     // 6. Wrap in Tensor
     let new_tensor = Tensor {
-        data: Arc::new(RwLock::new(new_td))
+        data: Arc::new(RwLock::new(new_td)),
     };
 
     Ok(new_tensor)
@@ -176,7 +180,11 @@ pub(crate) fn permute_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 ) -> Result<Tensor<T>, NeuraRustError> {
     // 1. Acquire read lock
     let tensor_data_arc = Arc::clone(&tensor.data);
-    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for permute".to_string()))?;
+    let guard = tensor_data_arc.read().map_err(|_| {
+        NeuraRustError::InternalError(
+            "Failed to acquire read lock on TensorData for permute".to_string(),
+        )
+    })?;
 
     let rank = guard.shape.len();
 
@@ -186,16 +194,16 @@ pub(crate) fn permute_op<T: Default + Send + Sync + 'static + Debug + Copy>(
         // must also be 0 to match the rank. If not, it's a DimensionMismatch.
         if !dims.is_empty() {
             return Err(NeuraRustError::DimensionMismatch {
-                 expected: 0, // rank
-                 actual: dims.len(),
+                expected: 0, // rank
+                actual: dims.len(),
             });
         } else {
             // If dims is also empty, it's still a mismatch conceptually.
             // Trying to permute 0 dimensions with 0 dimensions doesn't fit the operation.
             // Return DimensionMismatch as the test expects.
             return Err(NeuraRustError::DimensionMismatch {
-                 expected: 0, // Indicate rank mismatch conceptually
-                 actual: 0,
+                expected: 0, // Indicate rank mismatch conceptually
+                actual: 0,
             });
             // Previously returned UnsupportedOperation, but test expects DimensionMismatch.
         }
@@ -235,17 +243,11 @@ pub(crate) fn permute_op<T: Default + Send + Sync + 'static + Debug + Copy>(
     drop(guard);
 
     // 5. Create new TensorData using new_view
-    let new_td = TensorData::new_view(
-        buffer_arc,
-        device,
-        offset,
-        new_shape,
-        new_strides,
-    );
+    let new_td = TensorData::new_view(buffer_arc, device, offset, new_shape, new_strides);
 
     // 6. Wrap in Tensor
     let new_tensor = Tensor {
-        data: Arc::new(RwLock::new(new_td))
+        data: Arc::new(RwLock::new(new_td)),
     };
 
     Ok(new_tensor)
@@ -266,7 +268,11 @@ pub(crate) fn reshape_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 ) -> Result<Tensor<T>, NeuraRustError> {
     // 1. Acquire read lock
     let tensor_data_arc = Arc::clone(&tensor.data);
-    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for reshape".to_string()))?;
+    let guard = tensor_data_arc.read().map_err(|_| {
+        NeuraRustError::InternalError(
+            "Failed to acquire read lock on TensorData for reshape".to_string(),
+        )
+    })?;
 
     // 2. Validate number of elements
     let original_numel: usize = guard.shape.iter().product();
@@ -284,7 +290,8 @@ pub(crate) fn reshape_op<T: Default + Send + Sync + 'static + Debug + Copy>(
     if !guard.is_contiguous() {
         // Offer suggestion to call .contiguous()
         return Err(NeuraRustError::UnsupportedOperation(
-            "Reshape currently only supports contiguous tensors. Call .contiguous() first.".to_string()
+            "Reshape currently only supports contiguous tensors. Call .contiguous() first."
+                .to_string(),
         ));
     }
 
@@ -309,10 +316,10 @@ pub(crate) fn reshape_op<T: Default + Send + Sync + 'static + Debug + Copy>(
 
     // Wrap in Tensor
     let new_tensor = Tensor {
-        data: Arc::new(RwLock::new(new_td))
+        data: Arc::new(RwLock::new(new_td)),
     };
 
     Ok(new_tensor)
 }
 
-// Placeholder for Debug trait implementation if needed 
+// Placeholder for Debug trait implementation if needed

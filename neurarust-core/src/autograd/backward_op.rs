@@ -33,4 +33,4 @@ pub trait BackwardOp<T: 'static + Debug + Copy + Send + Sync>: Debug + Send + Sy
     /// Using `Arc::as_ptr` on the `Arc<RwLock<TensorData<T>>>` held by the corresponding
     /// input `Tensor`s is a common way to obtain these pointers.
     fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>>;
-} 
+}

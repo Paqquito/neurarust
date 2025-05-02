@@ -1,15 +1,15 @@
-use crate::tensor::Tensor;
-use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord};
-use std::ops::{Div, Mul, AddAssign};
-use std::fmt::Debug;
-use num_traits::{Zero, One};
-use std::iter::Sum;
-use std::default::Default;
-use crate::error::NeuraRustError;
-use std::cmp::PartialEq;
 use crate::device::StorageDevice;
+use crate::error::NeuraRustError;
+use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord};
+use crate::tensor::Tensor;
+use num_traits::{One, Zero};
+use std::cmp::PartialEq;
+use std::default::Default;
+use std::fmt::Debug;
+use std::iter::Sum;
+use std::ops::{AddAssign, Div, Mul};
 
-// --- Forward Operation --- 
+// --- Forward Operation ---
 
 /// Performs element-wise division for two Tensors with broadcasting.
 /// Requires both tensors to be on the same device (currently CPU only).
@@ -17,38 +17,51 @@ use crate::device::StorageDevice;
 /// This operation creates a new Tensor with copied data on the same device.
 pub fn div_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Div<Output = T> + Mul<Output=T> + Copy + Clone + Debug + Default + Zero + One + Sum + AddAssign + 'static + PartialEq,
+    T: Div<Output = T>
+        + Mul<Output = T>
+        + Copy
+        + Clone
+        + Debug
+        + Default
+        + Zero
+        + One
+        + Sum
+        + AddAssign
+        + 'static
+        + PartialEq,
 {
     // Acquire read locks
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
-    // --- Device Check --- 
+    // --- Device Check ---
     if a_guard.device != b_guard.device {
-        return Err(NeuraRustError::UnsupportedOperation(
-            format!("Cannot divide tensors on different devices: {:?} and {:?}", a_guard.device, b_guard.device)
-        ));
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Cannot divide tensors on different devices: {:?} and {:?}",
+            a_guard.device, b_guard.device
+        )));
     }
-    let device = a_guard.device; 
+    let device = a_guard.device;
     if device != StorageDevice::CPU {
-         return Err(NeuraRustError::UnsupportedOperation(
-            format!("Division is currently only supported on CPU, not {:?}", device)
-        ));
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Division is currently only supported on CPU, not {:?}",
+            device
+        )));
     }
-    // --- Get CPU Data Buffers --- 
-    let a_data_arc = a_guard.data.cpu_data()?.clone(); 
-    let b_data_arc = b_guard.data.cpu_data()?.clone(); 
+    // --- Get CPU Data Buffers ---
+    let a_data_arc = a_guard.data.cpu_data()?.clone();
+    let b_data_arc = b_guard.data.cpu_data()?.clone();
 
-    // --- Shape and Broadcasting --- 
+    // --- Shape and Broadcasting ---
     let a_shape = &a_guard.shape;
     let b_shape = &b_guard.shape;
-    let output_shape = broadcast_shapes(a_shape, b_shape)
-        .map_err(|_e| NeuraRustError::BroadcastError { 
-            shape1: a_shape.clone(), 
-            shape2: b_shape.clone()
+    let output_shape =
+        broadcast_shapes(a_shape, b_shape).map_err(|_e| NeuraRustError::BroadcastError {
+            shape1: a_shape.clone(),
+            shape2: b_shape.clone(),
         })?;
 
-    // --- Calculation --- 
+    // --- Calculation ---
     let numel_result = output_shape.iter().product();
     let mut result_data_vec = Vec::with_capacity(numel_result);
     let result_strides = calculate_strides(&output_shape);
@@ -62,19 +75,27 @@ where
         for dim_idx in 0..a_guard.shape.len() {
             let output_coord_idx = rank_diff_a + dim_idx;
             // Use guard for shape check
-            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
+            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
         }
         let offset_a = a_guard.get_offset(&input_a_coords);
         let val_a = a_data_arc[offset_a]; // Use CPU data arc
-        // Coords for b
+                                          // Coords for b
         for dim_idx in 0..b_guard.shape.len() {
             let output_coord_idx = rank_diff_b + dim_idx;
             // Use guard for shape check
-            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
+            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
         }
         let offset_b = b_guard.get_offset(&input_b_coords);
         let val_b = b_data_arc[offset_b]; // Use CPU data arc
-        // Check for division by zero
+                                          // Check for division by zero
         if val_b == T::zero() {
             return Err(NeuraRustError::DivisionByZero);
         }
@@ -85,7 +106,7 @@ where
     drop(a_guard);
     drop(b_guard);
 
-    // --- Create Result --- 
+    // --- Create Result ---
     Tensor::new(result_data_vec, output_shape.clone())
     // Autograd setup removed
 }
@@ -93,7 +114,18 @@ where
 // --- std::ops::Div implementation (calls the op function) ---
 impl<'a, 'b, T> Div<&'b Tensor<T>> for &'a Tensor<T>
 where
-    T: Div<Output = T> + Mul<Output = T> + AddAssign + Copy + Clone + 'static + Default + Debug + Zero + One + Sum + PartialEq,
+    T: Div<Output = T>
+        + Mul<Output = T>
+        + AddAssign
+        + Copy
+        + Clone
+        + 'static
+        + Default
+        + Debug
+        + Zero
+        + One
+        + Sum
+        + PartialEq,
 {
     type Output = Result<Tensor<T>, NeuraRustError>; // Output Result
 
@@ -105,7 +137,7 @@ where
 /// REMOVED: In-place DivAssign is generally not provided/meaningful with shared data.
 // impl<'a, T> DivAssign<&'a Tensor<T>> for Tensor<T> { ... }
 
-// --- Backward Operation (REMOVED for Phase 0) --- 
+// --- Backward Operation (REMOVED for Phase 0) ---
 // #[derive(Debug)]
 // struct DivBackward<T: 'static> { ... }
 // impl<T> BackwardOp<T> for DivBackward<T> { ... }
@@ -113,21 +145,33 @@ where
 // --- Tests ---
 #[cfg(test)]
 mod tests {
-    use super::*; 
+    use super::*;
+    use crate::error::NeuraRustError;
     use crate::Tensor;
-    use num_traits::{Zero, One};
-    use std::ops::{Div, Mul, AddAssign};
+    use approx::assert_relative_eq;
+    use num_traits::{One, Zero};
+    use std::cmp::PartialEq;
+    use std::default::Default;
     use std::fmt::Debug;
     use std::iter::Sum;
-    use crate::error::NeuraRustError;
-    use approx::assert_relative_eq;
-    use std::default::Default;
-    use std::cmp::PartialEq;
+    use std::ops::{AddAssign, Div, Mul};
 
-    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Div<Output=T> + Mul<Output=T> + Default + Sum>(
-        data: Vec<T>, 
-        shape: Vec<usize>
-    ) -> Tensor<T> { 
+    fn create_test_tensor<
+        T: Clone
+            + Debug
+            + PartialEq
+            + Zero
+            + One
+            + AddAssign
+            + Copy
+            + Div<Output = T>
+            + Mul<Output = T>
+            + Default
+            + Sum,
+    >(
+        data: Vec<T>,
+        shape: Vec<usize>,
+    ) -> Tensor<T> {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
     // REMOVED: fn create_test_tensor_with_grad(...)
@@ -168,16 +212,26 @@ mod tests {
         assert_eq!(result_scalar.shape(), vec![2, 2]);
         // Updated data access
         let scalar_res_buffer_arc = result_scalar.borrow_data_buffer();
-        let scalar_res_cpu_data = scalar_res_buffer_arc.cpu_data().expect("Scalar div result not on CPU");
-        assert_eq!(scalar_res_cpu_data.as_slice(), expected_scalar_div.as_slice());
+        let scalar_res_cpu_data = scalar_res_buffer_arc
+            .cpu_data()
+            .expect("Scalar div result not on CPU");
+        assert_eq!(
+            scalar_res_cpu_data.as_slice(),
+            expected_scalar_div.as_slice()
+        );
 
         let result_scalar_rev = div_op(&t_scalar, &t_mat).expect("Scalar div reverse failed");
-        let expected_scalar_div_rev = vec![1.0_f32, 0.5, 1.0/3.0, 0.25];
+        let expected_scalar_div_rev = vec![1.0_f32, 0.5, 1.0 / 3.0, 0.25];
         assert_eq!(result_scalar_rev.shape(), vec![2, 2]);
         // Updated data access
         let scalar_rev_buffer_arc = result_scalar_rev.borrow_data_buffer();
-        let scalar_rev_cpu_data = scalar_rev_buffer_arc.cpu_data().expect("Scalar div reverse result not on CPU");
-        assert_relative_eq!(scalar_rev_cpu_data.as_slice(), expected_scalar_div_rev.as_slice());
+        let scalar_rev_cpu_data = scalar_rev_buffer_arc
+            .cpu_data()
+            .expect("Scalar div reverse result not on CPU");
+        assert_relative_eq!(
+            scalar_rev_cpu_data.as_slice(),
+            expected_scalar_div_rev.as_slice()
+        );
     }
 
     #[test]
@@ -187,15 +241,15 @@ mod tests {
         let result = div_op(&t1, &t2);
         assert!(result.is_err());
         match result.err().unwrap() {
-            NeuraRustError::DivisionByZero => {},
+            NeuraRustError::DivisionByZero => {}
             _ => panic!("Expected DivisionByZero error"),
         }
 
         let t_scalar_zero = Tensor::scalar(0.0_f32);
         let result_scalar = div_op(&t1, &t_scalar_zero);
-         assert!(result_scalar.is_err());
-         match result_scalar.err().unwrap() {
-            NeuraRustError::DivisionByZero => {},
+        assert!(result_scalar.is_err());
+        match result_scalar.err().unwrap() {
+            NeuraRustError::DivisionByZero => {}
             _ => panic!("Expected DivisionByZero error"),
         }
     }

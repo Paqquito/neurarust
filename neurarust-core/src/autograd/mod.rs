@@ -8,4 +8,4 @@ pub mod graph;
 pub mod grad_check;
 
 // Re-export the core BackwardOp trait for easier access
-pub use backward_op::BackwardOp; 
+pub use backward_op::BackwardOp;

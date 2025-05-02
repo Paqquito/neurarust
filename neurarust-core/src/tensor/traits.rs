@@ -1,11 +1,11 @@
 // src/tensor/traits.rs
 
-use crate::tensor::Tensor;
 use crate::device::StorageDevice;
+use crate::tensor::Tensor;
 use std::fmt::{self, Debug};
-use std::sync::Arc;
 use std::hash::{Hash, Hasher};
 use std::marker::Copy;
+use std::sync::Arc;
 
 // --- Trait Implementations ---
 
@@ -15,7 +15,9 @@ impl<T: 'static + Debug + Copy> Clone for Tensor<T> {
     /// of the underlying shared data. Modifications through one clone will be visible
     /// through others.
     fn clone(&self) -> Self {
-        Tensor { data: Arc::clone(&self.data) }
+        Tensor {
+            data: Arc::clone(&self.data),
+        }
     }
 }
 
@@ -27,8 +29,11 @@ impl<T: 'static + Debug + Copy> Debug for Tensor<T> {
         // Need read_data access
         let td = self.read_data();
 
-        write!(f, "Tensor(shape={:?}, device={:?}, strides={:?}, offset={}, data=",
-               td.shape, td.device, td.strides, td.offset)?;
+        write!(
+            f,
+            "Tensor(shape={:?}, device={:?}, strides={:?}, offset={}, data=",
+            td.shape, td.device, td.strides, td.offset
+        )?;
 
         match td.device {
             StorageDevice::CPU => {
@@ -58,10 +63,10 @@ impl<T: PartialEq + 'static + Debug + Copy> PartialEq for Tensor<T> {
         let self_guard = self.read_data();
         let other_guard = other.read_data();
 
-        if self_guard.shape != other_guard.shape ||
-           self_guard.device != other_guard.device ||
-           self_guard.offset != other_guard.offset ||
-           self_guard.strides != other_guard.strides
+        if self_guard.shape != other_guard.shape
+            || self_guard.device != other_guard.device
+            || self_guard.offset != other_guard.offset
+            || self_guard.strides != other_guard.strides
         {
             return false;
         }
@@ -73,10 +78,15 @@ impl<T: PartialEq + 'static + Debug + Copy> PartialEq for Tensor<T> {
                         if Arc::ptr_eq(&self_guard.data, &other_guard.data) {
                             return true;
                         }
-                        if self_guard.is_contiguous() && other_guard.is_contiguous() && self_guard.offset == other_guard.offset {
+                        if self_guard.is_contiguous()
+                            && other_guard.is_contiguous()
+                            && self_guard.offset == other_guard.offset
+                        {
                             let numel = self_guard.numel();
-                            let self_slice = &self_cpu_data[self_guard.offset..self_guard.offset + numel];
-                            let other_slice = &other_cpu_data[other_guard.offset..other_guard.offset + numel];
+                            let self_slice =
+                                &self_cpu_data[self_guard.offset..self_guard.offset + numel];
+                            let other_slice =
+                                &other_cpu_data[other_guard.offset..other_guard.offset + numel];
                             self_slice == other_slice
                         } else {
                             eprintln!(
@@ -89,7 +99,7 @@ impl<T: PartialEq + 'static + Debug + Copy> PartialEq for Tensor<T> {
                 }
             }
             (StorageDevice::GPU, StorageDevice::GPU) => {
-                 Arc::ptr_eq(&self_guard.data, &other_guard.data)
+                Arc::ptr_eq(&self_guard.data, &other_guard.data)
             }
             _ => false,
         }
@@ -106,4 +116,4 @@ impl<T: Hash + 'static + Debug + Copy> Hash for Tensor<T> {
         // Need id_ptr access
         self.id_ptr().hash(state);
     }
-} 
+}

@@ -35,8 +35,14 @@ pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usiz
     let mut result_shape = vec![0; max_rank];
 
     for i in 0..max_rank {
-        let dim_a = shape_a.get(rank_a.wrapping_sub(1 + i)).copied().unwrap_or(1);
-        let dim_b = shape_b.get(rank_b.wrapping_sub(1 + i)).copied().unwrap_or(1);
+        let dim_a = shape_a
+            .get(rank_a.wrapping_sub(1 + i))
+            .copied()
+            .unwrap_or(1);
+        let dim_b = shape_b
+            .get(rank_b.wrapping_sub(1 + i))
+            .copied()
+            .unwrap_or(1);
 
         if dim_a == dim_b {
             result_shape[max_rank - 1 - i] = dim_a;
@@ -61,21 +67,23 @@ pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usiz
 // Helper to convert a linear index to multi-dimensional coordinates
 // TODO: Handle strides/shape containing 0 more robustly?
 pub fn index_to_coord(index: usize, strides: &[usize], shape: &[usize]) -> Vec<usize> {
-    if shape.is_empty() { return vec![]; }
+    if shape.is_empty() {
+        return vec![];
+    }
     let rank = shape.len();
     let mut coord = vec![0; rank];
     let mut current_index = index;
     for i in 0..rank {
-        if strides[i] == 0 { 
-             if shape[i] > 0 { 
+        if strides[i] == 0 {
+            if shape[i] > 0 {
                 // Avoid division by zero if stride is 0 but dim is not
                 // This happens in shapes like [2,0,3] where stride[0] is 0
                 // If index > 0, this coordinate must be 0 anyway?
-                coord[i] = 0; 
-             } else {
-                 // If shape[i] is 0, coord must be 0
-                 coord[i] = 0;
-             }
+                coord[i] = 0;
+            } else {
+                // If shape[i] is 0, coord must be 0
+                coord[i] = 0;
+            }
         } else {
             coord[i] = current_index / strides[i];
             current_index %= strides[i];
@@ -85,8 +93,14 @@ pub fn index_to_coord(index: usize, strides: &[usize], shape: &[usize]) -> Vec<u
 }
 
 // Helper to get the original data index from broadcasted coordinates
-pub fn coord_to_index_broadcasted(target_coord: &[usize], original_shape: &[usize], original_strides: &[usize]) -> usize {
-    if original_shape.is_empty() { return 0; } // Scalar
+pub fn coord_to_index_broadcasted(
+    target_coord: &[usize],
+    original_shape: &[usize],
+    original_strides: &[usize],
+) -> usize {
+    if original_shape.is_empty() {
+        return 0;
+    } // Scalar
     let rank_diff = target_coord.len().saturating_sub(original_shape.len());
     let mut index = 0;
     for i in 0..original_shape.len() {
@@ -94,7 +108,11 @@ pub fn coord_to_index_broadcasted(target_coord: &[usize], original_shape: &[usiz
         let dim_size = original_shape[i];
         let stride = original_strides[i];
         // If the original dimension was 1, use coord 0, otherwise use the target coord
-        let effective_coord = if dim_size == 1 { 0 } else { target_coord[coord_idx] };
+        let effective_coord = if dim_size == 1 {
+            0
+        } else {
+            target_coord[coord_idx]
+        };
         index += effective_coord * stride;
     }
     index
@@ -161,8 +179,14 @@ mod tests {
 
     #[test]
     fn test_broadcast_shapes_complex() {
-        assert_eq!(broadcast_shapes(&[5, 1, 4, 1], &[4, 5]), Ok(vec![5, 1, 4, 5]));
-        assert_eq!(broadcast_shapes(&[4, 5], &[5, 1, 4, 1]), Ok(vec![5, 1, 4, 5]));
+        assert_eq!(
+            broadcast_shapes(&[5, 1, 4, 1], &[4, 5]),
+            Ok(vec![5, 1, 4, 5])
+        );
+        assert_eq!(
+            broadcast_shapes(&[4, 5], &[5, 1, 4, 1]),
+            Ok(vec![5, 1, 4, 5])
+        );
     }
 
     #[test]
@@ -179,4 +203,4 @@ mod tests {
         assert!(broadcast_shapes(&[2, 3], &[2, 4]).is_err());
         assert!(broadcast_shapes(&[3, 0], &[2, 0]).is_err());
     }
-} 
+}

@@ -1,11 +1,11 @@
+use crate::device::StorageDevice; // Needed for contiguous
+use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
-use crate::error::NeuraRustError;
-use crate::device::StorageDevice; // Needed for contiguous
-use std::sync::{Arc, RwLockReadGuard}; // Keep Arc for contiguous helper, RwLockReadGuard for helper signature
 use std::fmt::Debug; // Keep Debug for T bound and contiguous helper
+use std::iter::Product;
 use std::marker::Copy; // Keep Copy for T bound and contiguous helper
-use std::iter::Product; // Keep Product for T bound in contiguous
+use std::sync::{Arc, RwLockReadGuard}; // Keep Arc for contiguous helper, RwLockReadGuard for helper signature // Keep Product for T bound in contiguous
 
 // Helper function for recursive multidimensional iteration used by contiguous()
 // Moved here from mod.rs
@@ -90,7 +90,8 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
                 StorageDevice::CPU => {
                     let original_cpu_data = guard.data.cpu_data()?;
                     let mut current_indices = vec![0; shape.len()];
-                    copy_non_contiguous_recursive::<T>( // Explicit type annotation
+                    copy_non_contiguous_recursive::<T>(
+                        // Explicit type annotation
                         &guard,
                         original_cpu_data,
                         &mut new_buffer_vec,
@@ -99,7 +100,9 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
                     );
                 }
                 StorageDevice::GPU => {
-                    return Err(NeuraRustError::UnsupportedOperation("GPU contiguous copy not yet implemented".to_string()));
+                    return Err(NeuraRustError::UnsupportedOperation(
+                        "GPU contiguous copy not yet implemented".to_string(),
+                    ));
                 }
             }
             drop(guard);
@@ -107,4 +110,4 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
             Self::new(new_buffer_vec, shape)
         }
     }
-} 
+}

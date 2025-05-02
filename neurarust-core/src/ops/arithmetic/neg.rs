@@ -1,51 +1,62 @@
-use crate::tensor::Tensor;
-use std::ops::{Neg, AddAssign};
-use std::fmt::Debug;
-use num_traits::{Zero, One};
-use std::iter::Sum;
-use std::default::Default;
-use crate::error::NeuraRustError;
-use std::cmp::PartialEq;
 use crate::device::StorageDevice;
+use crate::error::NeuraRustError;
+use crate::tensor::Tensor;
+use num_traits::{One, Zero};
+use std::cmp::PartialEq;
+use std::default::Default;
+use std::fmt::Debug;
+use std::iter::Sum;
+use std::ops::{AddAssign, Neg};
 
-// --- Forward Operation --- 
+// --- Forward Operation ---
 
 /// Performs unary negation for a Tensor.
 /// Requires the tensor to be on CPU.
 /// Returns a `Result` wrapping the new `Tensor` or a `NeuraRustError`.
 pub fn neg_op<T>(a: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Neg<Output = T> + Copy + Clone + Debug + Default + Zero + One + Sum + AddAssign + 'static + PartialEq,
+    T: Neg<Output = T>
+        + Copy
+        + Clone
+        + Debug
+        + Default
+        + Zero
+        + One
+        + Sum
+        + AddAssign
+        + 'static
+        + PartialEq,
 {
     // Acquire read lock
     let a_guard = a.read_data();
 
-    // --- Device Check --- 
-    let device = a_guard.device; 
+    // --- Device Check ---
+    let device = a_guard.device;
     if device != StorageDevice::CPU {
-         return Err(NeuraRustError::UnsupportedOperation(
-            format!("Negation is currently only supported on CPU, not {:?}", device)
-        ));
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Negation is currently only supported on CPU, not {:?}",
+            device
+        )));
     }
-    // --- Get CPU Data Buffer --- 
-    let a_data_arc = a_guard.data.cpu_data()?.clone(); 
+    // --- Get CPU Data Buffer ---
+    let a_data_arc = a_guard.data.cpu_data()?.clone();
 
-    // --- Calculation (Handles Strides) --- 
+    // --- Calculation (Handles Strides) ---
     let output_shape = a_guard.shape.clone();
     let numel = output_shape.iter().product();
     let mut result_data_vec = Vec::with_capacity(numel);
-    
+
     // Need to iterate respecting strides
     let strides = &a_guard.strides;
     let offset = a_guard.offset;
-    
+
     if numel > 0 {
         let mut current_coords = vec![0; output_shape.len()];
         for linear_idx in 0..numel {
             // Calculate current logical offset in the original buffer
             let mut relative_offset = 0;
             for i in 0..output_shape.len() {
-                 relative_offset += current_coords[i] * strides[i];
+                relative_offset += current_coords[i] * strides[i];
             }
             let logical_offset = offset + relative_offset;
 
@@ -54,47 +65,50 @@ where
             result_data_vec.push(-val_a);
 
             // Increment coordinates (standard n-dimensional iteration logic)
-            if linear_idx < numel - 1 { // Avoid incrementing after the last element
-                 let mut dim_to_inc = output_shape.len() - 1;
-                 loop {
-                     current_coords[dim_to_inc] += 1;
-                     if current_coords[dim_to_inc] < output_shape[dim_to_inc] {
-                         break; // Finished incrementing this dimension
-                     }
-                     current_coords[dim_to_inc] = 0; // Reset current dim, carry over
-                     if dim_to_inc == 0 {
-                         break; // Finished all increments (should not happen if linear_idx < numel - 1)
-                     }
-                     dim_to_inc -= 1;
-                 }
-             }
+            if linear_idx < numel - 1 {
+                // Avoid incrementing after the last element
+                let mut dim_to_inc = output_shape.len() - 1;
+                loop {
+                    current_coords[dim_to_inc] += 1;
+                    if current_coords[dim_to_inc] < output_shape[dim_to_inc] {
+                        break; // Finished incrementing this dimension
+                    }
+                    current_coords[dim_to_inc] = 0; // Reset current dim, carry over
+                    if dim_to_inc == 0 {
+                        break; // Finished all increments (should not happen if linear_idx < numel - 1)
+                    }
+                    dim_to_inc -= 1;
+                }
+            }
         }
     }
-    
+
     // Drop lock
     drop(a_guard);
 
-    // --- Create Result --- 
+    // --- Create Result ---
     Tensor::new(result_data_vec, output_shape)
 }
 
-// --- Tests --- 
+// --- Tests ---
 
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::Tensor;
-    use num_traits::{Zero, One};
-    use std::ops::{Neg, AddAssign};
-    use std::iter::Sum;
-    use std::fmt::Debug;
-    use std::default::Default;
+    use num_traits::{One, Zero};
     use std::cmp::PartialEq;
+    use std::default::Default;
+    use std::fmt::Debug;
+    use std::iter::Sum;
+    use std::ops::{AddAssign, Neg};
 
-    fn create_test_tensor<T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Neg<Output=T> + Default + Sum>(
-        data: Vec<T>, 
-        shape: Vec<usize>
-    ) -> Tensor<T> { 
+    fn create_test_tensor<
+        T: Clone + Debug + PartialEq + Zero + One + AddAssign + Copy + Neg<Output = T> + Default + Sum,
+    >(
+        data: Vec<T>,
+        shape: Vec<usize>,
+    ) -> Tensor<T> {
         Tensor::new(data, shape).expect("Test tensor creation failed")
     }
 
@@ -112,7 +126,7 @@ mod tests {
         assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
         assert_eq!(res_tensor.shape(), expected_shape, "Shape mismatch");
     }
-    
+
     // Add test for non-contiguous tensor
     /* // TODO: Re-enable this test when Tensor::transpose and Tensor::is_contiguous are implemented (Phase 1.1)
     #[test]
@@ -120,7 +134,7 @@ mod tests {
          // Create a tensor, transpose it to make it non-contiguous
          let t_orig = create_test_tensor(vec![1.0_f32, 2.0, 3.0, 4.0], vec![2, 2]);
          let t_transposed = t_orig.transpose(0, 1).expect("Transpose failed"); // [[1, 3], [2, 4]]
-         
+
          let expected_data = vec![-1.0_f32, -3.0, -2.0, -4.0]; // Negated transposed data
          let expected_shape = vec![2, 2];
 
@@ -137,4 +151,4 @@ mod tests {
          assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice(), "Data mismatch");
      }
      */
-} 
+}

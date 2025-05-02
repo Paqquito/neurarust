@@ -1,5 +1,5 @@
-use thiserror::Error;
-use crate::device::StorageDevice; // Import StorageDevice
+use crate::device::StorageDevice;
+use thiserror::Error; // Import StorageDevice
 
 /// Custom error type for the NeuraRust framework.
 #[derive(Error, Debug, PartialEq, Clone)] // PartialEq for easier testing, Clone added
@@ -12,17 +12,14 @@ pub enum NeuraRustError {
     },
 
     #[error("Dimension mismatch: expected {expected}, got {actual}")]
-    DimensionMismatch {
-        expected: usize,
-        actual: usize,
-    },
+    DimensionMismatch { expected: usize, actual: usize },
 
     #[error("Incompatible shapes for operation: {shape1:?} and {shape2:?}")]
     IncompatibleShapes {
         shape1: Vec<usize>,
         shape2: Vec<usize>,
     },
-    
+
     #[error("Cannot broadcast shapes: {shape1:?} and {shape2:?}")]
     BroadcastError {
         shape1: Vec<usize>,
@@ -39,16 +36,10 @@ pub enum NeuraRustError {
     SliceError { message: String },
 
     #[error("Invalid permutation: dims {dims:?} are not a valid permutation for rank {rank}")]
-    InvalidPermutation {
-        dims: Vec<usize>,
-        rank: usize,
-    },
+    InvalidPermutation { dims: Vec<usize>, rank: usize },
 
     #[error("Tensor creation error: data length {data_len} does not match shape {shape:?}")]
-    TensorCreationError {
-        data_len: usize,
-        shape: Vec<usize>,
-    },
+    TensorCreationError { data_len: usize, shape: Vec<usize> },
 
     #[error("Operation requires tensor to require grad, but it doesn't.")]
     RequiresGradNotMet,
@@ -68,13 +59,15 @@ pub enum NeuraRustError {
     #[error("Internal error: {0}")]
     InternalError(String),
 
-     #[error("Division by zero error")]
+    #[error("Division by zero error")]
     DivisionByZero,
 
     #[error("Cannot stack an empty list of tensors")]
     EmptyTensorList,
 
-    #[error("Data is not available on the expected device: expected {expected:?}, actual {actual:?}")]
+    #[error(
+        "Data is not available on the expected device: expected {expected:?}, actual {actual:?}"
+    )]
     DataNotAvailableError {
         expected: StorageDevice,
         actual: StorageDevice,
@@ -89,6 +82,5 @@ pub enum NeuraRustError {
 
     #[error("Cycle detected in the computation graph during backward pass.")]
     CycleDetected,
-
     // Add more specific errors as needed
-} 
+}

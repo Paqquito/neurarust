@@ -4,9 +4,9 @@
 // Keep necessary imports for the main struct definition
 // Remove this redundant import
 // use crate::tensor_data::TensorData;
-use std::sync::{Arc, RwLock};
 use std::fmt::Debug; // Keep Debug and Copy for the struct bound
 use std::marker::Copy;
+use std::sync::{Arc, RwLock};
 
 // Define modules within the tensor directory
 // These files contain the implementations of methods previously in this file.
@@ -49,12 +49,12 @@ mod tests;
 // --- Public Exports ---
 // Export the main Tensor struct
 pub use crate::tensor_data::TensorData; // Re-export TensorData if needed externally
-// Remove these re-exports, users will access methods via Tensor::method
-// pub use crate::tensor::accessors::*; // Export methods related to accessing tensor properties
-// pub use crate::tensor::autograd_methods::*; // Export methods related to autograd
-// pub use crate::tensor::create::*; // Export methods related to tensor creation
-// pub use crate::tensor::traits::*; // Export trait implementations
-// pub use crate::tensor::view_methods::*; // Export view/reshape/etc methods
+                                        // Remove these re-exports, users will access methods via Tensor::method
+                                        // pub use crate::tensor::accessors::*; // Export methods related to accessing tensor properties
+                                        // pub use crate::tensor::autograd_methods::*; // Export methods related to autograd
+                                        // pub use crate::tensor::create::*; // Export methods related to tensor creation
+                                        // pub use crate::tensor::traits::*; // Export trait implementations
+                                        // pub use crate::tensor::view_methods::*; // Export view/reshape/etc methods
 
 // Remove the re-export of specific creation functions
 // Users will call Tensor::zeros, Tensor::ones, etc.

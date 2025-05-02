@@ -328,7 +328,7 @@ mod tests {
     use super::*;
     use crate::error::NeuraRustError;
     use crate::Tensor;
-    use num_traits::{Float, One, Signed, Zero};
+    use num_traits::{One, Zero};
     use std::default::Default;
     use std::fmt::Debug;
     use std::iter::Sum;

@@ -1,6 +1,6 @@
 // src/tensor_data.rs
 use std::fmt::Debug; // Removed unnecessary braces
-// Use Arc for the buffer for thread-safe sharing
+                     // Use Arc for the buffer for thread-safe sharing
 use std::sync::Arc; // Removed unused RwLock import
 
 // Import new types
@@ -17,7 +17,8 @@ use crate::tensor::Tensor; // Import Tensor for Option<Tensor<T>>
 // Note: Removed PartialEq/Eq derive. Comparing grad_fn (trait object) is complex and not usually needed.
 // Equality might be redefined later if specific comparison logic is required.
 #[derive(Debug)]
-pub struct TensorData<T: 'static + Debug + Copy> { // Add T bounds needed by BackwardOp
+pub struct TensorData<T: 'static + Debug + Copy> {
+    // Add T bounds needed by BackwardOp
     // Data buffer. Shared via Arc. Views will clone this Arc.
     pub data: Arc<Buffer<T>>,
     // The device where the data buffer resides.
@@ -48,10 +49,7 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
         let numel: usize = shape.iter().product();
         let data_len = data_vec.len();
         if data_len != numel {
-            return Err(NeuraRustError::TensorCreationError {
-                 data_len,
-                 shape,
-             });
+            return Err(NeuraRustError::TensorCreationError { data_len, shape });
         }
         let strides = Self::calculate_contiguous_strides(&shape);
         // Create a CPU buffer and wrap it in Arc
@@ -60,7 +58,7 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
             // Wrap buffer in Arc
             data: Arc::new(buffer),
             device: StorageDevice::CPU, // Default to CPU
-            offset: 0, // New tensors always start at offset 0
+            offset: 0,                  // New tensors always start at offset 0
             shape,
             strides,
             // Initialize autograd fields
@@ -85,7 +83,11 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
     ) -> Self {
         // Assert that the provided device matches the buffer's device
         // This prevents creating inconsistent TensorData
-        assert_eq!(buffer_arc.device(), device, "Device mismatch between provided buffer and device parameter");
+        assert_eq!(
+            buffer_arc.device(),
+            device,
+            "Device mismatch between provided buffer and device parameter"
+        );
         TensorData {
             data: buffer_arc,
             device,
@@ -102,7 +104,9 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
     // Calculates strides for a contiguous tensor
     pub fn calculate_contiguous_strides(shape: &[usize]) -> Vec<usize> {
         let mut strides = vec![0; shape.len()];
-        if shape.is_empty() { return strides; } // Handle empty shape (scalar)
+        if shape.is_empty() {
+            return strides;
+        } // Handle empty shape (scalar)
 
         strides[shape.len() - 1] = 1;
         for i in (0..shape.len() - 1).rev() {
@@ -121,15 +125,25 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
     /// Panics if the number of indices doesn't match the tensor rank or if any index is out of bounds.
     /// NOTE: This returns the logical offset. Accessing data requires checking the buffer type (CPU/GPU).
     pub fn get_offset(&self, indices: &[usize]) -> usize {
-        assert_eq!(indices.len(), self.shape.len(),
-                   "Number of indices ({}) does not match tensor rank ({}) for shape {:?}",
-                   indices.len(), self.shape.len(), self.shape);
+        assert_eq!(
+            indices.len(),
+            self.shape.len(),
+            "Number of indices ({}) does not match tensor rank ({}) for shape {:?}",
+            indices.len(),
+            self.shape.len(),
+            self.shape
+        );
 
         let mut relative_offset = 0;
         for i in 0..self.shape.len() {
-            assert!(indices[i] < self.shape[i],
-                    "Index {} is out of bounds for dimension {} with size {} (shape: {:?})",
-                    indices[i], i, self.shape[i], self.shape);
+            assert!(
+                indices[i] < self.shape[i],
+                "Index {} is out of bounds for dimension {} with size {} (shape: {:?})",
+                indices[i],
+                i,
+                self.shape[i],
+                self.shape
+            );
             relative_offset += indices[i] * self.strides[i];
         }
         // Add the base offset of this tensor view
@@ -140,7 +154,9 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
     /// A tensor is contiguous if its elements are laid out in the standard
     /// row-major order (C order) without gaps, considering its strides.
     pub fn is_contiguous(&self) -> bool {
-        if self.shape.is_empty() { return true; } // Scalar is contiguous
+        if self.shape.is_empty() {
+            return true;
+        } // Scalar is contiguous
 
         // Check if the strides match the standard C-contiguous strides
         // Comment out unused variable
@@ -150,7 +166,9 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
         let mut current_stride = 1;
         for i in (0..self.shape.len()).rev() {
             let shape_i = self.shape[i];
-            if shape_i == 0 { return true; } // Tensor with 0 elements is contiguous
+            if shape_i == 0 {
+                return true;
+            } // Tensor with 0 elements is contiguous
             if shape_i != 1 {
                 if self.strides[i] != current_stride {
                     return false;
@@ -161,4 +179,4 @@ impl<T: 'static + Debug + Copy> TensorData<T> {
         }
         true
     }
-} 
+}

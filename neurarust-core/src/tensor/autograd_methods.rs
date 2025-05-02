@@ -1,19 +1,34 @@
-use crate::tensor::Tensor;
-use crate::error::NeuraRustError;
+use crate::autograd::graph::{topological_sort, NodeId};
 use crate::autograd::BackwardOp;
-use std::sync::Arc;
-use num_traits::{Zero, One};
-use std::iter::Sum;
+use crate::device::StorageDevice;
+use crate::error::NeuraRustError;
+use crate::ops;
+use crate::tensor::Tensor;
+use num_traits::{One, Zero};
+use std::collections::HashMap;
 use std::fmt::Debug;
+use std::iter::Sum;
 use std::marker::Copy;
 use std::ops::{Add, AddAssign};
-use std::collections::HashMap;
-use crate::autograd::graph::{topological_sort, NodeId};
-use crate::ops;
-use crate::device::StorageDevice;
+use std::sync::Arc;
 
 // Note: T bounds for the impl block cover all methods inside
-impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum + PartialEq + Default + Send + Sync + PartialOrd> Tensor<T> {
+impl<
+        T: 'static
+            + Debug
+            + Copy
+            + Zero
+            + One
+            + Add<Output = T>
+            + AddAssign
+            + Sum
+            + PartialEq
+            + Default
+            + Send
+            + Sync
+            + PartialOrd,
+    > Tensor<T>
+{
     /// Checks if this tensor requires gradient computation.
     pub fn requires_grad(&self) -> bool {
         self.read_data().requires_grad
@@ -37,7 +52,7 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
     /// Accumulates the given gradient into the tensor's `grad` field.
     pub fn acc_grad(&self, grad_to_add: Tensor<T>) -> Result<(), NeuraRustError>
     where
-        T: Add<Output = T> + AddAssign + Zero + One + Sum + PartialEq + Default + Send + Sync
+        T: Add<Output = T> + AddAssign + Zero + One + Sum + PartialEq + Default + Send + Sync,
     {
         let mut guard = self.write_data();
 
@@ -67,7 +82,10 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
     }
 
     /// Sets the backward operation node (`grad_fn`) for this tensor.
-    pub fn set_grad_fn(&self, grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>) -> Result<(), NeuraRustError> {
+    pub fn set_grad_fn(
+        &self,
+        grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>,
+    ) -> Result<(), NeuraRustError> {
         let mut guard = self.write_data();
         guard.grad_fn = grad_fn;
         Ok(())
@@ -90,7 +108,10 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
     /// # Returns
     /// * `Ok(())` if the backward pass is successful.
     /// * `Err(NeuraRustError)` if an error occurs (e.g., shape mismatch, device mismatch, cycle detected, requires_grad issues).
-    pub fn backward(&self, gradient: Option<Tensor<T>> /*, retain_graph: bool = false */) -> Result<(), NeuraRustError> {
+    pub fn backward(
+        &self,
+        gradient: Option<Tensor<T>>, /*, retain_graph: bool = false */
+    ) -> Result<(), NeuraRustError> {
         // --- 1. Initial Checks ---
         if !self.requires_grad() {
             // Nothing to do if the starting tensor doesn't require grad
@@ -124,12 +145,13 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
                 }
                 // Create a scalar tensor with value One<T> on the same device
                 // Assuming `Tensor::ones` works for scalar shape and only supports CPU for now.
-                 // Check device first
-                 if self.device() != StorageDevice::CPU {
-                     return Err(NeuraRustError::UnsupportedOperation(
-                         "Backward with implicit scalar gradient only supported on CPU currently".to_string()
-                     ));
-                 }
+                // Check device first
+                if self.device() != StorageDevice::CPU {
+                    return Err(NeuraRustError::UnsupportedOperation(
+                        "Backward with implicit scalar gradient only supported on CPU currently"
+                            .to_string(),
+                    ));
+                }
                 Tensor::<T>::ones(vec![])? // Use `vec![]` for scalar shape
             }
         };
@@ -145,7 +167,8 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
 
         // --- 5. Backward Pass Loop ---
         // Iterate through nodes in reverse topological order
-        for node_id in sorted_nodes.iter().rev() { // Iterate from output towards inputs
+        for node_id in sorted_nodes.iter().rev() {
+            // Iterate from output towards inputs
             // Retrieve the accumulated gradient for the current node
             let current_grad = match grad_map.get(node_id) {
                 Some(grad) => grad.clone(), // Clone the gradient Tensor for use
@@ -157,7 +180,13 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
             // 1. The pointers come from `Arc::as_ptr` on Arcs that are kept alive by the `Tensor` instances involved
             //    in the graph, which must exist for the backward pass to be called.
             // 2. We only hold the read lock for a short duration.
-            let grad_fn_option = unsafe { (*(*node_id)).read().expect("RwLock poisoned during grad_fn read").grad_fn.clone() };
+            let grad_fn_option = unsafe {
+                (*(*node_id))
+                    .read()
+                    .expect("RwLock poisoned during grad_fn read")
+                    .grad_fn
+                    .clone()
+            };
 
             if let Some(backward_op) = grad_fn_option {
                 // Calculate gradients for the inputs of this operation
@@ -176,7 +205,11 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
                 // Accumulate gradients for each parent node
                 for (parent_id, grad_to_add) in parent_node_ids.iter().zip(input_grads) {
                     // Check if the parent requires gradient before accumulating
-                    let parent_data = unsafe { (*(*parent_id)).read().expect("RwLock poisoned during parent requires_grad read") };
+                    let parent_data = unsafe {
+                        (*(*parent_id))
+                            .read()
+                            .expect("RwLock poisoned during parent requires_grad read")
+                    };
                     if parent_data.requires_grad {
                         // Get or create the gradient entry in the map
                         let parent_shape = parent_data.shape.clone();
@@ -197,19 +230,18 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
 
                         // Perform device-aware addition using add_op
                         // Note: add_op creates a *new* tensor. We need to update the map entry.
-                         // Check devices before adding
-                         if acc_grad_entry.device() != grad_to_add.device() {
-                             return Err(NeuraRustError::DeviceMismatch {
-                                 expected: acc_grad_entry.device(),
-                                 actual: grad_to_add.device(),
-                                 operation: "gradient accumulation".to_string(),
-                             });
-                         }
+                        // Check devices before adding
+                        if acc_grad_entry.device() != grad_to_add.device() {
+                            return Err(NeuraRustError::DeviceMismatch {
+                                expected: acc_grad_entry.device(),
+                                actual: grad_to_add.device(),
+                                operation: "gradient accumulation".to_string(),
+                            });
+                        }
                         // TODO: Replace with an in-place add or update the map entry carefully.
                         // For now, create sum and update map.
                         let sum_grad = ops::arithmetic::add::add_op(acc_grad_entry, &grad_to_add)?;
                         *acc_grad_entry = sum_grad;
-
                     }
                 }
             }
@@ -230,15 +262,20 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
             // No, the map contains the correct final gradient for all nodes.
 
             // Acquire write lock to update the grad field
-            let mut node_data = unsafe { (*node_id).write().expect("RwLock poisoned during final grad assignment") };
-            
-             // Check device just in case
-             if node_data.device != final_grad.device() {
-                 return Err(NeuraRustError::InternalError(format!(
-                     "Final gradient device ({:?}) mismatch with tensor device ({:?}) for node.",
-                     final_grad.device(), node_data.device
-                 )));
-             }
+            let mut node_data = unsafe {
+                (*node_id)
+                    .write()
+                    .expect("RwLock poisoned during final grad assignment")
+            };
+
+            // Check device just in case
+            if node_data.device != final_grad.device() {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Final gradient device ({:?}) mismatch with tensor device ({:?}) for node.",
+                    final_grad.device(),
+                    node_data.device
+                )));
+            }
 
             // Use the existing `acc_grad` logic within TensorData might be cleaner?
             // Or directly assign here. Direct assignment is simpler now.
@@ -247,5 +284,4 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
 
         Ok(())
     }
-
-} 
+}

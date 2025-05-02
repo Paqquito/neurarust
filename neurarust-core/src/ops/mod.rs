@@ -25,9 +25,9 @@ pub mod view;
 
 // Re-export core operations for easier access (Phase 0)
 pub use arithmetic::{add_op, div_op, mul_op, neg_op, sub_op}; // Keep arithmetic ops
-// pub use arithmetic::pow_op; // Pow might be Phase 1+
-// Comment out problematic exports
-// pub use linalg::{matmul, transpose}; // Keep existing linalg exports
+                                                              // pub use arithmetic::pow_op; // Pow might be Phase 1+
+                                                              // Comment out problematic exports
+                                                              // pub use linalg::{matmul, transpose}; // Keep existing linalg exports
 pub use reduction::sum_axes; // Keep existing reduction export
 
 // Remove problematic exports causing linter errors
