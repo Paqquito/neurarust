@@ -142,89 +142,89 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   ✅ **Error Handling Improvement:** Addressed. Core functions like `Tensor::new`, `sum_axes` return `Result<T, NeuraRustError>`, handling common errors like shape mismatches or invalid indices gracefully.
     *   ✅ **Thread-Safety for Parallelism:** Replaced `Rc<RefCell<TensorData<T>>>` with `Arc<RwLock<TensorData<T>>>`. Internal data buffer uses `Arc<Buffer<T>>`. This provides the necessary thread-safety foundation for future parallel computation (e.g., CPU via Rayon, GPU acceleration - Phases 4/6), resolving the limitation noted previously.
 
-**Phase 1: Views, Autograd & Expanded CPU Ops [⏳ To Do]**
+**Phase 1: Views, Autograd & Expanded CPU Ops [🚧 In Progress]**
 *   🎯 **Goal:** Implement view semantics, a functional dynamic autograd system, and significantly expand CPU tensor operations & API, **ensuring compatibility with the new `Arc<RwLock>`, `Buffer`, and `StorageDevice` structures.**
 
 *   **1.1 View Semantics & Core Shape Ops [✅ Done]**
     *   🎯 Goal: Implement non-copying views for shape manipulation, essential for performance and memory.
     *   ✅ **Refine `TensorData::new_view`:** Ensure it's accessible (e.g., `pub(crate)`) and correctly takes `Arc<Buffer<T>>`, `device`, `offset`, `shape`, `strides` to create `TensorData` instances representing views.
     *   ✅ **Implement `slice` Operation:** -> ✅ **Done**
-        *   Define `slice_op(tensor: &Tensor<T>, /* slice args */) -> Result<Tensor<T>>`.
-        *   Inside, acquire read lock on input `tensor.data`.
-        *   Validate slice arguments against `shape`.
-        *   Calculate new `shape` and new `offset` based on original offset, slice args, and `strides`.
-        *   Create new `TensorData` using `new_view` with cloned `Arc<Buffer<T>>`, original `device`, new `offset`, new `shape`, and *original* `strides`.
-        *   Wrap in `Tensor { data: Arc::new(RwLock::new(new_td)) }`.
-        *   Implement user-facing `Tensor::slice(...)` method.
+        *   ✅ Define `slice_op(tensor: &Tensor<T>, /* slice args */) -> Result<Tensor<T>>`.
+        *   ✅ Inside, acquire read lock on input `tensor.data`.
+        *   ✅ Validate slice arguments against `shape`.
+        *   ✅ Calculate new `shape` and new `offset` based on original offset, slice args, and `strides`.
+        *   ✅ Create new `TensorData` using `new_view` with cloned `Arc<Buffer<T>>`, original `device`, new `offset`, new `shape`, and *original* `strides`.
+        *   ✅ Wrap in `Tensor { data: Arc::new(RwLock::new(new_td)) }`.
+        *   ✅ Implement user-facing `Tensor::slice(...)` method.
     *   ✅ **Implement `transpose` Operation:** -> ✅ **Done**
-        *   Define `transpose_op(tensor: &Tensor<T>, dim1: usize, dim2: usize) -> Result<Tensor<T>>`.
-        *   Acquire read lock, validate `dim1`, `dim2` against rank.
-        *   Calculate new `shape` (swap dims) and new `strides` (swap strides).
-        *   Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
-        *   Implement `Tensor::transpose(...)`.
+        *   ✅ Define `transpose_op(tensor: &Tensor<T>, dim1: usize, dim2: usize) -> Result<Tensor<T>>`.
+        *   ✅ Acquire read lock, validate `dim1`, `dim2` against rank.
+        *   ✅ Calculate new `shape` (swap dims) and new `strides` (swap strides).
+        *   ✅ Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
+        *   ✅ Implement `Tensor::transpose(...)`.
     *   ✅ **Implement `permute` Operation:** -> ✅ **Done**
-        *   Define `permute_op(tensor: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>>`.
-        *   Acquire read lock, validate `dims` is a valid permutation for the rank.
-        *   Calculate new `shape` and new `strides` by reordering according to `dims`.
-        *   Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
-        *   Implement `Tensor::permute(...)`.
+        *   ✅ Define `permute_op(tensor: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>>`.
+        *   ✅ Acquire read lock, validate `dims` is a valid permutation for the rank.
+        *   ✅ Calculate new `shape` and new `strides` by reordering according to `dims`.
+        *   ✅ Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
+        *   ✅ Implement `Tensor::permute(...)`.
     *   ✅ **Implement `reshape` / `view` Operation:** -> ✅ **Done (Initial: Contiguous Only)**
-        *   Define `reshape_op(tensor: &Tensor<T>, new_shape: Vec<usize>) -> Result<Tensor<T>>`.
-        *   Acquire read lock, validate `new_shape` product matches old product.
-        *   Call `is_contiguous()` on the tensor.
-        *   If contiguous: Calculate new *contiguous* `strides` for `new_shape`. Create view using `new_view` (cloned buffer, original device/offset, `new_shape`, new strides).
-        *   If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly). -> *(Currently returns Err)*
-        *   Implement `Tensor::reshape(...)` and potentially `Tensor::view(...)` (alias or stricter view-only version).
+        *   ✅ Define `reshape_op(tensor: &Tensor<T>, new_shape: Vec<usize>) -> Result<Tensor<T>>`.
+        *   ✅ Acquire read lock, validate `new_shape` product matches old product.
+        *   ✅ Call `is_contiguous()` on the tensor.
+        *   ✅ If contiguous: Calculate new *contiguous* `strides` for `new_shape`. Create view using `new_view` (cloned buffer, original device/offset, `new_shape`, new strides).
+        *   ✅ If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly). -> *(Currently returns Err)*
+        *   ✅ Implement `Tensor::reshape(...)` and potentially `Tensor::view(...)` (alias or stricter view-only version).
     *   ✅ **Implement `contiguous()` Method:** -> ✅ **Done**
-        *   Implement `Tensor::contiguous(&self) -> Result<Tensor<T>>`.
-        *   Call `is_contiguous()`. If true, return `self.clone()`.
+        *   ✅ Implement `Tensor::contiguous(&self) -> Result<Tensor<T>>`.
+        *   ✅ Call `is_contiguous()`. If true, return `self.clone()`.
         *   If false:
-            *   Acquire read lock.
-            *   Get buffer reference (`cpu_data()?` for now). Get `device`, `shape`, `strides`, `offset`.
-            *   Allocate a *new*, *contiguous* buffer (`Vec<T>` for now) on the **same `device`**.
-            *   Iterate multidimensionally over `shape`.
-            *   For each index set, calculate offset in the *original* buffer using `guard.get_offset()`.
-            *   Read value from original buffer (CPU read for now).
-            *   Write value to the *new* buffer at the current linear index.
-            *   Create and return a *new* `Tensor` using `Tensor::new()` with the new buffer and shape (which calculates contiguous strides).
+            *   ✅ Acquire read lock.
+            *   ✅ Get buffer reference (`cpu_data()?` for now). Get `device`, `shape`, `strides`, `offset`.
+            *   ✅ Allocate a *new*, *contiguous* buffer (`Vec<T>` for now) on the **same `device`**.
+            *   ✅ Iterate multidimensionally over `shape`.
+            *   ✅ For each index set, calculate offset in the *original* buffer using `guard.get_offset()`.
+            *   ✅ Read value from original buffer (CPU read for now).
+            *   ✅ Write value to the *new* buffer at the current linear index.
+            *   ✅ Create and return a *new* `Tensor` using `Tensor::new()` with the new buffer and shape (which calculates contiguous strides).
     *   ✅ **Implement `is_contiguous()` Check:** -> ✅ **Done**
-        *   Implement `TensorData::is_contiguous(&self) -> bool`.
-        *   Calculate expected contiguous strides for `self.shape`.
-        *   Compare `self.strides` with expected strides (handle 0/1 dim sizes).
-        *   Implement `Tensor::is_contiguous(&self)` calling the `TensorData` method via read lock.
+        *   ✅ Implement `TensorData::is_contiguous(&self) -> bool`.
+        *   ✅ Calculate expected contiguous strides for `self.shape`.
+        *   ✅ Compare `self.strides` with expected strides (handle 0/1 dim sizes).
+        *   ✅ Implement `Tensor::is_contiguous(&self)` calling the `TensorData` method via read lock.
     *   ✅ **Testing:** -> ✅ **Done (Except Shared Modification)**
-        *   Unit tests for each view op (`slice`, `transpose`, `permute`, `reshape`/`view`). ✅
-        *   Test edge cases (empty tensors, 0/1 sized dimensions). ✅
-        *   Verify views share the underlying buffer (`Arc::ptr_eq` on `borrow_data_buffer()`). ✅
-        *   Verify correct `shape`, `strides`, `offset`, `device` for views. ✅
-        *   Test `is_contiguous()` correctly identifies contiguous/non-contiguous tensors. ✅
-        *   Test `contiguous()` copies only when necessary and produces a contiguous tensor on the correct device. ✅
-        *   Test that data modifications via one view are reflected when accessing via another view (requires working `get`/`set` or similar). -> *(TODO: Pending set/in-place ops)*
+        *   ✅ Unit tests for each view op (`slice`, `transpose`, `permute`, `reshape`/`view`).
+        *   ✅ Test edge cases (empty tensors, 0/1 sized dimensions).
+        *   ✅ Verify views share the underlying buffer (`Arc::ptr_eq` on `borrow_data_buffer()`).
+        *   ✅ Verify correct `shape`, `strides`, `offset`, `device` for views.
+        *   ✅ Test `is_contiguous()` correctly identifies contiguous/non-contiguous tensors.
+        *   ✅ Test `contiguous()` copies only when necessary and produces a contiguous tensor on the correct device.
+        *   ✅ Test that data modifications via one view are reflected when accessing via another view (requires working `get`/`set` or similar). -> *(TODO: Pending set/in-place ops)*
 
 *   **1.2 Basic Autograd Infrastructure [🚧 In Progress]**
     *   🎯 Goal: Re-establish the foundational components for automatic differentiation, **handling thread-safety and device awareness.**
     *   ✅ **Add `TensorData` Fields:**
-        *   Add `requires_grad: bool` (default `false`).
-        *   Add `grad: Option<Tensor<T>>` (holds the gradient tensor, must be on same device).
-        *   Add `grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>` (using `Arc` for shared ownership of backward node, requires trait bounds).
+        *   ✅ `requires_grad: bool` (default `false`).
+        *   ✅ `grad: Option<Tensor<T>>` (holds the gradient tensor, must be on same device).
+        *   ✅ `grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>` (using `Arc` for shared ownership of backward node, requires trait bounds).
     *   ✅ **Define `BackwardOp<T>` Trait:**
-        *   `pub trait BackwardOp<T: 'static + ...>: Debug + Send + Sync { ... }` (add relevant bounds for `T`).
-        *   `fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError>;` (Must handle device consistency).
-        *   `fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>>;` (Returns stable IDs of input tensors).
+        *   ✅ `pub trait BackwardOp<T: 'static + ...>: Debug + Send + Sync { ... }` (add relevant bounds for `T`).
+        *   ✅ `fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError>;` (Must handle device consistency).
+        *   ✅ `fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>>;` (Returns stable IDs of input tensors).
     *   ✅ **Implement `Tensor` Autograd Accessors/Mutators:**
-        *   `fn requires_grad(&self) -> bool;` (read lock).
-        *   `fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError>;` (write lock, handle potential graph modifications).
-        *   `fn grad(&self) -> Option<Tensor<T>>;` (read lock, clones `Tensor` if `Some`).
-        *   `fn acc_grad(&self, grad_to_add: Tensor<T>) -> Result<(), NeuraRustError>;` (write lock, handles `None`, checks device, performs accumulation via device-aware `add_op`).
-        *   `fn grad_fn(&self) -> Option<Arc<dyn BackwardOp<T> + Send + Sync>>;` (read lock, clones `Arc`).
-        *   `fn set_grad_fn(&self, grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>) -> Result<(), NeuraRustError>;` (write lock).
-    *   ⏳ **Implement Graph Traversal (`autograd::graph`):**
-        *   Implement topological sort function (e.g., Kahn's or DFS based).
-        *   Takes starting `Tensor` pointer/ID.
-        *   Uses `*const RwLock<TensorData<T>>` as node identifier.
-        *   Traverses graph via `grad_fn` and `inputs()`. Needs read locks.
-        *   Handles cycles (returns `Err`).
-        *   Returns ordered list of node IDs for backward pass.
+        *   ✅ `fn requires_grad(&self) -> bool;` (read lock).
+        *   ✅ `fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError>;` (write lock, handle potential graph modifications).
+        *   ✅ `fn grad(&self) -> Option<Tensor<T>>;` (read lock, clones `Tensor` if `Some`).
+        *   ✅ `fn acc_grad(&self, grad_to_add: Tensor<T>) -> Result<(), NeuraRustError>;` (write lock, handles `None`, checks device, performs accumulation via device-aware `add_op`).
+        *   ✅ `fn grad_fn(&self) -> Option<Arc<dyn BackwardOp<T> + Send + Sync>>;` (read lock, clones `Arc`).
+        *   ✅ `fn set_grad_fn(&self, grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>) -> Result<(), NeuraRustError>;` (write lock).
+    *   ✅ **Implement Graph Traversal (`autograd::graph`):**
+        *   ✅ Implement topological sort function (e.g., Kahn's or DFS based).
+        *   ✅ Takes starting `Tensor` pointer/ID.
+        *   ✅ Uses `*const RwLock<TensorData<T>>` as node identifier.
+        *   ✅ Traverses graph via `grad_fn` and `inputs()`. Needs read locks.
+        *   ✅ Handles cycles (returns `Err`).
+        *   ✅ Returns ordered list of node IDs for backward pass.
     *   ⏳ **Implement `Tensor::backward()` Logic:**
         *   `fn backward(&self, gradient: Option<Tensor<T>>) -> Result<(), NeuraRustError>;`
         *   Check `self.requires_grad()`.

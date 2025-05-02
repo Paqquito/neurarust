@@ -1,136 +1,174 @@
 use crate::error::NeuraRustError;
-use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
-use crate::autograd::BackwardOp; // Needed for op.inputs()
+// Remove top-level unused import (used inside build_graph_dfs)
+// use crate::autograd::backward_op::BackwardOp;
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashSet;
 use std::fmt::Debug;
-use std::sync::{Arc, RwLock};
+use std::sync::RwLock;
 
 /// Type alias for the unique identifier of a node in the computation graph.
-/// It's the raw pointer to the RwLock containing the TensorData.
-pub type NodeIdType<T> = *const RwLock<TensorData<T>>;
+/// Uses the raw pointer to the RwLock<TensorData> as a stable ID.
+pub type NodeId<T> = *const RwLock<TensorData<T>>;
 
-/// Performs a topological sort of the computation graph starting from a given tensor.
-/// Returns the nodes in reverse topological order (dependencies first), suitable for backpropagation.
-/// Detects cycles in the graph.
-///
-/// # Arguments
-/// * `start_tensor`: The tensor from which to start the backward traversal.
-///
-/// # Returns
-/// A `Result` containing a `Vec` of `NodeIdType<T>` in reverse topological order,
-/// or a `NeuraRustError::CycleDetected` if a cycle is found.
-pub fn topological_sort<T: 'static + Debug + Copy>(
-    start_tensor: &Tensor<T>,
-) -> Result<Vec<NodeIdType<T>>, NeuraRustError> {
-    let mut visited: HashSet<NodeIdType<T>> = HashSet::new();
-    let mut visiting: HashSet<NodeIdType<T>> = HashSet::new();
-    let mut sorted_nodes: Vec<NodeIdType<T>> = Vec::new();
+/// Performs a topological sort of the computation graph starting from `start_node`.
+/// Returns the nodes in reverse topological order (suitable for backward pass).
+/// Uses Depth First Search (DFS) and detects cycles.
+pub fn topological_sort<T>(
+    start_node: NodeId<T>,
+) -> Result<Vec<NodeId<T>>, NeuraRustError>
+where
+    T: 'static + Debug + Copy + Send + Sync,
+{
+    let mut sorted_nodes = Vec::new();
+    let mut visited = HashSet::new(); // Nodes for which DFS has *completed*
+    let mut recursion_stack = HashSet::new(); // Nodes currently in the DFS recursion stack
 
-    let start_node_id = start_tensor.id_ptr();
+    // Define the recursive DFS function
+    fn dfs<T>(
+        node_id: NodeId<T>,
+        visited: &mut HashSet<NodeId<T>>,
+        recursion_stack: &mut HashSet<NodeId<T>>,
+        sorted_nodes: &mut Vec<NodeId<T>>,
+    ) -> Result<(), NeuraRustError>
+    where
+        T: 'static + Debug + Copy + Send + Sync,
+    {
+        // 1. Check if already visited (and DFS completed for this node)
+        if visited.contains(&node_id) {
+            return Ok(());
+        }
+        // 2. Check for cycle (if node is already in the current recursion path)
+        if recursion_stack.contains(&node_id) {
+            return Err(NeuraRustError::CycleDetected);
+        }
 
-    dfs(start_node_id, &mut visited, &mut visiting, &mut sorted_nodes)?;
+        // 3. Mark node as currently being visited (add to recursion stack)
+        recursion_stack.insert(node_id);
 
-    Ok(sorted_nodes)
-}
-
-/// Recursive Depth First Search helper for topological sort.
-/// Uses unsafe block to dereference NodeId pointers.
-fn dfs<T: 'static + Debug + Copy>(
-    node_id: NodeIdType<T>,
-    visited: &mut HashSet<NodeIdType<T>>,
-    visiting: &mut HashSet<NodeIdType<T>>,
-    sorted_nodes: &mut Vec<NodeIdType<T>>,
-) -> Result<(), NeuraRustError> {
-    // Mark node as currently being visited (for cycle detection)
-    visiting.insert(node_id);
-
-    let inputs: Option<Vec<NodeIdType<T>>> = {
-        // SAFETY: We are dereferencing a raw pointer obtained from Arc::as_ptr.
-        // This pointer is assumed to be valid for the duration of the sort,
-        // as the Tensors involved in the graph are expected to be kept alive
-        // (e.g., by the main backward call context).
-        // Incorrect management of Tensor lifetimes could lead to dangling pointers here.
-        let tensor_data_lock = unsafe { &*node_id };
-        let tensor_data_guard = tensor_data_lock.read().map_err(|_| {
-            NeuraRustError::InternalError("RwLock poisoned during topological sort".to_string())
-        })?;
-
-        // Clone the grad_fn Arc if it exists
-        let grad_fn_arc = tensor_data_guard.grad_fn.clone();
-
-        // Get input IDs if grad_fn exists
-        grad_fn_arc.map(|op| op.inputs())
-        // Guard is dropped here implicitly when grad_fn_arc goes out of scope or below
-    };
-
-    if let Some(input_ids) = inputs {
-        // Recursively visit dependencies (inputs to the forward op)
-        for input_id in input_ids {
-            if visiting.contains(&input_id) {
-                // Cycle detected!
-                return Err(NeuraRustError::CycleDetected);
-            }
-            if !visited.contains(&input_id) {
-                // Visit unvisited dependencies
-                dfs(input_id, visited, visiting, sorted_nodes)?;
+        // 4. Recursively visit parents (dependencies)
+        let grad_fn_arc = unsafe { (*node_id).read().expect("RwLock poisoned").grad_fn.clone() };
+        if let Some(grad_fn) = grad_fn_arc {
+            // Remove unused import - method call works directly on the trait object
+            // use crate::autograd::backward_op::BackwardOp;
+            let parents = grad_fn.inputs();
+            for parent_id in parents {
+                dfs(parent_id, visited, recursion_stack, sorted_nodes)?;
             }
         }
+
+        // 5. Finished visiting this node and all its dependencies
+        recursion_stack.remove(&node_id); // Remove from current recursion path
+        visited.insert(node_id);          // Mark as fully visited
+        sorted_nodes.push(node_id);       // Add to the sorted list (Post-order)
+
+        Ok(())
     }
 
-    // Finished visiting this node and its dependencies
-    visiting.remove(&node_id); // Remove from current path
-    visited.insert(node_id); // Mark as fully visited
-    sorted_nodes.push(node_id); // Add to the sorted list (reverse topological order)
+    // Start the DFS from the root node of the backward pass
+    dfs(start_node, &mut visited, &mut recursion_stack, &mut sorted_nodes)?;
 
-    Ok(())
+    // The result `sorted_nodes` is already in reverse topological order due to post-order DFS
+    Ok(sorted_nodes)
 }
 
 // --- Tests --- (Placeholder - Need to create mock BackwardOps and Tensors)
 #[cfg(test)]
 mod tests {
-    // use super::*;
-    // use crate::tensor::Tensor;
-    // use crate::autograd::BackwardOp;
-    // use crate::error::NeuraRustError;
-    // use std::sync::{Arc, RwLock};
-    // use std::fmt::Debug;
+    use super::*;
+    use crate::autograd::backward_op::BackwardOp;
+    use crate::tensor::Tensor;
+    use std::fmt::Debug;
+    use std::sync::Arc;
 
-    // Define Mock Tensor Creation and Mock BackwardOp here for testing
-    // ...
+    // Mock BackwardOp for testing
+    #[derive(Debug)]
+    struct MockOp { inputs: Vec<NodeId<f32>> }
+    // UNSAFE: Only for tests! Mark MockOp as Send + Sync despite raw pointers.
+    // This is acceptable because tests run sequentially and don't share across threads.
+    unsafe impl Send for MockOp {}
+    unsafe impl Sync for MockOp {}
 
-    // #[test]
-    // fn test_linear_graph() {
-    //     // Create Tensors t1, t2, t3
-    //     // Create Ops op1 (t1 -> t2), op2 (t2 -> t3)
-    //     // Set grad_fn for t2 and t3
-    //     // let sorted = topological_sort(&t3).unwrap();
-    //     // assert_eq!(sorted, vec![t1.id_ptr(), t2.id_ptr(), t3.id_ptr()]); // Example assertion
-    // }
+    impl BackwardOp<f32> for MockOp {
+        fn backward(&self, _grad_output: &Tensor<f32>) -> Result<Vec<Tensor<f32>>, NeuraRustError> {
+            Ok(vec![]) // Not needed for graph test
+        }
+        fn inputs(&self) -> Vec<NodeId<f32>> {
+            self.inputs.clone()
+        }
+    }
 
-    // #[test]
-    // fn test_branching_graph() {
-    //     // t1, t2 -> t3 (via op1)
-    //     // t3 -> t4 (via op2)
-    //     // let sorted = topological_sort(&t4).unwrap();
-    //     // Order of t1, t2 might vary, but t3 must come after t1/t2, and t4 after t3.
-    // }
+    // Helper to create a mock tensor with a grad_fn
+    fn mock_tensor_with_grad_fn(op: MockOp) -> Tensor<f32> {
+        let t = Tensor::scalar(0.0); // Content doesn't matter
+        // The cast to Arc<dyn ... Send + Sync> works now because MockOp is marked Send+Sync
+        t.set_grad_fn(Some(Arc::new(op))).unwrap();
+        t
+    }
 
-    // #[test]
-    // fn test_shared_node_graph() {
-    //     // t1 -> t2 (op1)
-    //     // t1 -> t3 (op2)
-    //     // t2, t3 -> t4 (op3)
-    //     // let sorted = topological_sort(&t4).unwrap();
-    //     // t1 must come before t2 and t3. t2, t3 must come before t4.
-    // }
+    fn get_node_id<T: 'static + Debug + Copy + Send + Sync>(tensor: &Tensor<T>) -> NodeId<T> {
+        Arc::as_ptr(&tensor.data)
+    }
 
-    // #[test]
-    // fn test_cycle_detection() {
-    //     // t1 -> t2 (op1)
-    //     // t2 -> t1 (op2) // Create cycle
-    //     // let result = topological_sort(&t2);
-    //     // assert!(matches!(result, Err(NeuraRustError::CycleDetected)));
-    // }
+    #[test]
+    fn test_topological_sort_linear() {
+        let t1 = Tensor::scalar(1.0);
+        let t2 = Tensor::scalar(2.0);
+        let t3 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t1), get_node_id(&t2)] });
+        let t4 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t3)] });
+
+        let order = topological_sort(get_node_id(&t4)).unwrap();
+
+        // Expected reverse topological order: t1, t2, t3, t4 (order of t1/t2 might swap)
+        assert_eq!(order.len(), 4);
+        assert!( (order[0] == get_node_id(&t1) && order[1] == get_node_id(&t2)) ||
+                   (order[0] == get_node_id(&t2) && order[1] == get_node_id(&t1)) );
+        assert_eq!(order[2], get_node_id(&t3));
+        assert_eq!(order[3], get_node_id(&t4));
+    }
+
+    #[test]
+    fn test_topological_sort_branch() {
+        let t1 = Tensor::scalar(1.0);
+        let t2 = Tensor::scalar(2.0);
+        let t3 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t1)] });
+        let t4 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t1), get_node_id(&t2)] });
+        let t5 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t3), get_node_id(&t4)] });
+
+        let order = topological_sort(get_node_id(&t5)).unwrap();
+
+        // Expected order: t1, t2, t3, t4, t5 (or other valid reverse topological orders)
+        // We check dependencies: t1 must come before t3, t4. t2 must come before t4.
+        // t3 must come before t5. t4 must come before t5.
+        assert_eq!(order.len(), 5);
+        let pos = |id| order.iter().position(|&x| x == id).unwrap();
+        assert!(pos(get_node_id(&t1)) < pos(get_node_id(&t3)));
+        assert!(pos(get_node_id(&t1)) < pos(get_node_id(&t4)));
+        assert!(pos(get_node_id(&t2)) < pos(get_node_id(&t4)));
+        assert!(pos(get_node_id(&t3)) < pos(get_node_id(&t5)));
+        assert!(pos(get_node_id(&t4)) < pos(get_node_id(&t5)));
+        assert_eq!(order[4], get_node_id(&t5)); // t5 must be last
+    }
+
+     #[test]
+     fn test_topological_sort_cycle() {
+        let _t1 = Tensor::scalar(1.0);
+        let t2 = mock_tensor_with_grad_fn(MockOp { inputs: vec![] }); // Placeholder grad_fn
+        let t3 = mock_tensor_with_grad_fn(MockOp { inputs: vec![get_node_id(&t2)] }); 
+
+        // Manually create a cycle: t2's grad_fn depends on t3
+        let op_for_t2 = MockOp { inputs: vec![get_node_id(&t3)] }; 
+        t2.set_grad_fn(Some(Arc::new(op_for_t2))).unwrap();
+
+        let result = topological_sort(get_node_id(&t3));
+        assert!(matches!(result, Err(NeuraRustError::CycleDetected)));
+    }
+    
+    #[test]
+    fn test_topological_sort_single_node() {
+        let t1 = Tensor::scalar(1.0); // No grad_fn
+        let order = topological_sort(get_node_id(&t1)).unwrap();
+        assert_eq!(order.len(), 1);
+        assert_eq!(order[0], get_node_id(&t1));
+    }
 } 
