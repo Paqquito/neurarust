@@ -92,32 +92,6 @@ pub fn index_to_coord(index: usize, strides: &[usize], shape: &[usize]) -> Vec<u
     coord
 }
 
-// Helper to get the original data index from broadcasted coordinates
-pub fn coord_to_index_broadcasted(
-    target_coord: &[usize],
-    original_shape: &[usize],
-    original_strides: &[usize],
-) -> usize {
-    if original_shape.is_empty() {
-        return 0;
-    } // Scalar
-    let rank_diff = target_coord.len().saturating_sub(original_shape.len());
-    let mut index = 0;
-    for i in 0..original_shape.len() {
-        let coord_idx = rank_diff + i;
-        let dim_size = original_shape[i];
-        let stride = original_strides[i];
-        // If the original dimension was 1, use coord 0, otherwise use the target coord
-        let effective_coord = if dim_size == 1 {
-            0
-        } else {
-            target_coord[coord_idx]
-        };
-        index += effective_coord * stride;
-    }
-    index
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;

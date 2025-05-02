@@ -1,0 +1,121 @@
+use crate::{error::NeuraRustError, ops::reduction::sum::sum_axes, tensor::Tensor};
+use num_traits::Zero;
+use std::{fmt::Debug, iter::Sum, ops::AddAssign};
+
+impl<T> Tensor<T>
+where
+    // Bounds required by this method and sum_axes
+    T: Debug
+        + Copy
+        + Send
+        + Sync
+        + Zero
+        + AddAssign
+        + 'static
+        + Default
+        + PartialEq
+        + Sum
+        + num_traits::One
+        + PartialOrd,
+{
+    /// Reduces the tensor (gradient) to match a target shape by summing along broadcasted dimensions.
+    ///
+    /// This is crucial for the backward pass of operations involving broadcasting.
+    /// If the tensor's shape already matches the target shape, a clone is returned.
+    /// Otherwise, it identifies dimensions that were broadcasted (either added or expanded from 1)
+    /// and sums along those dimensions using `sum_axes`.
+    ///
+    /// # Arguments
+    /// * `target_shape`: The shape the tensor should be reduced to.
+    ///
+    /// # Returns
+    /// * `Ok(Tensor<T>)` containing the reduced tensor.
+    /// * `Err(NeuraRustError)` if reduction is not possible or an internal error occurs.
+    pub fn reduce_sum_for_broadcast(
+        &self,
+        target_shape: &[usize],
+    ) -> Result<Tensor<T>, NeuraRustError> {
+        let current_shape = self.shape();
+
+        // If shapes match, no reduction needed.
+        if current_shape == target_shape {
+            return Ok(self.clone());
+        }
+
+        // Handle reduction to scalar
+        if target_shape.is_empty() {
+            if self.numel() == 1 {
+                 // Already effectively scalar, reshape if needed (e.g., from [1])
+                 return crate::ops::view::reshape_op(self, vec![]);
+            }
+            // Sum all elements if target is scalar and current is not
+            let axes_to_reduce: Vec<usize> = (0..current_shape.len()).collect();
+            return sum_axes(self, &axes_to_reduce, false);
+        }
+
+        let current_rank = current_shape.len();
+        let target_rank = target_shape.len();
+
+        // Check if ranks are compatible for broadcast reduction
+        if current_rank < target_rank {
+            return Err(NeuraRustError::InternalError(format!(
+                "Cannot reduce gradient shape {:?} to target {:?}: Current rank is less than target rank.",
+                current_shape, target_shape
+            )));
+        }
+
+        let rank_diff = current_rank - target_rank;
+        let mut axes_to_reduce: Vec<usize> = (0..rank_diff).collect(); // Axes added during broadcast
+
+        for i in 0..target_rank {
+            let current_dim = current_shape[rank_diff + i];
+            let target_dim = target_shape[i];
+
+            if current_dim != target_dim {
+                if target_dim == 1 {
+                    // This dimension was expanded from 1, reduce along it.
+                    axes_to_reduce.push(rank_diff + i);
+                } else {
+                    // Shapes mismatch in a non-broadcastable way (target is not 1)
+                    return Err(NeuraRustError::InternalError(format!(
+                        "Cannot reduce gradient shape {:?} to target {:?}: Incompatible dimension {} (size {} vs target size {}).",
+                        current_shape, target_shape, i, current_dim, target_dim
+                    )));
+                }
+            }
+        }
+
+        if axes_to_reduce.is_empty() {
+             // This case should ideally be caught by the initial `current_shape == target_shape` check,
+             // but we add a safeguard.
+            if current_shape == target_shape { // Double check shapes if no axes found
+                Ok(self.clone())
+            } else {
+                 Err(NeuraRustError::InternalError(format!(
+                     "Cannot reduce gradient shape {:?} to {:?}: Shapes differ but no reduction axes identified.",
+                     current_shape, target_shape
+                 )))
+            }
+        } else {
+            // Perform summation along the identified axes.
+            // keep_dims=true simplifies reshaping later.
+            let reduced_grad = sum_axes(self, &axes_to_reduce, true)?;
+
+            // Reshape the result to match the target shape EXACTLY.
+            // sum_axes with keep_dims=true will keep the rank, but dimensions summed will be 1.
+            // Reshape is needed to remove these dimensions if the target_shape doesn't have them
+            // (e.g., reducing [2, 5] to [5] should result in shape [5], not [1, 5]).
+            // However, reshape might fail if the tensor is not contiguous after sum_axes.
+            // TODO: Ensure sum_axes output is contiguous or handle non-contiguous reshape.
+            // For now, assume sum_axes output is contiguous or reshape can handle it.
+            if reduced_grad.shape() == target_shape {
+                 Ok(reduced_grad)
+            } else {
+                // If shapes don't match after sum_axes(keep_dims=true), it means we need to squeeze
+                // the dimensions that were 1 in the target shape.
+                // Let's try reshaping directly.
+                 crate::ops::view::reshape_op(&reduced_grad, target_shape.to_vec())
+            }
+        }
+    }
+} 

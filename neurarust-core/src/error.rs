@@ -82,5 +82,45 @@ pub enum NeuraRustError {
 
     #[error("Cycle detected in the computation graph during backward pass.")]
     CycleDetected,
+
+    #[error("Backward pass error: {0}")]
+    BackwardError(String),
+
+    #[error("Invalid number of dimensions: Expected {expected}, got {actual}")]
+    RankMismatch {
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error("Invalid axis specified: Axis {axis} is out of bounds for rank {rank}")]
+    InvalidAxis {
+        axis: usize,
+        rank: usize,
+    },
+
+    #[error("Invalid slice specified: Slice {slice_start}..{slice_end} (step {step}) is invalid for dimension {dimension} with size {size}")]
+    InvalidSlice {
+        slice_start: usize,
+        slice_end: usize,
+        step: usize,
+        dimension: usize,
+        size: usize,
+    },
+
+    #[error("Buffer access error: Could not access {buffer_type} buffer. Details: {details}")]
+    BufferAccessError {
+        buffer_type: String, // e.g., "CPU", "GPU"
+        details: String,
+    },
+
+    #[error("Locking error: Failed to acquire {lock_type} lock. Reason: {reason}")]
+    LockError {
+        lock_type: String, // e.g., "read", "write"
+        reason: String,
+    },
+
+    #[error("Backward pass error: A cycle was detected in the computation graph.")]
+    BackwardGraphCycle,
+
     // Add more specific errors as needed
 }

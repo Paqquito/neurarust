@@ -1,20 +1,25 @@
 #![allow(clippy::needless_borrow)]
 // src/tensor/mod.rs
 
-// Keep necessary imports for the main struct definition
-// Remove this redundant import
-// use crate::tensor_data::TensorData;
-use std::fmt::Debug; // Keep Debug and Copy for the struct bound
+use crate::tensor_data::TensorData;
+use std::fmt::Debug;
 use std::marker::Copy;
 use std::sync::{Arc, RwLock};
 
-// Define modules within the tensor directory
-// These files contain the implementations of methods previously in this file.
-mod accessors;
+// --- Define existing implementation modules ---
+// These should correspond to actual files like `autograd_methods.rs`
 mod autograd_methods;
+mod traits; // Keep traits module declared
+// Remove module declaration, implementation will be below
+// mod traits;
+// Add other existing modules here if they exist (e.g., based on previous structure or file listing)
+mod accessors;
 mod create;
-mod traits;
 mod view_methods;
+
+// --- Declare utility modules ---
+pub(crate) mod utils; // Declare internal utils
+pub mod broadcast_utils; // Declare the new public broadcast utils module
 
 /// Represents a multi-dimensional array (tensor).
 ///
@@ -29,47 +34,15 @@ mod view_methods;
 /// It must be `Debug` and `Copy`. `Copy` is crucial because operations often
 /// involve reading/writing individual elements. `'static` is needed due to
 /// the way `Arc` and threading interact.
-// Remove Clone derive here
-// Remove Debug derive here
 pub struct Tensor<T: 'static + Debug + Copy> {
     /// Arc for shared ownership, RwLock for interior mutability of TensorData.
     pub(crate) data: Arc<RwLock<TensorData<T>>>,
 }
 
-// Declare the modules
-pub mod utils; // Keep utils module declaration
+// --- Public Exports ---
+// Remove this re-export as it causes name collision
+// pub use crate::tensor_data::TensorData;
 
-// Re-export standalone creation functions for convenience
-// pub use create::{zeros, ones, full, scalar};
-
-// The test module reference remains here
+// --- Test Module ---
 #[cfg(test)]
 mod tests;
-
-// --- Public Exports ---
-// Export the main Tensor struct
-pub use crate::tensor_data::TensorData; // Re-export TensorData if needed externally
-                                        // Remove these re-exports, users will access methods via Tensor::method
-                                        // pub use crate::tensor::accessors::*; // Export methods related to accessing tensor properties
-                                        // pub use crate::tensor::autograd_methods::*; // Export methods related to autograd
-                                        // pub use crate::tensor::create::*; // Export methods related to tensor creation
-                                        // pub use crate::tensor::traits::*; // Export trait implementations
-                                        // pub use crate::tensor::view_methods::*; // Export view/reshape/etc methods
-
-// Remove the re-export of specific creation functions
-// Users will call Tensor::zeros, Tensor::ones, etc.
-// pub use create::{zeros, ones, full, scalar};
-
-// --- Potentially keep standalone functions if they have a different API ---
-// Example: Maybe a version of zeros that infers device differently?
-// If not, these can be removed. For now, rely on Tensor::zeros etc.
-
-// pub fn zeros<T: Zero + 'static + Debug + Copy>(shape: Vec<usize>) -> Result<Tensor<T>, NeuraRustError> {
-//     Tensor::zeros(shape)
-// }
-// pub fn ones<T: One + 'static + Debug + Copy>(shape: Vec<usize>) -> Result<Tensor<T>, NeuraRustError> {
-//     Tensor::ones(shape)
-// }
-// pub fn full<T: 'static + Debug + Copy>(shape: Vec<usize>, fill_value: T) -> Result<Tensor<T>, NeuraRustError> {
-//     Tensor::full(shape, fill_value)
-// }

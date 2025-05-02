@@ -6,6 +6,7 @@ use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 use std::marker::Copy;
 use std::sync::Arc;
+use std::cmp::PartialEq;
 
 // --- Trait Implementations ---
 
@@ -53,55 +54,95 @@ impl<T: 'static + Debug + Copy> Debug for Tensor<T> {
 }
 
 // Add bounds here, merge with existing PartialEq
-impl<T: PartialEq + 'static + Debug + Copy> PartialEq for Tensor<T> {
-    /// Checks for tensor equality.
+impl<T> PartialEq for Tensor<T>
+where
+    T: 'static + Debug + Copy + PartialEq,
+{
+    /// Checks for logical equality between two Tensors.
+    ///
+    /// Two tensors are considered equal if they have the same device, shape, strides,
+    /// offset, and underlying data content according to their view parameters.
+    ///
+    /// Gradient information (`grad`, `requires_grad`, `grad_fn`) is NOT considered
+    /// in this equality check.
+    ///
+    /// Note: This currently only implements comparison for tensors residing on the CPU.
     fn eq(&self, other: &Self) -> bool {
-        // Need read_data access
         if Arc::ptr_eq(&self.data, &other.data) {
             return true;
         }
-        let self_guard = self.read_data();
-        let other_guard = other.read_data();
 
-        if self_guard.shape != other_guard.shape
-            || self_guard.device != other_guard.device
-            || self_guard.offset != other_guard.offset
+        // Use read lock directly via the data field
+        let self_guard = match self.data.read() {
+            Ok(guard) => guard,
+            Err(_) => return false, // Poisoned lock, consider unequal
+        };
+        let other_guard = match other.data.read() {
+            Ok(guard) => guard,
+            Err(_) => return false,
+        };
+
+        // Compare metadata
+        if self_guard.device != other_guard.device
+            || self_guard.shape != other_guard.shape
             || self_guard.strides != other_guard.strides
+            || self_guard.offset != other_guard.offset
         {
             return false;
         }
 
-        match (self_guard.device, other_guard.device) {
-            (StorageDevice::CPU, StorageDevice::CPU) => {
-                match (self_guard.data.cpu_data(), other_guard.data.cpu_data()) {
-                    (Ok(self_cpu_data), Ok(other_cpu_data)) => {
-                        if Arc::ptr_eq(&self_guard.data, &other_guard.data) {
-                            return true;
-                        }
-                        if self_guard.is_contiguous()
-                            && other_guard.is_contiguous()
-                            && self_guard.offset == other_guard.offset
-                        {
-                            let numel = self_guard.numel();
-                            let self_slice =
-                                &self_cpu_data[self_guard.offset..self_guard.offset + numel];
-                            let other_slice =
-                                &other_cpu_data[other_guard.offset..other_guard.offset + numel];
-                            self_slice == other_slice
-                        } else {
-                            eprintln!(
-                                "Warning: PartialEq comparing non-contiguous CPU Tensors or views with different offsets. Returning false. Implement element-wise comparison."
-                            );
-                            false
-                        }
-                    }
-                    _ => false,
+        // Compare buffer contents for CPU tensors
+        if self_guard.device == StorageDevice::CPU {
+            let self_buffer_arc = match self_guard.data.cpu_data() {
+                Ok(arc) => arc,
+                Err(_) => return false, // Failed to get CPU data
+            };
+            let other_buffer_arc = match other_guard.data.cpu_data() {
+                Ok(arc) => arc,
+                Err(_) => return false,
+            };
+
+            // Optimization: If underlying data Arcs are the same, data is equal
+            if Arc::ptr_eq(self_buffer_arc, other_buffer_arc) {
+                return true;
+            }
+
+            let self_data_slice = self_buffer_arc.as_slice();
+            let other_data_slice = other_buffer_arc.as_slice();
+
+            let numel = self_guard.shape.iter().product();
+            if numel == 0 {
+                return true; // Empty tensors are equal
+            }
+
+            // Use nd_iter or direct index calculation for element comparison
+            // Need index_to_coord and get_offset from TensorData
+            let shape = &self_guard.shape;
+            let self_strides = &self_guard.strides;
+            // No need for other_strides if shapes/strides already matched
+
+            for i in 0..numel {
+                 // Need to qualify index_to_coord if it's in utils
+                let coords = super::utils::index_to_coord(i, self_strides, shape);
+                let self_offset = self_guard.get_offset(&coords);
+                let other_offset = other_guard.get_offset(&coords);
+
+                if self_offset >= self_data_slice.len() || other_offset >= other_data_slice.len() {
+                    return false; // Offset out of bounds
+                }
+
+                if self_data_slice[self_offset] != other_data_slice[other_offset] {
+                    return false;
                 }
             }
-            (StorageDevice::GPU, StorageDevice::GPU) => {
-                Arc::ptr_eq(&self_guard.data, &other_guard.data)
-            }
-            _ => false,
+            // All elements matched
+            true
+        } else {
+            // For non-CPU tensors, rely on metadata comparison for now
+            eprintln!(
+                "Warning: PartialEq comparison for non-CPU tensors relies on metadata only."
+            );
+            true // Metadata already matched
         }
     }
 }
@@ -117,3 +158,6 @@ impl<T: Hash + 'static + Debug + Copy> Hash for Tensor<T> {
         self.id_ptr().hash(state);
     }
 }
+
+// Note: Implementations for Add, Sub, Mul, Neg etc. using the op functions
+// should also go in this file or a dedicated ops_impl.rs file.
