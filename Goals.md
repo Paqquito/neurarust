@@ -162,18 +162,18 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   Calculate new `shape` (swap dims) and new `strides` (swap strides).
         *   Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
         *   Implement `Tensor::transpose(...)`.
-    *   ✅ **Implement `permute` Operation:**
+    *   ✅ **Implement `permute` Operation:** -> ✅ **Done**
         *   Define `permute_op(tensor: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>>`.
         *   Acquire read lock, validate `dims` is a valid permutation for the rank.
         *   Calculate new `shape` and new `strides` by reordering according to `dims`.
         *   Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
         *   Implement `Tensor::permute(...)`.
-    *   ⏳ **Implement `reshape` / `view` Operation:**
+    *   ✅ **Implement `reshape` / `view` Operation:** -> ✅ **Done (Initial: Contiguous Only)**
         *   Define `reshape_op(tensor: &Tensor<T>, new_shape: Vec<usize>) -> Result<Tensor<T>>`.
         *   Acquire read lock, validate `new_shape` product matches old product.
         *   Call `is_contiguous()` on the tensor.
         *   If contiguous: Calculate new *contiguous* `strides` for `new_shape`. Create view using `new_view` (cloned buffer, original device/offset, `new_shape`, new strides).
-        *   If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly).
+        *   If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly). -> *(Currently returns Err)*
         *   Implement `Tensor::reshape(...)` and potentially `Tensor::view(...)` (alias or stricter view-only version).
     *   ⏳ **Implement `contiguous()` Method:**
         *   Implement `Tensor::contiguous(&self) -> Result<Tensor<T>>`.
@@ -187,7 +187,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
             *   Read value from original buffer (CPU read for now).
             *   Write value to the *new* buffer at the current linear index.
             *   Create and return a *new* `Tensor` using `Tensor::new()` with the new buffer and shape (which calculates contiguous strides).
-    *   ⏳ **Implement `is_contiguous()` Check:**
+    *   ✅ **Implement `is_contiguous()` Check:** -> ✅ **Done**
         *   Implement `TensorData::is_contiguous(&self) -> bool`.
         *   Calculate expected contiguous strides for `self.shape`.
         *   Compare `self.strides` with expected strides (handle 0/1 dim sizes).

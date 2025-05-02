@@ -495,4 +495,118 @@ fn test_reshape_numel_mismatch() {
         assert_eq!(expected, vec![2, 3]);
         assert_eq!(actual, vec![2, 2]);
     }
+}
+
+#[test]
+fn test_contiguous_on_contiguous() {
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data.clone(), vec![2, 3]);
+    assert!(tensor.is_contiguous());
+
+    let contiguous_tensor = tensor.contiguous().expect("Contiguous call failed");
+
+    // Should return a clone (same Arc pointer)
+    assert!(Arc::ptr_eq(&tensor.data, &contiguous_tensor.data), "Contiguous on contiguous tensor should return a clone (same Arc)");
+    assert_eq!(tensor, contiguous_tensor, "Contiguous on contiguous tensor should be equal");
+}
+
+#[test]
+fn test_contiguous_on_transpose() {
+    // Shape [2, 3], Strides [3, 1]
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let original_tensor = create_test_tensor(data.clone(), vec![2, 3]);
+    let transposed_tensor = original_tensor.transpose(0, 1).expect("Transpose failed");
+    assert!(!transposed_tensor.is_contiguous());
+
+    let contiguous_tensor = transposed_tensor.contiguous().expect("Contiguous call on transpose failed");
+
+    // Should be a new tensor (different Arc pointer)
+    assert!(!Arc::ptr_eq(&transposed_tensor.data, &contiguous_tensor.data), "Contiguous on transposed tensor should return a new Arc");
+
+    // Check properties of the new tensor
+    assert!(contiguous_tensor.is_contiguous(), "Result of contiguous() must be contiguous");
+    assert_eq!(contiguous_tensor.shape(), vec![3, 2], "Shape should be same as transposed tensor");
+    assert_eq!(contiguous_tensor.strides(), vec![2, 1], "Strides should be contiguous for the new shape");
+
+    // Check data content
+    let expected_data: Vec<f32> = vec![0.0, 3.0, 1.0, 4.0, 2.0, 5.0];
+    let contiguous_guard = contiguous_tensor.read_data();
+    let contiguous_buffer_arc = contiguous_guard.data.cpu_data().unwrap();
+    // Dereference Arc -> Vec, then borrow as slice &[T]
+    assert_eq!(&contiguous_buffer_arc[..], &expected_data[..], "Data mismatch after contiguous() on transpose");
+}
+
+#[test]
+fn test_contiguous_on_permute() {
+    // Shape: [2, 3, 4], Strides: [12, 4, 1]
+    let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+    let original_tensor = create_test_tensor(data, vec![2, 3, 4]);
+    // Permute [0, 1, 2] -> [2, 0, 1]
+    let permuted_tensor = original_tensor.permute(&[2, 0, 1]).expect("Permute failed"); // Shape [4, 2, 3], Strides [1, 12, 4]
+    assert!(!permuted_tensor.is_contiguous());
+
+    let contiguous_tensor = permuted_tensor.contiguous().expect("Contiguous call on permute failed");
+
+    // Should be a new tensor
+    assert!(!Arc::ptr_eq(&permuted_tensor.data, &contiguous_tensor.data), "Contiguous on permuted tensor should return a new Arc");
+
+    // Check properties
+    assert!(contiguous_tensor.is_contiguous(), "Result of contiguous() must be contiguous");
+    assert_eq!(contiguous_tensor.shape(), vec![4, 2, 3], "Shape should be same as permuted tensor");
+    assert_eq!(contiguous_tensor.strides(), vec![6, 3, 1], "Strides should be contiguous for the new shape [4, 2, 3]");
+
+    // Check data content
+    let contiguous_guard = contiguous_tensor.read_data();
+    let contiguous_buffer_arc = contiguous_guard.data.cpu_data().unwrap();
+    let mut expected_data: Vec<f32> = Vec::with_capacity(24);
+    let mut current_indices = vec![0; 3];
+    // Local helper function remains the same
+    fn build_expected_permuted_data<T: Clone>(
+        original_tensor: &Tensor<T>,
+        permuted_tensor: &Tensor<T>,
+        expected_buffer: &mut Vec<T>,
+        current_indices: &mut Vec<usize>,
+        current_dim: usize,
+    ) {
+         if current_dim == permuted_tensor.ndim() {
+            expected_buffer.push(permuted_tensor.get(current_indices).unwrap());
+        } else {
+            for i in 0..permuted_tensor.shape()[current_dim] {
+                current_indices[current_dim] = i;
+                build_expected_permuted_data(original_tensor, permuted_tensor, expected_buffer, current_indices, current_dim + 1);
+            }
+        }
+    }
+    // Ensure T is specified for build_expected_permuted_data if needed, though it should infer from expected_data
+    build_expected_permuted_data::<f32>(&original_tensor, &permuted_tensor, &mut expected_data, &mut current_indices, 0);
+
+    // Dereference Arc -> Vec, then borrow as slice &[T]
+    assert_eq!(&contiguous_buffer_arc[..], &expected_data[..], "Data mismatch after contiguous() on permute");
+}
+
+#[test]
+fn test_contiguous_on_slice() {
+    // Shape: [2, 3, 4], Strides: [12, 4, 1]
+    let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+    let original_tensor = create_test_tensor(data, vec![2, 3, 4]);
+    // Slice that becomes non-contiguous
+    let sliced_tensor = original_tensor.slice(&[(0, 2), (0, 3), (1, 3)]).expect("Slice failed"); // Shape [2, 3, 2], Strides[12, 4, 1], Offset 1
+    assert!(!sliced_tensor.is_contiguous());
+
+    let contiguous_tensor = sliced_tensor.contiguous().expect("Contiguous call on slice failed");
+
+    // Should be a new tensor
+    assert!(!Arc::ptr_eq(&sliced_tensor.data, &contiguous_tensor.data), "Contiguous on sliced tensor should return a new Arc");
+
+    // Check properties
+    assert!(contiguous_tensor.is_contiguous(), "Result of contiguous() must be contiguous");
+    assert_eq!(contiguous_tensor.shape(), vec![2, 3, 2], "Shape should be same as sliced tensor");
+    assert_eq!(contiguous_tensor.strides(), vec![6, 2, 1], "Strides should be contiguous for the new shape [2, 3, 2]");
+
+    // Check data content
+    let expected_data: Vec<f32> = vec![1.0, 2.0, 5.0, 6.0, 9.0, 10.0, 13.0, 14.0, 17.0, 18.0, 21.0, 22.0];
+    let contiguous_guard = contiguous_tensor.read_data();
+    let contiguous_buffer_arc = contiguous_guard.data.cpu_data().unwrap();
+    // Dereference Arc -> Vec, then borrow as slice &[T]
+    assert_eq!(&contiguous_buffer_arc[..], &expected_data[..], "Data mismatch after contiguous() on slice");
 } 

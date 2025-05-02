@@ -10,6 +10,7 @@ use num_traits::{Zero, One};
 use crate::device::StorageDevice;
 use crate::tensor_data::TensorData;
 use crate::error::NeuraRustError;
+use std::iter::Product;
 
 pub mod utils;
 
@@ -21,6 +22,36 @@ pub struct Tensor<T> {
     // The core data and metadata, protected by a read-write lock and
     // shared across potentially multiple Tensor instances via an Arc.
     pub(crate) data: Arc<RwLock<TensorData<T>>>,
+}
+
+// Helper function for recursive multidimensional iteration used by contiguous()
+// This function iterates through the dimensions and calls itself recursively.
+// It builds up the current index set and, at the deepest level, calculates
+// the source offset, reads the data, and pushes it to the new contiguous buffer.
+fn copy_non_contiguous_recursive<T: Clone>(
+    original_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    original_cpu_data: &Arc<Vec<T>>, // Pass Arc reference
+    new_buffer: &mut Vec<T>,
+    current_indices: &mut Vec<usize>,
+    current_dim: usize,
+) {
+    if current_dim == original_guard.shape.len() {
+        // Base case: We have a full index set
+        let original_offset = original_guard.get_offset(current_indices);
+        new_buffer.push(original_cpu_data[original_offset].clone());
+    } else {
+        // Recursive step: Iterate through the current dimension
+        for i in 0..original_guard.shape[current_dim] {
+            current_indices[current_dim] = i;
+            copy_non_contiguous_recursive(
+                original_guard,
+                original_cpu_data,
+                new_buffer,
+                current_indices,
+                current_dim + 1,
+            );
+        }
+    }
 }
 
 // --- Combine all inherent methods into one block ---
@@ -290,6 +321,62 @@ impl<T> Tensor<T> {
         T: Clone + Debug + Default + Send + Sync + 'static, // Match trait bounds of reshape_op
     {
         crate::ops::view_ops::reshape_op(self, new_shape)
+    }
+
+    /// Returns a contiguous tensor containing the same data.
+    ///
+    /// If the tensor is already contiguous, this method clones the tensor (cheaply, via Arc).
+    /// If the tensor is not contiguous, it performs a data copy to create a new,
+    /// contiguous tensor on the same device.
+    ///
+    /// # Returns
+    /// A Result containing the contiguous tensor, or an error if data access fails (e.g., non-CPU).
+    pub fn contiguous(&self) -> Result<Self, NeuraRustError>
+    where
+        T: Clone + Debug + Default + Send + Sync + Product + 'static,
+    {
+        if self.is_contiguous() {
+            Ok(self.clone()) // Cheap clone if already contiguous
+        } else {
+            // Need to copy data
+            let guard = self.read_data();
+            let device = guard.device;
+            let shape = guard.shape.clone();
+            let numel = guard.numel();
+
+            // --- Data Copy Logic (CPU only for now) ---
+            match device {
+                StorageDevice::CPU => {
+                    // Get access to the original CPU buffer data
+                    let original_cpu_data = guard.data.cpu_data()?;
+                    let mut new_buffer = Vec::with_capacity(numel);
+
+                    // Perform multidimensional iteration and copy
+                    let mut current_indices = vec![0; shape.len()];
+                    copy_non_contiguous_recursive(
+                        &guard,
+                        &original_cpu_data, // Pass Arc reference
+                        &mut new_buffer,
+                        &mut current_indices,
+                        0, // Start recursion at dimension 0
+                    );
+
+                    // Drop the read guard before creating the new tensor
+                    drop(guard);
+
+                    // Create a new tensor from the copied, contiguous buffer
+                    // Tensor::new will calculate the correct contiguous strides.
+                    Tensor::new(new_buffer, shape)
+                }
+                StorageDevice::GPU => {
+                    // TODO: Implement contiguous copy for GPU tensors
+                    Err(NeuraRustError::UnsupportedOperation(
+                        "Contiguous copy for GPU tensors not yet implemented".to_string(),
+                    ))
+                }
+            }
+            // --- End Data Copy Logic ---
+        }
     }
 
     // Optional: Alias or stricter view-only version
