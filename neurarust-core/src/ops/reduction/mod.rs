@@ -3,3 +3,6 @@
 
 pub mod sum;
 // pub mod mean; 
+
+// Add re-export for sum_axes
+pub use sum::sum_axes; 

@@ -1,9 +1,4 @@
 use std::cmp::max;
-use crate::tensor::Tensor;
-use std::ops::{AddAssign, Add};
-use num_traits::{Zero, One};
-use std::iter::Sum as IterSum;
-use std::fmt::Debug;
 
 /// Calculates the strides for a given shape.
 /// Strides represent the number of elements to skip in the flattened data array
@@ -103,92 +98,6 @@ pub fn coord_to_index_broadcasted(target_coord: &[usize], original_shape: &[usiz
         index += effective_coord * stride;
     }
     index
-}
-
-/// Reduces a gradient tensor to match the shape of an original input tensor 
-/// that was involved in a broadcasting operation.
-///
-/// When broadcasting occurs during a forward pass (e.g., A[2,3] + B[3] -> C[2,3]),
-/// the gradient flowing back to an input must have the shape of that input.
-/// If the upstream gradient (dL/dC) has the broadcasted shape (e.g., [2,3]), 
-/// the gradient w.r.t. the smaller input (dL/dB) needs to be summed across 
-/// the dimensions that were broadcasted.
-///
-/// This function identifies the dimensions that were broadcasted and sums the 
-/// `grad` tensor along those dimensions.
-///
-/// # Arguments
-/// * `grad` - The gradient tensor, typically having the broadcasted shape.
-/// * `target_shape` - The shape of the original input tensor to which the 
-///   gradient should be reduced.
-///
-/// # Returns
-/// A new Tensor representing the gradient summed over the appropriate dimensions 
-/// to match `target_shape`. If no broadcasting occurred (i.e., `grad.shape() == target_shape`),
-/// a clone of the original `grad` is returned.
-pub fn reduce_gradient<T>(grad: &Tensor<T>, target_shape: &[usize]) -> Tensor<T>
-where
-    T: AddAssign + Copy + Clone + Default + Debug + 'static + Add<Output = T> + Zero + One + IterSum,
-{
-    let grad_shape = grad.shape();
-    if grad_shape == target_shape {
-        return grad.clone();
-    }
-
-    // Handle reduction to scalar target
-    if target_shape.is_empty() {
-        let axes_to_sum = (0..grad_shape.len()).collect::<Vec<_>>();
-        return grad.sum_axes(&axes_to_sum, false); // keep_dims=false produces scalar shape []
-    }
-
-    let rank_diff = grad_shape.len().saturating_sub(target_shape.len());
-    let mut axes_to_sum = Vec::new();
-
-    // 1. Sum dimensions that were prepended
-    for i in 0..rank_diff {
-        axes_to_sum.push(i);
-    }
-
-    // 2. Sum dimensions that were broadcasted from 1
-    for i in 0..target_shape.len() {
-        let grad_dim_index = rank_diff + i;
-        if grad_dim_index < grad_shape.len() 
-           && target_shape[i] == 1
-           && grad_shape[grad_dim_index] != 1 
-        {
-             if !axes_to_sum.contains(&grad_dim_index) {
-                axes_to_sum.push(grad_dim_index);
-             }
-        }
-    }
-    
-    // Perform summation (keep_dims=false removes summed axes)
-    let summed_grad = if !axes_to_sum.is_empty() {
-        grad.sum_axes(&axes_to_sum, false) 
-    } else {
-        // If shapes differ but no axes to sum, this is likely an error, but return clone for now.
-        eprintln!(
-            "Warning: reduce_gradient inconsistency. Shapes {:?} and {:?} differ, but no axes to sum found.",
-            grad_shape, target_shape
-        );
-        grad.clone()
-    };
-
-    // Reshape the summed gradient to exactly match the target shape.
-    // sum_axes(keep_dims=false) might return a shape that needs adjustment.
-    // Example: grad=[2,3], target=[3] -> sum(axis=0, keep_dims=false) -> summed_grad=[3]
-    // Example: grad=[2,1,3], target=[1,3] -> sum(axis=0, keep_dims=false) -> summed_grad=[1,3]
-    // Example: grad=[2,3], target=[1] -> sum(axes=[0,1], keep_dims=false) -> summed_grad=[] (scalar)
-    // This reshape ensures the final gradient has the *exact* dimensions required.
-    if summed_grad.shape() != target_shape {
-         // This assert ensures the number of elements matches before reshaping.
-         assert_eq!(summed_grad.numel(), target_shape.iter().product::<usize>(), 
-                    "Element count mismatch after summing gradient. Summed shape: {:?}, Target shape: {:?}",
-                    summed_grad.shape(), target_shape);
-        summed_grad.reshape(target_shape.to_vec())
-    } else {
-        summed_grad
-    }
 }
 
 #[cfg(test)]

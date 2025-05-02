@@ -1,8 +1,7 @@
 // neurarust-core/src/nn/losses/mse.rs
 
 use crate::tensor::Tensor;
-use crate::ops::arithmetic::{sub, mul, div, neg};
-use crate::ops::reduction::sum::sum_axes;
+use crate::ops;
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
 use std::fmt::Debug;
@@ -68,11 +67,11 @@ impl MSELoss {
             });
         }
 
-        let diff = sub(input, target)?;
+        let diff = ops::arithmetic::sub_op(input, target)?;
 
-        let sq_diff = mul(&diff, &diff)?;
+        let sq_diff = ops::arithmetic::mul_op(&diff, &diff)?;
         
-        let sum_val = sum_axes(&sq_diff, &[], false)?;
+        let sum_val = ops::reduction::sum::sum(&sq_diff)?;
 
         let n = input.numel();
         let n_t = T::from_usize(n).ok_or_else(|| 
@@ -80,13 +79,11 @@ impl MSELoss {
         )?;
         let n_tensor = Tensor::scalar(n_t);
         
-        // Correct conversion using from_f64
         let two = T::from_f64(2.0).expect("Cannot create 2.0 from f64 for type T");
-        let two_tensor = Tensor::scalar(two);
 
         let result = match self.reduction {
             Reduction::Sum => sum_val,
-            Reduction::Mean => div(&sum_val, &n_tensor)?,
+            Reduction::Mean => ops::arithmetic::div_op(&sum_val, &n_tensor)?,
             Reduction::None => unreachable!(),
         };
 
@@ -125,23 +122,23 @@ where
         if let (Some(input_rc), Some(target_rc)) = (self.input_ref.upgrade(), self.target_ref.upgrade()) {
             let input_tensor = Tensor { data: input_rc.clone() };
             let target_tensor = Tensor { data: target_rc.clone() };
-            let diff = sub(&input_tensor, &target_tensor)
+            let diff = ops::arithmetic::sub_op(&input_tensor, &target_tensor)
                  .expect("Internal error: Failed subtraction in MSE backward");
-            let two = T::from_f64(2.0).expect("Failed to create 2.0");
+            let _two = T::from_f64(2.0).expect("Failed to create 2.0");
             assert_eq!(upstream_grad.numel(), 1, "MSE Loss must be scalar for backward");
-            let upstream_scalar = upstream_grad.data()[0];
+            let upstream_scalar = upstream_grad.borrow_data_buffer()[0];
             let factor = match self.reduction {
-                Reduction::Sum => two * upstream_scalar,
+                Reduction::Sum => T::from_f64(2.0).unwrap() * upstream_scalar,
                 Reduction::Mean => {
                      let n_t = T::from_usize(self.num_elements).expect("Failed to create n");
-                     (two * upstream_scalar) / n_t 
+                     (T::from_f64(2.0).unwrap() * upstream_scalar) / n_t 
                 },
                 Reduction::None => unreachable!(),
             };
 
             let factor_tensor = Tensor::scalar(factor);
                  
-            let final_local_grad_res = mul(&factor_tensor, &diff);
+            let final_local_grad_res = ops::arithmetic::mul_op(&factor_tensor, &diff);
 
             if input_tensor.requires_grad() {
                 let final_local_grad = final_local_grad_res.as_ref()
@@ -151,7 +148,7 @@ where
             if target_tensor.requires_grad() {
                  let final_local_grad = final_local_grad_res
                       .expect("Internal error: Failed scalar multiplication (getting tensor for neg)");
-                 let final_local_grad_neg = neg(&final_local_grad)
+                 let final_local_grad_neg = ops::arithmetic::neg_op(&final_local_grad)
                       .expect("Internal error: Failed negation for target grad");
                 crate::autograd::accumulate_gradient(gradients, &self.target_ref, final_local_grad_neg);
             }
@@ -194,7 +191,7 @@ mod tests {
         let target = create_tensor_f32(vec![1.5, 2.5, 3.5], vec![3]);
         let loss = mse.forward(&input, &target)?;
         assert_eq!(loss.shape(), Vec::<usize>::new());
-        assert_approx_eq(loss.data()[0], 0.25, 1e-6);
+        assert_approx_eq(loss.borrow_data_buffer()[0], 0.25, 1e-6);
         assert!(!loss.requires_grad());
         Ok(())
     }
@@ -217,7 +214,7 @@ mod tests {
         let loss = mse.forward(&input, &target)?;
         assert!(loss.requires_grad());
         assert_eq!(loss.shape(), Vec::<usize>::new());
-        assert_approx_eq(loss.data()[0], 0.25, 1e-6);
+        assert_approx_eq(loss.borrow_data_buffer()[0], 0.25, 1e-6);
         
         loss.backward(None); 
         
@@ -225,9 +222,9 @@ mod tests {
         assert!(grad_input_opt.is_some());
         let grad_input = grad_input_opt.as_ref().unwrap();
         assert_eq!(grad_input.shape(), vec![3]);
-        assert_approx_eq(grad_input.data()[0], -1.0 / 3.0, 1e-6);
-        assert_approx_eq(grad_input.data()[1], -1.0 / 3.0, 1e-6);
-        assert_approx_eq(grad_input.data()[2], -1.0 / 3.0, 1e-6);
+        assert_approx_eq(grad_input.borrow_data_buffer()[0], -1.0 / 3.0, 1e-6);
+        assert_approx_eq(grad_input.borrow_data_buffer()[1], -1.0 / 3.0, 1e-6);
+        assert_approx_eq(grad_input.borrow_data_buffer()[2], -1.0 / 3.0, 1e-6);
         assert!(target.grad().is_none());
         Ok(())
     }
@@ -247,9 +244,9 @@ mod tests {
         assert!(grad_target_opt.is_some());
         let grad_target = grad_target_opt.as_ref().unwrap();
         assert_eq!(grad_target.shape(), vec![3]);
-        assert_approx_eq(grad_target.data()[0], 1.0 / 3.0, 1e-6);
-        assert_approx_eq(grad_target.data()[1], 1.0 / 3.0, 1e-6);
-        assert_approx_eq(grad_target.data()[2], 1.0 / 3.0, 1e-6);
+        assert_approx_eq(grad_target.borrow_data_buffer()[0], 1.0 / 3.0, 1e-6);
+        assert_approx_eq(grad_target.borrow_data_buffer()[1], 1.0 / 3.0, 1e-6);
+        assert_approx_eq(grad_target.borrow_data_buffer()[2], 1.0 / 3.0, 1e-6);
         Ok(())
     }
 
@@ -293,7 +290,7 @@ mod tests {
         let input = create_tensor_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let target = create_tensor_f32(vec![1.5, 2.5, 3.5, 4.5], vec![2, 2]);
         let result = loss.forward(&input, &target).expect("Forward failed");
-        assert_approx_eq(result.data()[0], 0.25, 1e-6);
+        assert_approx_eq(result.borrow_data_buffer()[0], 0.25, 1e-6);
         assert!(!result.requires_grad());
     }
     
@@ -303,7 +300,7 @@ mod tests {
         let input = create_tensor_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let target = create_tensor_f32(vec![1.5, 2.5, 3.5, 4.5], vec![2, 2]);
         let result = loss.forward(&input, &target).expect("Forward failed");
-        assert_approx_eq(result.data()[0], 1.0, 1e-6);
+        assert_approx_eq(result.borrow_data_buffer()[0], 1.0, 1e-6);
         assert!(!result.requires_grad());
     }
 
@@ -319,10 +316,10 @@ mod tests {
 
         let grad = input.grad().expect("Input gradient missing");
         assert_eq!(grad.shape(), vec![2, 2]);
-        assert_approx_eq(grad.data()[0], -0.25, 1e-6);
-        assert_approx_eq(grad.data()[1], -0.25, 1e-6);
-        assert_approx_eq(grad.data()[2], -0.25, 1e-6);
-        assert_approx_eq(grad.data()[3], -0.25, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[0], -0.25, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[1], -0.25, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[2], -0.25, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[3], -0.25, 1e-6);
     }
     
     #[test]
@@ -337,10 +334,10 @@ mod tests {
 
         let grad = input.grad().expect("Input gradient missing");
         assert_eq!(grad.shape(), vec![2, 2]);
-        assert_approx_eq(grad.data()[0], -1.0, 1e-6);
-        assert_approx_eq(grad.data()[1], -1.0, 1e-6);
-        assert_approx_eq(grad.data()[2], -1.0, 1e-6);
-        assert_approx_eq(grad.data()[3], -1.0, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[0], -1.0, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[1], -1.0, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[2], -1.0, 1e-6);
+        assert_approx_eq(grad.borrow_data_buffer()[3], -1.0, 1e-6);
     }
 
     #[test]
@@ -349,7 +346,7 @@ mod tests {
         let input = create_tensor_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let target = create_tensor_f32(vec![1.5, 2.5, 3.5, 4.5], vec![2, 2]);
         let result_tensor = loss.forward(&input, &target)?;
-        assert_approx_eq(result_tensor.data()[0], 0.25, 1e-6);
+        assert_approx_eq(result_tensor.borrow_data_buffer()[0], 0.25, 1e-6);
         assert!(!result_tensor.requires_grad());
         Ok(())
     }
@@ -360,7 +357,7 @@ mod tests {
         let input = create_tensor_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         let target = create_tensor_f32(vec![1.5, 2.5, 3.5, 4.5], vec![2, 2]);
         let result_tensor = loss.forward(&input, &target)?;
-        assert_approx_eq(result_tensor.data()[0], 1.0, 1e-6);
+        assert_approx_eq(result_tensor.borrow_data_buffer()[0], 1.0, 1e-6);
         assert!(!result_tensor.requires_grad());
         Ok(())
     }
@@ -376,7 +373,7 @@ mod tests {
         let grad = input.grad().expect("Input gradient missing");
         assert_eq!(grad.shape(), vec![2, 2]);
         let expected_grad = vec![-0.25, -0.25, -0.25, -0.25];
-        grad.data().iter().zip(expected_grad.iter()).for_each(|(a, e)| assert_approx_eq(*a, *e, 1e-6));
+        grad.borrow_data_buffer().iter().zip(expected_grad.iter()).for_each(|(a, e)| assert_approx_eq(*a, *e, 1e-6));
         Ok(())
     }
 
@@ -391,7 +388,7 @@ mod tests {
         let grad = input.grad().expect("Input gradient missing");
         assert_eq!(grad.shape(), vec![2, 2]);
         let expected_grad = vec![-1.0, -1.0, -1.0, -1.0];
-         grad.data().iter().zip(expected_grad.iter()).for_each(|(a, e)| assert_approx_eq(*a, *e, 1e-6));
+         grad.borrow_data_buffer().iter().zip(expected_grad.iter()).for_each(|(a, e)| assert_approx_eq(*a, *e, 1e-6));
         Ok(())
     }
 
@@ -403,7 +400,7 @@ mod tests {
 
         // Use fallible creation
         let result_tensor = loss.forward(&input, &target)?;
-        assert_eq!(result_tensor.data().to_vec(), vec![0.25]);
+        assert_eq!(result_tensor.borrow_data_buffer().to_vec(), vec![0.25]);
         // Result should require grad because target requires grad
         assert!(result_tensor.requires_grad()); 
         Ok(())
@@ -417,7 +414,7 @@ mod tests {
 
         // Use fallible creation
         let result_tensor = loss.forward(&input, &target)?;
-        assert_eq!(result_tensor.data().to_vec(), vec![0.25]);
+        assert_eq!(result_tensor.borrow_data_buffer().to_vec(), vec![0.25]);
          // Result should require grad because input requires grad
         assert!(result_tensor.requires_grad());
         Ok(())

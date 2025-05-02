@@ -5,9 +5,12 @@ pub mod autograd;
 pub mod ops;
 pub mod tensor;
 pub mod tensor_data;
+// Add new modules for buffer management and device abstraction
+pub mod buffer;
+pub mod device;
 
 // Declare new top-level modules
-pub mod nn;
+// pub mod nn; // REMOVED Phase 2 component
 // pub mod optim; // REMOVED: Optimizers moved to neurarust-optim crate
 pub mod utils;
 

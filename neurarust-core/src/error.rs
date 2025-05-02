@@ -63,5 +63,14 @@ pub enum NeuraRustError {
      #[error("Division by zero error")]
     DivisionByZero,
 
+    #[error("Cannot stack an empty list of tensors")]
+    EmptyTensorList,
+
+    #[error("Data is not available on the expected device: expected {expected:?}, actual {actual:?}")]
+    DataNotAvailableError {
+        expected: crate::device::StorageDevice, // Use crate path
+        actual: crate::device::StorageDevice,   // Use crate path
+    },
+
     // Add more specific errors as needed
 } 

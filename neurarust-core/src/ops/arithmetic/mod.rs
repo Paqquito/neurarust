@@ -1,15 +1,14 @@
-// Declare arithmetic operation modules
+// Export foundational arithmetic operations directly
 pub mod add;
 pub mod sub;
 pub mod mul;
 pub mod div;
 pub mod neg;
-pub mod pow;
 
-// Re-export the public, fallible functions
-pub use add::add;
-pub use sub::sub;
-pub use mul::mul;
-pub use div::div;
-pub use neg::neg;
-pub use pow::pow_scalar; // Consider renaming re-export e.g., `pub use pow::pow_scalar as pow;` 
+// Re-export the primary operation functions with their new names
+pub use add::add_op;
+pub use sub::sub_op;
+pub use mul::mul_op;
+pub use div::div_op;
+pub use neg::neg_op;
+// pub use pow::pow_op; // Commented out until pow.rs is refactored 
