@@ -8,6 +8,7 @@ use crate::buffer::Buffer; // Needed for borrow_data_buffer
 use std::sync::{Arc, RwLock, RwLockReadGuard, RwLockWriteGuard};
 use std::fmt::Debug;
 use std::marker::Copy;
+use crate::autograd::graph::NodeId;
 
 // Note: T bounds for the impl block cover all methods inside
 impl<T: 'static + Debug + Copy> Tensor<T> {
@@ -94,5 +95,15 @@ impl<T: 'static + Debug + Copy> Tensor<T> {
     /// Returns a type-erased pointer, useful as a unique identifier.
     pub fn id(&self) -> *const () {
         Arc::as_ptr(&self.data) as *const ()
+    }
+
+    /// Helper function to get the NodeId (*const RwLock<TensorData<T>>) for this Tensor.
+    /// Used internally by autograd operations.
+    pub(crate) fn get_node_id(&self) -> NodeId<T> {
+        // `Arc::as_ptr` gives a pointer to the inner value (RwLock<TensorData<T>>).
+        // This pointer is stable as long as the Arc lives.
+        // This is inherently unsafe if not managed carefully, but within the autograd
+        // system, we ensure the corresponding Tensors (and thus Arcs) are kept alive.
+        std::sync::Arc::as_ptr(&self.data)
     }
 } 

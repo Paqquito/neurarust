@@ -7,13 +7,13 @@ use std::iter::Sum;
 use std::fmt::Debug;
 use std::marker::Copy;
 use std::ops::{Add, AddAssign};
-use std::collections::{HashMap};
+use std::collections::HashMap;
 use crate::autograd::graph::{topological_sort, NodeId};
 use crate::ops;
 use crate::device::StorageDevice;
 
 // Note: T bounds for the impl block cover all methods inside
-impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum + PartialEq + Default + Send + Sync> Tensor<T> {
+impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum + PartialEq + Default + Send + Sync + PartialOrd> Tensor<T> {
     /// Checks if this tensor requires gradient computation.
     pub fn requires_grad(&self) -> bool {
         self.read_data().requires_grad
@@ -247,12 +247,5 @@ impl<T: 'static + Debug + Copy + Zero + One + Add<Output = T> + AddAssign + Sum 
 
         Ok(())
     }
-
-     /// Helper function to get the NodeId (*const RwLock<TensorData<T>>) for this Tensor.
-     fn get_node_id(&self) -> NodeId<T> {
-         // `Arc::as_ptr` gives a pointer to the inner value (RwLock<TensorData<T>>).
-         // This pointer is stable as long as the Arc lives.
-         std::sync::Arc::as_ptr(&self.data)
-     }
 
 } 
