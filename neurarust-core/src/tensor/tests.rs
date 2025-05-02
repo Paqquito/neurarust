@@ -2,6 +2,7 @@
 // This file contains the unit tests previously located in tensor/mod.rs
 
 use super::*; // Import everything from the parent module (tensor/mod.rs)
+use crate::error::NeuraRustError; // Import error enum
 use approx::assert_relative_eq;
 use num_traits::{Zero, One};
 use std::ops::AddAssign;
@@ -10,6 +11,7 @@ use std::iter::Sum;
 use std::cmp::PartialEq;
 use std::default::Default;
 use std::sync::Arc;
+use crate::device::StorageDevice; // Added StorageDevice import for tests
 
 // Helper function to create a basic tensor for testing
 // It requires many trait bounds, ensure they are available or adjust tests.
@@ -40,6 +42,7 @@ fn test_tensor_creation() {
 fn test_tensor_creation_error() {
     let data = vec![1.0_f32, 2.0, 3.0];
     let shape = vec![2, 2];
+    // Use Tensor::new directly here as create_test_tensor would panic
     let result = Tensor::<f32>::new(data, shape);
     assert!(result.is_err());
     match result.err().unwrap() {
@@ -47,7 +50,7 @@ fn test_tensor_creation_error() {
             assert_eq!(data_len, 3);
             assert_eq!(err_shape, vec![2, 2]);
         }
-        _ => panic!("Expected TensorCreationError"),
+        e => panic!("Expected TensorCreationError, got {:?}", e), // Improved panic message
     }
 }
 
@@ -95,7 +98,7 @@ fn test_get_element_out_of_bounds() {
             assert_eq!(index, vec![0, 2]);
             assert_eq!(shape, vec![2, 2]);
         }
-        _ => panic!("Expected IndexOutOfBounds"),
+        e => panic!("Expected IndexOutOfBounds, got {:?}", e),
     }
 }
 
@@ -109,35 +112,44 @@ fn test_get_element_wrong_ndim() {
             assert_eq!(expected, 2);
             assert_eq!(actual, 1);
         }
-        _ => panic!("Expected DimensionMismatch"),
+        e => panic!("Expected DimensionMismatch, got {:?}", e),
     }
 }
 
 #[test]
 fn test_zeros_creation() {
     let shape = vec![2, 3];
-    let t = zeros::<f64>(shape.clone()).unwrap();
+    // Use Tensor::zeros and add type annotation for variable t
+    let t: Tensor<f64> = Tensor::zeros(shape.clone()).unwrap();
     assert_eq!(t.shape(), shape);
     assert_eq!(t.numel(), 6);
-    for i in 0..2 { for j in 0..3 { assert_relative_eq!(t.get(&[i, j]).unwrap(), 0.0); } }
+    assert_eq!(t.device(), StorageDevice::CPU); // Check device
+    // Verify data is zero (type known from t)
+    for i in 0..2 { for j in 0..3 { assert_relative_eq!(t.get(&[i, j]).unwrap(), 0.0f64); } }
 }
 
 #[test]
 fn test_ones_creation() {
     let shape = vec![1, 4];
-    let t = ones::<i32>(shape.clone()).unwrap();
+     // Use Tensor::ones and add type annotation for variable t
+    let t: Tensor<i32> = Tensor::ones(shape.clone()).unwrap();
     assert_eq!(t.shape(), shape);
     assert_eq!(t.numel(), 4);
-    for j in 0..4 { assert_eq!(t.get(&[0, j]).unwrap(), 1); }
+    assert_eq!(t.device(), StorageDevice::CPU);
+    // Verify data is one (type known from t)
+    for j in 0..4 { assert_eq!(t.get(&[0, j]).unwrap(), 1i32); }
 }
 
 #[test]
 fn test_full_creation() {
     let shape = vec![3, 1, 2];
     let fill_val = 42.5_f32;
-    let t = full(shape.clone(), fill_val).unwrap();
+    // Use Tensor::full (type inferred from fill_val)
+    let t = Tensor::full(shape.clone(), fill_val).unwrap();
     assert_eq!(t.shape(), shape);
     assert_eq!(t.numel(), 6);
+    assert_eq!(t.device(), StorageDevice::CPU);
+    // Verify data is fill_val
     for i in 0..3 { for j in 0..1 { for k in 0..2 { assert_relative_eq!(t.get(&[i, j, k]).unwrap(), fill_val); } } }
 }
 
@@ -145,7 +157,8 @@ fn test_full_creation() {
 fn test_simple_slice() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
-    let ranges = vec![(0, 1), (0, 3), (0, 4)];
+    // Use SliceArg type for clarity
+    let ranges: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 3), (0, 4)];
     let view = tensor.slice(&ranges).expect("Simple slice failed");
 
     assert_eq!(view.shape(), vec![1, 3, 4], "View shape mismatch");
@@ -157,7 +170,7 @@ fn test_simple_slice() {
 fn test_slice_shares_data() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
-    let ranges = vec![(1, 2), (1, 3), (0, 2)];
+    let ranges: Vec<crate::ops::view_ops::SliceArg> = vec![(1, 2), (1, 3), (0, 2)];
     let view = tensor.slice(&ranges).expect("Slice for data sharing test failed");
 
     let original_buffer_ptr = Arc::as_ptr(&tensor.borrow_data_buffer());
@@ -171,18 +184,18 @@ fn test_slice_shares_data() {
 fn test_slice_metadata() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]); // Shape [2, 3, 4], Strides [12, 4, 1], Offset 0
-    let ranges = vec![(1, 2), (1, 3), (0, 2)]; // Slice: [1, 1:3, 0:2] -> Shape [1, 2, 2]
+    let ranges: Vec<crate::ops::view_ops::SliceArg> = vec![(1, 2), (1, 3), (0, 2)]; // Slice: [1, 1:3, 0:2] -> Shape [1, 2, 2]
     let view = tensor.slice(&ranges).expect("Slice for metadata test failed");
 
     let view_data = view.read_data();
 
     assert_eq!(view_data.shape, vec![1, 2, 2], "View shape mismatch");
     assert_eq!(view_data.strides, vec![12, 4, 1], "View strides should be inherited");
-    assert_eq!(view_data.offset, 16, "View offset calculation incorrect");
+    assert_eq!(view_data.offset, 16, "View offset calculation incorrect"); // Offset = 1*12 + 1*4 + 0*1 = 16
 
     // Drop guard before calling view.get() which also locks
     drop(view_data);
-    assert_eq!(view.get(&[0, 0, 0]).unwrap(), 16.0, "First element value mismatch");
+    assert_eq!(view.get(&[0, 0, 0]).unwrap(), 16.0, "First element value mismatch"); // 1*12 + 1*4 + 0*1 = 16
 }
 
 #[test]
@@ -191,23 +204,23 @@ fn test_slice_invalid_range() {
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
 
     // Range end > dimension size
-    let ranges_invalid_end = vec![(0, 1), (0, 4), (0, 4)]; // Dim 1 size is 3, end is 4
+    let ranges_invalid_end: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 4), (0, 4)]; // Dim 1 size is 3, end is 4
     let result_invalid_end = tensor.slice(&ranges_invalid_end);
     assert!(matches!(result_invalid_end, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for end > dim size");
 
-    // Range start > end (start == end is now allowed)
-    let ranges_invalid_start = vec![(0, 1), (3, 2), (0, 4)]; // Dim 1 start > end
+    // Range start > end
+    let ranges_invalid_start: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (3, 2), (0, 4)]; // Dim 1 start > end
     let result_invalid_start = tensor.slice(&ranges_invalid_start);
     assert!(matches!(result_invalid_start, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for start > end");
 
     // Test start == end (should work)
-    let ranges_zero_size = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 becomes size 0
+    let ranges_zero_size: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 becomes size 0
     let result_zero_size = tensor.slice(&ranges_zero_size);
     assert!(result_zero_size.is_ok(), "Slice with start == end should be Ok");
     assert_eq!(result_zero_size.unwrap().shape(), vec![1, 0, 4], "Slice start == end shape mismatch");
 
     // Incorrect number of ranges
-    let ranges_wrong_ndim = vec![(0, 1), (0, 1)]; // Only 2 ranges for 3 dims
+    let ranges_wrong_ndim: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 1)]; // Only 2 ranges for 3 dims
     let result_wrong_ndim = tensor.slice(&ranges_wrong_ndim);
     assert!(matches!(result_wrong_ndim, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of ranges");
 }
@@ -256,9 +269,9 @@ fn test_transpose_higher_dim() {
     // Check a few values
     // view[0, 0, 0] -> original[0, 0, 0] = 0
     assert_eq!(view.get(&[0, 0, 0]).unwrap(), 0.0);
-    // view[0, 1, 2] -> original[0, 2, 1] = 4 + 4 = 8 + 1 = 9
+    // view[0, 1, 2] -> original[0, 2, 1] = offset 0 + 2*4 + 1*1 = 9 -> val 9.0
     assert_eq!(view.get(&[0, 1, 2]).unwrap(), 9.0);
-    // view[1, 2, 1] -> original[1, 1, 2] = 12 + 4 + 2 = 18
+    // view[1, 2, 1] -> original[1, 1, 2] = offset 0 + 1*12 + 1*4 + 2*1 = 18 -> val 18.0
     assert_eq!(view.get(&[1, 2, 1]).unwrap(), 18.0);
 }
 
@@ -272,7 +285,7 @@ fn test_transpose_invalid_dims() {
     assert!(matches!(result_dim1, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for dim1 >= rank");
     if let Err(NeuraRustError::DimensionMismatch { expected, actual }) = result_dim1 {
         assert_eq!(expected, 2, "Expected rank 2");
-        assert_eq!(actual, 2, "Actual invalid dim was 2");
+        assert_eq!(actual, 2, "Actual invalid dim was 2"); // Should report the invalid dimension index
     }
 
     // dim2 >= rank
@@ -280,14 +293,22 @@ fn test_transpose_invalid_dims() {
     assert!(matches!(result_dim2, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for dim2 >= rank");
     if let Err(NeuraRustError::DimensionMismatch { expected, actual }) = result_dim2 {
         assert_eq!(expected, 2, "Expected rank 2");
-        assert_eq!(actual, 2, "Actual invalid dim was 2");
+        assert_eq!(actual, 2, "Actual invalid dim was 2"); // Should report the invalid dimension index
     }
 
     // dim1 == dim2 (should ideally be a no-op view, but let's check if it errors or not)
     // Current implementation likely doesn't error, just creates an identical view.
     let result_same_dims = tensor.transpose(0, 0);
     assert!(result_same_dims.is_ok(), "Transposing same dimension should be Ok");
-    assert_eq!(result_same_dims.unwrap(), tensor, "Transposing same dim should yield equal tensor");
+    let view_same_dims = result_same_dims.unwrap();
+    // Check metadata is identical
+    assert_eq!(view_same_dims.shape(), tensor.shape());
+    assert_eq!(view_same_dims.strides(), tensor.strides());
+    assert_eq!(view_same_dims.read_data().offset, tensor.read_data().offset);
+    // Ensure it's a new view struct pointing to the same data
+    assert_ne!(Arc::as_ptr(&tensor.data), Arc::as_ptr(&view_same_dims.data), "Transpose same dim should create new view struct");
+    assert!(Arc::ptr_eq(&tensor.borrow_data_buffer(), &view_same_dims.borrow_data_buffer()), "Transpose same dim view should share data buffer");
+
 }
 
 #[test]
@@ -328,8 +349,10 @@ fn test_permute_higher_dim() {
 
     // Check values
     assert_eq!(view.get(&[0, 0, 0]).unwrap(), 0.0);  // Original [0, 0, 0]
-    assert_eq!(view.get(&[1, 2, 0]).unwrap(), 6.0);  // Original [0, 1, 2]
-    assert_eq!(view.get(&[2, 3, 1]).unwrap(), 23.0); // Original [1, 2, 3]
+    // view[1, 2, 0] -> original[0, 1, 2] = offset 0 + 0*12 + 1*4 + 2*1 = 6 -> val 6.0
+    assert_eq!(view.get(&[1, 2, 0]).unwrap(), 6.0);
+    // view[2, 3, 1] -> original[1, 2, 3] = offset 0 + 1*12 + 2*4 + 3*1 = 23 -> val 23.0
+    assert_eq!(view.get(&[2, 3, 1]).unwrap(), 23.0);
 }
 
 #[test]
@@ -344,9 +367,11 @@ fn test_permute_identity() {
     assert_eq!(view.shape(), vec![2, 3, 4], "Identity permute shape mismatch");
     assert_eq!(view.strides(), vec![12, 4, 1], "Identity permute strides mismatch");
 
-    // Should be equal to original (metadata and buffer pointer comparison)
+    // Should be a new view struct, but logically equal
     assert_ne!(Arc::as_ptr(&tensor.data), Arc::as_ptr(&view.data), "Identity permute should create new view struct");
-    assert_eq!(tensor, view, "Identity permute view should be equal to original");
+    // Check equality using PartialEq impl
+    assert_eq!(tensor, view, "Identity permute view should be equal to original based on PartialEq");
+
 
     // Check data sharing
     assert!(Arc::ptr_eq(&tensor.borrow_data_buffer(), &view.borrow_data_buffer()), "Identity permute view should share data");
@@ -406,19 +431,19 @@ fn test_is_contiguous() {
     assert!(tensor_permuted_id.is_contiguous(), "Identity-permuted tensor view should be contiguous");
 
     // Sliced tensor (contiguous if slice covers full inner dimensions and starts at 0)
-    let slice_contig1 = tensor_std.slice(&[(0, 2), (0, 3), (0, 4)]).unwrap(); // Full slice
-    assert!(slice_contig1.is_contiguous(), "Full slice should be contiguous");
-    let slice_contig2 = tensor_std.slice(&[(0, 1), (0, 3), (0, 4)]).unwrap(); // First outer slice
-    assert!(slice_contig2.is_contiguous(), "Slice of first outer dim should be contiguous");
+    let slice_contig1: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 2), (0, 3), (0, 4)]; // Full slice
+    assert!(tensor_std.slice(&slice_contig1).unwrap().is_contiguous(), "Full slice should be contiguous");
+    let slice_contig2: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 3), (0, 4)]; // First outer slice
+    assert!(tensor_std.slice(&slice_contig2).unwrap().is_contiguous(), "Slice of first outer dim should be contiguous");
 
-    let slice_noncontig1 = tensor_std.slice(&[(0, 2), (0, 3), (1, 4)]).unwrap(); // Slice inner dim not at start
-    assert!(!slice_noncontig1.is_contiguous(), "Slice inner dim not at start should not be contiguous");
-    let slice_noncontig2 = tensor_std.slice(&[(0, 2), (1, 3), (0, 4)]).unwrap(); // Slice middle dim not at start
-    assert!(!slice_noncontig2.is_contiguous(), "Slice middle dim not at start should not be contiguous");
+    let slice_noncontig1: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 2), (0, 3), (1, 4)]; // Slice inner dim not at start
+    assert!(!tensor_std.slice(&slice_noncontig1).unwrap().is_contiguous(), "Slice inner dim not at start should not be contiguous");
+    let slice_noncontig2: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 2), (1, 3), (0, 4)]; // Slice middle dim not at start
+    assert!(!tensor_std.slice(&slice_noncontig2).unwrap().is_contiguous(), "Slice middle dim not at start should not be contiguous");
 
     // Slice resulting in dim size 1
-    let slice_dim1 = tensor_std.slice(&[(0, 1), (0, 1), (0, 4)]).unwrap(); // Shape [1, 1, 4]
-    assert!(slice_dim1.is_contiguous(), "Slice resulting in dim size 1 should be contiguous");
+    let slice_dim1: Vec<crate::ops::view_ops::SliceArg> = vec![(0, 1), (0, 1), (0, 4)]; // Shape [1, 1, 4]
+    assert!(tensor_std.slice(&slice_dim1).unwrap().is_contiguous(), "Slice resulting in dim size 1 should be contiguous");
 }
 
 #[test]
@@ -437,9 +462,9 @@ fn test_reshape_contiguous() {
     assert_eq!(view.read_data().offset, 0, "Reshape view offset should be 0");
 
     // Check values
-    assert_eq!(view.get(&[0, 0]).unwrap(), 0); // Original [0, 0]
-    assert_eq!(view.get(&[1, 1]).unwrap(), 5); // Original [0, 5]
-    assert_eq!(view.get(&[2, 3]).unwrap(), 11); // Original [1, 5]
+    assert_eq!(view.get(&[0, 0]).unwrap(), 0); // Original [0, 0] -> value 0
+    assert_eq!(view.get(&[1, 1]).unwrap(), 5); // Index 1*4 + 1 = 5 -> value 5
+    assert_eq!(view.get(&[2, 3]).unwrap(), 11); // Index 2*4 + 3 = 11 -> value 11
 }
 
 #[test]
@@ -480,31 +505,29 @@ fn test_reshape_non_contiguous_error() {
 
     // Attempt to reshape a likely non-contiguous slice (e.g., slicing middle dim)
     // Use a slice known to be non-contiguous from test_is_contiguous
-    let slice_noncontig = tensor_std.slice(&[(0, 2), (1, 5)]).unwrap_or_else(|_| {
-        // Fallback if slice fails (shouldn't for these indices)
-        tensor_std.transpose(0,1).unwrap() // Ensure we have *some* non-contiguous tensor
+    let slice_noncontig = tensor_std.slice(&[(0, 2), (1, 5)]).unwrap_or_else(|e| {
+         panic!("Slice creation failed unexpectedly: {:?}", e); // Should not fail here
     });
-    let result_slice = slice_noncontig.reshape(vec![8]); // Target shape with 2*4 = 8 elements
-     if !slice_noncontig.is_contiguous() {
-        assert!(matches!(result_slice, Err(NeuraRustError::UnsupportedOperation(_))), "Expected UnsupportedOperation for reshape non-contiguous slice");
-     } else {
-         // This branch might occur if the slice creation failed and we used the transposed tensor fallback
-         // (which has 12 elements), or if the slice (0,2), (1,5) happened to be contiguous (unlikely).
-         assert!(result_slice.is_err(), "Reshape should fail if fallback occurred or slice was contiguous but wrong numel");
-     }
+    assert!(!slice_noncontig.is_contiguous(), "Slice [(0, 2), (1, 5)] should be non-contiguous");
+    let result_slice = slice_noncontig.reshape(vec![8]); // Target shape with 2*(5-1) = 8 elements
+    assert!(matches!(result_slice, Err(NeuraRustError::UnsupportedOperation(_))), "Expected UnsupportedOperation for reshape non-contiguous slice");
 }
 
 #[test]
 fn test_reshape_numel_mismatch() {
     let data = (0..12).map(|x| x as i32).collect::<Vec<i32>>();
-    let tensor = create_test_tensor(data.clone(), vec![2, 6]); // 12 elements
+    let original_shape = vec![2, 6];
+    let target_shape = vec![3, 5];
+    let tensor = create_test_tensor(data.clone(), original_shape.clone()); // 12 elements
 
     // Attempt to reshape to shape with different number of elements
-    let result = tensor.reshape(vec![3, 5]); // 15 elements
+    let result = tensor.reshape(target_shape.clone()); // 15 elements
     assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })), "Expected ShapeMismatch for wrong number of elements");
-    if let Err(NeuraRustError::ShapeMismatch { expected, actual, .. }) = result {
-         assert_eq!(expected, vec![2, 6]);
-         assert_eq!(actual, vec![3, 5]);
+    // Correct the field names and compare shapes
+    if let Err(NeuraRustError::ShapeMismatch { expected, actual, operation, .. }) = result {
+         assert_eq!(expected, original_shape); // Check original shape
+         assert_eq!(actual, target_shape); // Check target shape
+         assert_eq!(operation, "reshape");
      }
 }
 
@@ -544,8 +567,17 @@ fn test_contiguous_on_transpose() {
 
     // Check data content
     let expected_data = vec![0, 3, 1, 4, 2, 5];
-    let contiguous_data = contiguous_tensor.borrow_data_buffer().cpu_data().unwrap().clone();
-    assert_eq!(*contiguous_data, expected_data, "Contiguous tensor data mismatch");
+    // Access data via .get() or a method that reads the buffer respecting new layout
+    let mut actual_data = Vec::with_capacity(6);
+    for i in 0..3 {
+        for j in 0..2 {
+            actual_data.push(contiguous_tensor.get(&[i,j]).unwrap());
+        }
+    }
+    assert_eq!(actual_data, expected_data, "Contiguous tensor data mismatch");
+    // Optional: Also check the raw buffer if needed, but .get() is safer
+    // let contiguous_buffer_data = contiguous_tensor.borrow_data_buffer().cpu_data().unwrap().clone();
+    // assert_eq!(*contiguous_buffer_data, expected_data, "Contiguous tensor raw buffer data mismatch");
 }
 
 #[test]
@@ -573,8 +605,10 @@ fn test_contiguous_on_permute() {
     // Original values:     0,       2,       4,       6,       1,       3,       5,       7
     let expected_data = vec![0, 2, 4, 6, 1, 3, 5, 7];
 
-    let contiguous_data = contiguous_tensor.borrow_data_buffer().cpu_data().unwrap().clone();
-    assert_eq!(*contiguous_data, expected_data, "Contiguous tensor data mismatch");
+    // Access data via .get()
+    let mut actual_data = Vec::with_capacity(8);
+     for i in 0..2 { for j in 0..2 { for k in 0..2 { actual_data.push(contiguous_tensor.get(&[i,j,k]).unwrap()); } } }
+    assert_eq!(actual_data, expected_data, "Contiguous tensor data mismatch");
 }
 
 #[test]
@@ -598,10 +632,13 @@ fn test_contiguous_on_slice() {
     // Expected data by iterating the slice view:
     // Indices (slice): [0,0,0], [0,0,1], [0,1,0], [0,1,1]
     // Corresponds to orig: [1,1,0], [1,1,1], [1,2,0], [1,2,1]
-    // Original values: 12+4=16, 16+1=17, 12+8=20, 20+1=21
+    // Original values: 1*12+1*4+0*1=16, 16+1=17, 1*12+2*4+0*1=20, 20+1=21
     let expected_data = vec![16.0, 17.0, 20.0, 21.0];
-    let contiguous_data = contiguous_tensor.borrow_data_buffer().cpu_data().unwrap().clone();
-    assert_eq!(*contiguous_data, expected_data, "Contiguous tensor data mismatch");
+
+    // Access data via .get()
+    let mut actual_data = Vec::with_capacity(4);
+    for i in 0..1 { for j in 0..2 { for k in 0..2 { actual_data.push(contiguous_tensor.get(&[i,j,k]).unwrap()); } } }
+    assert_eq!(actual_data, expected_data, "Contiguous tensor data mismatch");
 }
 
 #[test]
