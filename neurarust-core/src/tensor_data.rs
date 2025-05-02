@@ -1,5 +1,5 @@
 // src/tensor_data.rs
-use std::fmt::{Debug}; // Removed Formatter, Result as FmtResult
+use std::fmt::Debug; // Removed unnecessary braces
 // Use Arc for the buffer for thread-safe sharing
 use std::sync::Arc;
 
