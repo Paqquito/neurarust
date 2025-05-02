@@ -175,7 +175,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   If contiguous: Calculate new *contiguous* `strides` for `new_shape`. Create view using `new_view` (cloned buffer, original device/offset, `new_shape`, new strides).
         *   If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly). -> *(Currently returns Err)*
         *   Implement `Tensor::reshape(...)` and potentially `Tensor::view(...)` (alias or stricter view-only version).
-    *   ⏳ **Implement `contiguous()` Method:**
+    *   ✅ **Implement `contiguous()` Method:**
         *   Implement `Tensor::contiguous(&self) -> Result<Tensor<T>>`.
         *   Call `is_contiguous()`. If true, return `self.clone()`.
         *   If false:

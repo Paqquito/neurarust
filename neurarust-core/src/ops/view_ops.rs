@@ -42,16 +42,21 @@ pub(crate) fn slice_op<T: Clone + Debug + Default + Send + Sync + 'static>(
 
     for (i, &(start, end)) in ranges.iter().enumerate() {
         let dim_size = guard.shape[i];
-        // Use SliceError for invalid ranges within a dimension
-        if start >= end {
+
+        // Adjust validation for slice ranges:
+        // - start must be <= end
+        // - end must be <= dim_size
+        // - Allow start == end == 0 if dim_size == 0
+
+        if start > end { // Only check start > end
             return Err(NeuraRustError::SliceError {
                 message: format!(
-                    "Invalid slice range start >= end ({}:{}) for dimension {} with size {}",
+                    "Invalid slice range start > end ({}:{}) for dimension {} with size {}",
                     start, end, i, dim_size
                 )
             });
         }
-        if end > dim_size {
+        if end > dim_size { // Check end <= dim_size
              return Err(NeuraRustError::SliceError {
                  message: format!(
                     "Invalid slice range end > size ({}:{}) for dimension {} with size {}",
@@ -59,8 +64,14 @@ pub(crate) fn slice_op<T: Clone + Debug + Default + Send + Sync + 'static>(
                  )
             });
         }
+        // The case start == end is allowed (results in dim size 0)
+        // Special case start == end == 0 is also allowed if dim_size == 0.
+
         new_shape.push(end - start);
-        new_offset += start * guard.strides[i];
+        // Only add offset if the dimension is not empty, otherwise stride is irrelevant
+        if dim_size > 0 {
+             new_offset += start * guard.strides[i];
+        }
     }
 
     let buffer_arc = Arc::clone(&guard.data);

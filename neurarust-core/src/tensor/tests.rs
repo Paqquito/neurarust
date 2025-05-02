@@ -188,15 +188,20 @@ fn test_slice_invalid_range() {
     let result_invalid_end = tensor.slice(&ranges_invalid_end);
     assert!(matches!(result_invalid_end, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for end > dim size");
 
-    // Range start >= end
-    let ranges_invalid_start = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 start == end
+    // Range start > end (start == end is now allowed)
+    let ranges_invalid_start = vec![(0, 1), (3, 2), (0, 4)]; // Dim 1 start > end
     let result_invalid_start = tensor.slice(&ranges_invalid_start);
-    assert!(matches!(result_invalid_start, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for start >= end");
+    assert!(matches!(result_invalid_start, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for start > end");
+
+    // Test start == end (should work)
+    let ranges_zero_size = vec![(0, 1), (2, 2), (0, 4)]; // Dim 1 becomes size 0
+    let result_zero_size = tensor.slice(&ranges_zero_size);
+    assert!(result_zero_size.is_ok(), "Slice with start == end should be Ok");
+    assert_eq!(result_zero_size.unwrap().shape(), vec![1, 0, 4], "Slice start == end shape mismatch");
 
     // Incorrect number of ranges
     let ranges_wrong_ndim = vec![(0, 1), (0, 1)]; // Only 2 ranges for 3 dims
     let result_wrong_ndim = tensor.slice(&ranges_wrong_ndim);
-    // Use DimensionMismatch as per the updated slice_op
     assert!(matches!(result_wrong_ndim, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of ranges");
 }
 
@@ -609,4 +614,82 @@ fn test_contiguous_on_slice() {
     let contiguous_buffer_arc = contiguous_guard.data.cpu_data().unwrap();
     // Dereference Arc -> Vec, then borrow as slice &[T]
     assert_eq!(&contiguous_buffer_arc[..], &expected_data[..], "Data mismatch after contiguous() on slice");
-} 
+}
+
+#[test]
+fn test_view_ops_on_scalar() {
+    let scalar = create_test_tensor(vec![5.0], vec![]); // Rank 0
+
+    // Slice
+    let slice_res = scalar.slice(&[(0, 0)]); // Invalid: requires rank > 0 for ranges
+    assert!(matches!(slice_res, Err(NeuraRustError::DimensionMismatch { expected: 0, actual: 1 })), "Slice on scalar should fail DimMismatch");
+
+    // Transpose
+    let transpose_res = scalar.transpose(0, 0); // Invalid: requires rank >= 2 usually, or at least > 0
+    assert!(matches!(transpose_res, Err(NeuraRustError::DimensionMismatch { .. })), "Transpose on scalar should fail DimMismatch");
+
+    // Permute
+    let permute_res = scalar.permute(&[0]); // Invalid: permutation requires rank > 0
+    assert!(matches!(permute_res, Err(NeuraRustError::DimensionMismatch { .. })), "Permute on scalar should fail DimMismatch");
+
+    // Reshape (already tested in test_reshape_from_scalar, but double check)
+    let reshape_ok = scalar.reshape(vec![1, 1]).expect("Reshape from scalar should work");
+    assert_eq!(reshape_ok.shape(), vec![1, 1]);
+    let reshape_err = scalar.reshape(vec![2]); // Wrong numel
+    assert!(matches!(reshape_err, Err(NeuraRustError::ShapeMismatch{ .. })), "Reshape scalar to wrong numel should fail");
+}
+
+#[test]
+fn test_view_ops_on_zero_dim_tensor() {
+    // Shape [2, 0, 3]
+    let tensor = create_test_tensor(Vec::<f32>::new(), vec![2, 0, 3]);
+
+    // Slice
+    let slice_view = tensor.slice(&[(0, 1), (0, 0), (1, 3)]).expect("Slice on zero-dim tensor failed");
+    assert_eq!(slice_view.shape(), vec![1, 0, 2], "Slice zero-dim shape mismatch");
+    assert!(slice_view.is_contiguous(), "Slice on zero-dim should remain contiguous (0 elements)");
+    assert_eq!(slice_view.numel(), 0);
+
+    // Transpose
+    let transpose_view = tensor.transpose(0, 2).expect("Transpose on zero-dim tensor failed");
+    assert_eq!(transpose_view.shape(), vec![3, 0, 2], "Transpose zero-dim shape mismatch");
+    assert!(!transpose_view.is_contiguous(), "Transpose [3,0,2] on zero-dim should be non-contiguous");
+    assert_eq!(transpose_view.numel(), 0);
+
+    // Permute
+    let permute_view = tensor.permute(&[1, 2, 0]).expect("Permute on zero-dim tensor failed");
+    assert_eq!(permute_view.shape(), vec![0, 3, 2], "Permute zero-dim shape mismatch");
+    // Strides become [3, 1, 0]. Check contiguity:
+    // dim 2 (size 2): stride 0 != 1 -> false
+    assert!(!permute_view.is_contiguous(), "Permute [0,3,2] on zero-dim should be non-contiguous");
+    assert_eq!(permute_view.numel(), 0);
+
+    // Reshape
+    let reshape_view = tensor.reshape(vec![6, 0]).expect("Reshape zero-dim tensor failed");
+    assert_eq!(reshape_view.shape(), vec![6, 0], "Reshape zero-dim shape mismatch");
+    assert!(reshape_view.is_contiguous(), "Reshape zero-dim should be contiguous");
+    assert_eq!(reshape_view.numel(), 0);
+
+    // Contiguous
+    let contiguous_view = tensor.contiguous().expect("Contiguous on zero-dim failed");
+    assert!(Arc::ptr_eq(&tensor.data, &contiguous_view.data), "Contiguous on zero-dim should be clone");
+    assert_eq!(contiguous_view.numel(), 0);
+}
+
+// TODO: Add test for shared modification via views once a set() or in-place op exists.
+// Example structure:
+// #[test]
+// fn test_view_shared_modification() {
+//     let tensor = create_test_tensor(...);
+//     let view1 = tensor.slice(...);
+//     let view2 = tensor.slice(...); // Slice overlapping with view1
+//
+//     // Modify data through view1 (requires tensor.set() or similar)
+//     // view1.set(&[...], new_value).unwrap();
+//
+//     // Check if modification is reflected in original tensor
+//     // assert_eq!(tensor.get(&[original_indices]).unwrap(), new_value);
+//
+//     // Check if modification is reflected in overlapping view2
+//     // assert_eq!(view2.get(&[view2_indices]).unwrap(), new_value);
+// } 
