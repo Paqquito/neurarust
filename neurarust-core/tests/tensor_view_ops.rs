@@ -684,9 +684,16 @@ fn test_view_ops_on_scalar() {
     assert!(matches!(scalar_tensor.slice(&[SliceArg::new(0, 0)]), Err(NeuraRustError::DimensionMismatch { .. })));
     // Transpose (invalid ndim)
     assert!(matches!(scalar_tensor.transpose(0,0), Err(NeuraRustError::DimensionMismatch { .. }))); // Needs 2 dims
-    // Permute (invalid ndim)
-    assert!(matches!(scalar_tensor.permute(&[]), Err(NeuraRustError::DimensionMismatch { .. }))); // Needs 0 dims for permute
-    // Reshape (valid)
+    // Permute (should be identity for scalar and [])
+    let permuted_scalar = scalar_tensor.permute(&[]).expect("Permute [] on scalar failed");
+    assert_eq!(permuted_scalar.shape(), &[] as &[usize], "Permute scalar shape mismatch");
+    assert_eq!(permuted_scalar.get(&[]).unwrap(), 5.0, "Permute scalar data mismatch");
+    assert_eq!(permuted_scalar.is_contiguous(), true, "Permute scalar contiguity");
+    assert_eq!(permuted_scalar.device(), scalar_tensor.device(), "Permute scalar device mismatch");
+    // Check that permute with non-empty dims fails
+    assert!(matches!(scalar_tensor.permute(&[0]), Err(NeuraRustError::DimensionMismatch { .. })));
+
+    // Reshape (should work to vec![1] or stay as vec![])
     let reshaped = scalar_tensor.reshape(vec![1,1]);
     assert!(reshaped.is_ok());
     assert_eq!(reshaped.unwrap().shape(), vec![1,1]);

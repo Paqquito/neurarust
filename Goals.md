@@ -294,9 +294,9 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   ✅ **Implement `PowBackward`, `ReluBackward`:** Define, implement `BackwardOp`, modify forward ops, test.
     *   ✅ **Implement `MatmulBackward` (2D):** Define, implement `BackwardOp` (matrix math), modify forward op (`matmul_op`), test.
 
-*   **1.10 Tensor API & Data Type Expansion [⏳ To Do]**
+*   **1.10 Tensor API & Data Type Expansion [🚧 In Progress]**
     *   🎯 Goal: Enhance `Tensor` usability and type support. *(Content from original 1.4)*
-    *   ⏳ Implement Creation Methods (`arange`, `linspace`, `eye`, `rand`, `randn`).
+    *   ✅ Implement Creation Methods (`arange`, `linspace`, `eye`, `rand`, `randn`).
     *   ⏳ `DType` Handling.
     *   ⏳ Type Promotion Logic.
     *   ⏳ Implement Type Conversion (`Tensor::cast`).

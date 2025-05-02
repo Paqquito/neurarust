@@ -47,3 +47,50 @@ pub fn check_tensor_near<T>(
         }
     }
 }
+
+#[cfg(test)]
+pub(crate) fn create_test_tensor<T>(
+    data: Vec<T>,
+    shape: Vec<usize>,
+) -> Tensor<T>
+where
+    T: Default
+        + Debug
+        + Clone
+        + Copy
+        + PartialEq
+        + PartialOrd
+        + Zero
+        + One
+        + std::iter::Sum
+        + Send
+        + Sync
+        + 'static,
+{
+    Tensor::new(data, shape).unwrap()
+}
+
+#[cfg(test)]
+pub(crate) fn create_test_tensor_with_grad<T>(
+    data: Vec<T>,
+    shape: Vec<usize>,
+) -> Tensor<T>
+where
+    T: Default
+        + Debug
+        + Clone
+        + Copy
+        + PartialEq
+        + PartialOrd
+        + Zero
+        + One
+        + std::iter::Sum
+        + Send
+        + Sync
+        + 'static
+        + std::ops::AddAssign,
+{
+    let tensor = Tensor::new(data, shape).unwrap();
+    tensor.set_requires_grad(true).unwrap();
+    tensor
+}

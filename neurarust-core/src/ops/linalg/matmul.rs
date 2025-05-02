@@ -4,7 +4,7 @@ use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
-use crate::ops::view::{transpose_op}; // Needed for backward
+use crate::ops::view::transpose_op; // Needed for backward
 
 use num_traits::{One, Zero};
 use std::fmt::Debug;
