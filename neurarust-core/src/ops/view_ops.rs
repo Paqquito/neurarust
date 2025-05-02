@@ -87,4 +87,67 @@ pub(crate) fn slice_op<T: Clone + Debug + Default + Send + Sync + 'static>(
     Ok(new_tensor)
 }
 
+/// Performs the transpose operation between two dimensions, creating a view.
+///
+/// # Arguments
+/// * `tensor`: The input tensor.
+/// * `dim1`: The first dimension to transpose.
+/// * `dim2`: The second dimension to transpose.
+///
+/// # Returns
+/// A new Tensor representing the transposed view, or an error.
+pub(crate) fn transpose_op<T: Clone + Debug + Default + Send + Sync + 'static>(
+    tensor: &Tensor<T>,
+    dim1: usize,
+    dim2: usize,
+) -> Result<Tensor<T>, NeuraRustError> {
+    // 1. Acquire read lock
+    let tensor_data_arc = Arc::clone(&tensor.data);
+    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for transpose".to_string()))?;
+
+    let rank = guard.shape.len();
+
+    // 2. Validate dimensions
+    if dim1 >= rank || dim2 >= rank {
+        return Err(NeuraRustError::DimensionMismatch {
+            expected: rank, // Or maybe rank - 1 as max index? Let's stick to rank for now.
+            actual: std::cmp::max(dim1, dim2), // The invalid dimension
+        });
+        // TODO: Consider a more specific error like InvalidDimensionError?
+        // Sticking with DimensionMismatch for now as it conveys rank issue.
+    }
+
+    // 3. Calculate new shape and strides
+    let mut new_shape = guard.shape.clone();
+    let mut new_strides = guard.strides.clone();
+
+    // Swap shape and strides at dim1 and dim2
+    new_shape.swap(dim1, dim2);
+    new_strides.swap(dim1, dim2);
+
+    // 4. Get other necessary info
+    let buffer_arc = Arc::clone(&guard.data); // Clone the Arc to the buffer
+    let device = guard.device;
+    let offset = guard.offset; // Transpose doesn't change the offset
+
+    // Drop the read guard before creating the new RwLock
+    drop(guard);
+
+    // 5. Create new TensorData using new_view
+    let new_td = TensorData::new_view(
+        buffer_arc,
+        device,
+        offset,
+        new_shape,
+        new_strides, // Use the *new* swapped strides
+    );
+
+    // 6. Wrap in Tensor
+    let new_tensor = Tensor {
+        data: Arc::new(RwLock::new(new_td))
+    };
+
+    Ok(new_tensor)
+}
+
 // Placeholder for Debug trait implementation if needed 

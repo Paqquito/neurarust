@@ -198,4 +198,83 @@ fn test_slice_invalid_range() {
     let result_wrong_ndim = tensor.slice(&ranges_wrong_ndim);
     // Use DimensionMismatch as per the updated slice_op
     assert!(matches!(result_wrong_ndim, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of ranges");
+}
+
+#[test]
+fn test_transpose_2d() {
+    // Tensor: [[0, 1, 2],
+    //          [3, 4, 5]] Shape: [2, 3], Strides: [3, 1]
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3]);
+
+    let view = tensor.transpose(0, 1).expect("Transpose 2D failed");
+
+    // Expected: [[0, 3],
+    //            [1, 4],
+    //            [2, 5]] Shape: [3, 2], Strides: [1, 3]
+    assert_eq!(view.shape(), vec![3, 2], "Transposed shape mismatch");
+    assert_eq!(view.strides(), vec![1, 3], "Transposed strides mismatch");
+
+    // Verify data sharing and offset
+    assert!(Arc::ptr_eq(&tensor.borrow_data_buffer(), &view.borrow_data_buffer()), "Transpose view should share data");
+    assert_eq!(view.read_data().offset, 0, "Transpose should not change offset");
+
+    // Check values
+    assert_eq!(view.get(&[0, 0]).unwrap(), 0.0); // Original [0, 0]
+    assert_eq!(view.get(&[0, 1]).unwrap(), 3.0); // Original [1, 0]
+    assert_eq!(view.get(&[1, 0]).unwrap(), 1.0); // Original [0, 1]
+    assert_eq!(view.get(&[1, 1]).unwrap(), 4.0); // Original [1, 1]
+    assert_eq!(view.get(&[2, 0]).unwrap(), 2.0); // Original [0, 2]
+    assert_eq!(view.get(&[2, 1]).unwrap(), 5.0); // Original [1, 2]
+}
+
+#[test]
+fn test_transpose_higher_dim() {
+    // Shape: [2, 3, 4], Strides: [12, 4, 1]
+    let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3, 4]);
+
+    // Transpose dims 1 and 2
+    let view = tensor.transpose(1, 2).expect("Transpose higher dim failed");
+
+    // Expected Shape: [2, 4, 3], Strides: [12, 1, 4]
+    assert_eq!(view.shape(), vec![2, 4, 3], "Transposed shape mismatch");
+    assert_eq!(view.strides(), vec![12, 1, 4], "Transposed strides mismatch");
+
+    // Check a few values
+    // view[0, 0, 0] -> original[0, 0, 0] = 0
+    assert_eq!(view.get(&[0, 0, 0]).unwrap(), 0.0);
+    // view[0, 1, 2] -> original[0, 2, 1] = 4*2 + 1 = 9
+    assert_eq!(view.get(&[0, 1, 2]).unwrap(), 9.0);
+    // view[1, 3, 0] -> original[1, 0, 3] = 12*1 + 4*0 + 1*3 = 15
+    assert_eq!(view.get(&[1, 3, 0]).unwrap(), 15.0);
+    // view[1, 2, 1] -> original[1, 1, 2] = 12*1 + 4*1 + 1*2 = 18
+     assert_eq!(view.get(&[1, 2, 1]).unwrap(), 18.0);
+}
+
+#[test]
+fn test_transpose_invalid_dims() {
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3]); // Rank 2
+
+    // Dim >= rank
+    let result1 = tensor.transpose(0, 2);
+    assert!(matches!(result1, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for dim >= rank");
+
+    let result2 = tensor.transpose(2, 1);
+    assert!(matches!(result2, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for dim >= rank");
+
+    // Transposing same dimension should ideally work (no-op), let's test it
+    let view_same_dim = tensor.transpose(1, 1).expect("Transposing same dimension failed");
+    assert_eq!(view_same_dim.shape(), vec![2, 3]);
+    assert_eq!(view_same_dim.strides(), vec![3, 1]);
+    assert_eq!(view_same_dim, tensor, "Transposing same dim should be identity (data pointer check)");
+    // Note: The above assert_eq checks pointer equality, not necessarily value equality or metadata equality.
+    // Let's check metadata explicitly
+    let view_data = view_same_dim.read_data();
+    let tensor_data = tensor.read_data();
+    assert_eq!(view_data.shape, tensor_data.shape);
+    assert_eq!(view_data.strides, tensor_data.strides);
+    assert_eq!(view_data.offset, tensor_data.offset);
+
 } 

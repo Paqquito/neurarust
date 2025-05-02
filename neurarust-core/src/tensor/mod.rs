@@ -208,6 +208,28 @@ impl<T> Tensor<T> {
         // Call the internal slice_op function from the view_ops module
         crate::ops::view_ops::slice_op(self, ranges)
     }
+
+    /// Returns a view of the tensor with dimensions `dim1` and `dim2` swapped.
+    /// This is a view operation and does not copy data.
+    ///
+    /// # Arguments
+    /// * `dim1`: The first dimension to transpose.
+    /// * `dim2`: The second dimension to transpose.
+    ///
+    /// # Returns
+    /// A new Tensor representing the transposed view, or an error if dimensions are invalid.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Assuming tensor is 2x3
+    /// let transposed_tensor = tensor.transpose(0, 1)?; // Shape becomes 3x2
+    /// ```
+    pub fn transpose(&self, dim1: usize, dim2: usize) -> Result<Self, NeuraRustError>
+    where
+        T: Clone + Debug + Default + Send + Sync + 'static, // Match trait bounds of transpose_op
+    {
+        crate::ops::view_ops::transpose_op(self, dim1, dim2)
+    }
 }
 
 // --- Traits Implementations ---
