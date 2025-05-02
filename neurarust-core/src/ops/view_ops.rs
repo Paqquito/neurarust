@@ -150,4 +150,77 @@ pub(crate) fn transpose_op<T: Clone + Debug + Default + Send + Sync + 'static>(
     Ok(new_tensor)
 }
 
+/// Performs the permute operation, creating a view with reordered dimensions.
+///
+/// # Arguments
+/// * `tensor`: The input tensor.
+/// * `dims`: A slice representing the desired permutation of dimensions.
+///           Must contain each dimension index from 0 to rank-1 exactly once.
+///
+/// # Returns
+/// A new Tensor representing the permuted view, or an error.
+pub(crate) fn permute_op<T: Clone + Debug + Default + Send + Sync + 'static>(
+    tensor: &Tensor<T>,
+    dims: &[usize],
+) -> Result<Tensor<T>, NeuraRustError> {
+    // 1. Acquire read lock
+    let tensor_data_arc = Arc::clone(&tensor.data);
+    let guard = tensor_data_arc.read().map_err(|_| NeuraRustError::InternalError("Failed to acquire read lock on TensorData for permute".to_string()))?;
+
+    let rank = guard.shape.len();
+
+    // 2. Validate permutation dimensions
+    if dims.len() != rank {
+        // Using DimensionMismatch is still appropriate here
+        return Err(NeuraRustError::DimensionMismatch {
+            expected: rank,
+            actual: dims.len(),
+        });
+    }
+    let mut seen = vec![false; rank];
+    for &dim in dims {
+        if dim >= rank || seen[dim] {
+            // Use the new InvalidPermutation error
+            return Err(NeuraRustError::InvalidPermutation {
+                dims: dims.to_vec(),
+                rank,
+            });
+        }
+        seen[dim] = true;
+    }
+    // Optional: Check if all dimensions were seen (implicitly covered by the duplicate check)
+    // if !seen.iter().all(|&x| x) { return Err(...) }
+
+    // 3. Calculate new shape and strides
+    let mut new_shape = Vec::with_capacity(rank);
+    let mut new_strides = Vec::with_capacity(rank);
+    for &new_dim_index in dims {
+        new_shape.push(guard.shape[new_dim_index]);
+        new_strides.push(guard.strides[new_dim_index]);
+    }
+
+    // 4. Get other necessary info
+    let buffer_arc = Arc::clone(&guard.data);
+    let device = guard.device;
+    let offset = guard.offset;
+
+    drop(guard);
+
+    // 5. Create new TensorData using new_view
+    let new_td = TensorData::new_view(
+        buffer_arc,
+        device,
+        offset,
+        new_shape,
+        new_strides,
+    );
+
+    // 6. Wrap in Tensor
+    let new_tensor = Tensor {
+        data: Arc::new(RwLock::new(new_td))
+    };
+
+    Ok(new_tensor)
+}
+
 // Placeholder for Debug trait implementation if needed 

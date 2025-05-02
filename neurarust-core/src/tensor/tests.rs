@@ -277,4 +277,97 @@ fn test_transpose_invalid_dims() {
     assert_eq!(view_data.strides, tensor_data.strides);
     assert_eq!(view_data.offset, tensor_data.offset);
 
+}
+
+#[test]
+fn test_permute_simple() {
+    // Shape: [2, 3], Strides: [3, 1]
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3]);
+
+    // Permute dims [0, 1] -> [1, 0] (equivalent to transpose(0, 1))
+    let view = tensor.permute(&[1, 0]).expect("Permute simple failed");
+
+    // Expected Shape: [3, 2], Strides: [1, 3]
+    assert_eq!(view.shape(), vec![3, 2], "Permuted shape mismatch");
+    assert_eq!(view.strides(), vec![1, 3], "Permuted strides mismatch");
+
+    // Verify data sharing and offset
+    assert!(Arc::ptr_eq(&tensor.borrow_data_buffer(), &view.borrow_data_buffer()), "Permute view should share data");
+    assert_eq!(view.read_data().offset, 0, "Permute should not change offset");
+
+    // Check values (should match transpose test)
+    assert_eq!(view.get(&[0, 0]).unwrap(), 0.0); // Original [0, 0]
+    assert_eq!(view.get(&[1, 0]).unwrap(), 1.0); // Original [0, 1]
+    assert_eq!(view.get(&[2, 0]).unwrap(), 2.0); // Original [0, 2]
+    assert_eq!(view.get(&[0, 1]).unwrap(), 3.0); // Original [1, 0]
+    assert_eq!(view.get(&[1, 1]).unwrap(), 4.0); // Original [1, 1]
+    assert_eq!(view.get(&[2, 1]).unwrap(), 5.0); // Original [1, 2]
+}
+
+#[test]
+fn test_permute_higher_dim() {
+    // Shape: [2, 3, 4], Strides: [12, 4, 1]
+    let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3, 4]);
+
+    // Permute [0, 1, 2] -> [2, 0, 1]
+    let view = tensor.permute(&[2, 0, 1]).expect("Permute higher dim failed");
+
+    // Expected Shape: [4, 2, 3], Strides: [1, 12, 4]
+    assert_eq!(view.shape(), vec![4, 2, 3], "Permuted shape mismatch");
+    assert_eq!(view.strides(), vec![1, 12, 4], "Permuted strides mismatch");
+
+    // Check a few values
+    // view[0, 0, 0] -> original[0, 0, 0] = 0
+    assert_eq!(view.get(&[0, 0, 0]).unwrap(), 0.0);
+    // view[1, 0, 2] -> original[0, 2, 1] = 0*12 + 2*4 + 1*1 = 9
+    assert_eq!(view.get(&[1, 0, 2]).unwrap(), 9.0);
+    // view[3, 1, 0] -> original[1, 0, 3] = 1*12 + 0*4 + 3*1 = 15
+    assert_eq!(view.get(&[3, 1, 0]).unwrap(), 15.0);
+    // view[2, 1, 1] -> original[1, 1, 2] = 1*12 + 1*4 + 2*1 = 18
+    assert_eq!(view.get(&[2, 1, 1]).unwrap(), 18.0);
+}
+
+#[test]
+fn test_permute_identity() {
+    // Shape: [2, 3, 4], Strides: [12, 4, 1]
+    let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3, 4]);
+
+    // Permute [0, 1, 2] -> [0, 1, 2]
+    let view = tensor.permute(&[0, 1, 2]).expect("Permute identity failed");
+
+    assert_eq!(view.shape(), vec![2, 3, 4]);
+    assert_eq!(view.strides(), vec![12, 4, 1]);
+    assert_eq!(view, tensor, "Permute identity should be equal (pointer check)");
+
+    // Check metadata explicitly
+    let view_data = view.read_data();
+    let tensor_data = tensor.read_data();
+    assert_eq!(view_data.shape, tensor_data.shape);
+    assert_eq!(view_data.strides, tensor_data.strides);
+    assert_eq!(view_data.offset, tensor_data.offset);
+}
+
+#[test]
+fn test_permute_invalid_dims() {
+    // Shape: [2, 3]
+    let data = (0..6).map(|x| x as f32).collect::<Vec<f32>>();
+    let tensor = create_test_tensor(data, vec![2, 3]);
+
+    // Incorrect number of dims
+    let result_wrong_len = tensor.permute(&[1, 0, 2]);
+    assert!(matches!(result_wrong_len, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of dims");
+
+    let result_wrong_len2 = tensor.permute(&[0]);
+    assert!(matches!(result_wrong_len2, Err(NeuraRustError::DimensionMismatch { .. })), "Expected DimensionMismatch for wrong number of dims");
+
+    // Invalid permutation (duplicate dim)
+    let result_duplicate = tensor.permute(&[1, 1]);
+    assert!(matches!(result_duplicate, Err(NeuraRustError::InvalidPermutation { .. })), "Expected InvalidPermutation for duplicate dims");
+
+    // Invalid permutation (dim out of bounds)
+    let result_oob = tensor.permute(&[0, 2]);
+    assert!(matches!(result_oob, Err(NeuraRustError::InvalidPermutation { .. })), "Expected InvalidPermutation for out-of-bounds dim");
 } 

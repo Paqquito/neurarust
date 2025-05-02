@@ -230,6 +230,29 @@ impl<T> Tensor<T> {
     {
         crate::ops::view_ops::transpose_op(self, dim1, dim2)
     }
+
+    /// Returns a view of the tensor with its dimensions permuted according to `dims`.
+    /// This is a view operation and does not copy data.
+    ///
+    /// `dims` must be a permutation of `0..self.ndim()`.
+    ///
+    /// # Arguments
+    /// * `dims`: The desired ordering of dimensions.
+    ///
+    /// # Returns
+    /// A new Tensor representing the permuted view, or an error if `dims` is invalid.
+    ///
+    /// # Example
+    /// ```rust,ignore
+    /// // Assuming tensor is 2x3x4
+    /// let permuted_tensor = tensor.permute(&[2, 0, 1])?; // Shape becomes 4x2x3
+    /// ```
+    pub fn permute(&self, dims: &[usize]) -> Result<Self, NeuraRustError>
+    where
+        T: Clone + Debug + Default + Send + Sync + 'static, // Match trait bounds of permute_op
+    {
+        crate::ops::view_ops::permute_op(self, dims)
+    }
 }
 
 // --- Traits Implementations ---

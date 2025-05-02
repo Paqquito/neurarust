@@ -147,8 +147,8 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
 
 *   **1.1 View Semantics & Core Shape Ops [⏳ To Do]**
     *   🎯 Goal: Implement non-copying views for shape manipulation, essential for performance and memory.
-    *   ⏳ **Refine `TensorData::new_view`:** Ensure it's accessible (e.g., `pub(crate)`) and correctly takes `Arc<Buffer<T>>`, `device`, `offset`, `shape`, `strides` to create `TensorData` instances representing views.
-    *   ⏳ **Implement `slice` Operation:**
+    *   ✅ **Refine `TensorData::new_view`:** Ensure it's accessible (e.g., `pub(crate)`) and correctly takes `Arc<Buffer<T>>`, `device`, `offset`, `shape`, `strides` to create `TensorData` instances representing views.
+    *   ✅ **Implement `slice` Operation:** -> ✅ **Done**
         *   Define `slice_op(tensor: &Tensor<T>, /* slice args */) -> Result<Tensor<T>>`.
         *   Inside, acquire read lock on input `tensor.data`.
         *   Validate slice arguments against `shape`.
@@ -156,7 +156,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
         *   Create new `TensorData` using `new_view` with cloned `Arc<Buffer<T>>`, original `device`, new `offset`, new `shape`, and *original* `strides`.
         *   Wrap in `Tensor { data: Arc::new(RwLock::new(new_td)) }`.
         *   Implement user-facing `Tensor::slice(...)` method.
-    *   ⏳ **Implement `transpose` Operation:**
+    *   ✅ **Implement `transpose` Operation:** -> ✅ **Done**
         *   Define `transpose_op(tensor: &Tensor<T>, dim1: usize, dim2: usize) -> Result<Tensor<T>>`.
         *   Acquire read lock, validate `dim1`, `dim2` against rank.
         *   Calculate new `shape` (swap dims) and new `strides` (swap strides).

@@ -36,6 +36,12 @@ pub enum NeuraRustError {
     #[error("Slice error: {message}")]
     SliceError { message: String },
 
+    #[error("Invalid permutation: dims {dims:?} are not a valid permutation for rank {rank}")]
+    InvalidPermutation {
+        dims: Vec<usize>,
+        rank: usize,
+    },
+
     #[error("Tensor creation error: data length {data_len} does not match shape {shape:?}")]
     TensorCreationError {
         data_len: usize,
