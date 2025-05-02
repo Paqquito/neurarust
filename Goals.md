@@ -282,12 +282,12 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   ✅ **Modify `slice_op`, `transpose_op`, `permute_op`, `reshape_op`:** Integrated autograd logic.
     *   ✅ **Add Tests:** Implemented tests for view backward passes.
 
-*   **1.8 Autograd Integration for Reduction Ops [⏳ To Do]**
-    *   🎯 Goal: Implement backward passes for reduction operations. *(Moved from 1.3)*
-    *   ⏳ **Implement `SumAxesBackward`, `MeanBackward`:** Define structs, implement `BackwardOp` (often broadcasting `grad_output`).
-    *   ⏳ **Modify `sum_axes_op`, `mean_op`:** Integrate autograd logic.
-    *   ⏳ **Add Tests:** Use `check_grad` utility.
-    *   ⏳ **Implement/Adapt `reduce_gradient` Utility:** (If needed) Helper function for backward passes of reductions.
+*   **1.8 Autograd Integration for Reduction Ops [✅ Done]**
+    *   🎯 Goal: Implement backward passes for reduction operations.
+    *   ✅ **Implement `SumAxesBackward`, `MeanBackward`:** Defined structs, implemented `BackwardOp` (handling broadcasting/scaling). Tested with `check_grad`.
+    *   ✅ **Modify `sum_axes_op`, `mean_op`:** Integrated autograd logic.
+    *   ✅ **Add Tests:** Used `check_grad` utility, switched to f64 for numerical stability.
+    *   ⏳ **Implement/Adapt `reduce_gradient` Utility:** (Not needed for current approach).
 
 *   **1.9 Autograd Integration for Other Core Ops [⏳ To Do]**
     *   🎯 Goal: Implement backward passes for remaining essential ops. *(Moved from 1.3)*
