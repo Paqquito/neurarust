@@ -101,6 +101,59 @@ where
     Ok(output_tensor)
 }
 
+// --- matmul_kernel (Private Calculation Core) ---
+
+/// Private kernel for matrix multiplication calculation.
+/// Assumes shapes are validated and buffers are accessible.
+fn matmul_kernel<T>(
+    m: usize,
+    k: usize, // Inner dimension (k1 == k2)
+    n: usize,
+    a_buffer: &[T],
+    a_strides: &[usize],
+    a_offset: usize,
+    b_buffer: &[T],
+    b_strides: &[usize],
+    b_offset: usize,
+) -> Result<Vec<T>, NeuraRustError>
+where
+     T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign,
+{
+    let mut output_data = vec![T::zero(); m * n];
+    // Output is contiguous, calculate its strides implicitly or pass them?
+    // For simplicity, calculate index directly: output_physical_idx = i * n + j;
+
+    for i in 0..m { // Row of output
+        for j in 0..n { // Col of output
+            let mut sum = T::zero();
+            for k_idx in 0..k { // Inner dimension
+                // Calculate physical index for A[i, k_idx]
+                let a_physical_idx = a_offset + i * a_strides[0] + k_idx * a_strides[1];
+
+                // Calculate physical index for B[k_idx, j]
+                let b_physical_idx = b_offset + k_idx * b_strides[0] + j * b_strides[1];
+
+                // Bounds check (optional but safer)
+                if a_physical_idx >= a_buffer.len() || b_physical_idx >= b_buffer.len() {
+                    return Err(NeuraRustError::InternalError(
+                        format!("Matmul kernel index out of bounds ({},{},{}) -> A[{}], B[{}]", i, j, k_idx, a_physical_idx, b_physical_idx)
+                    ));
+                }
+
+                sum += a_buffer[a_physical_idx] * b_buffer[b_physical_idx];
+            }
+            // Calculate physical index for Output[i, j] (Contiguous)
+            let output_physical_idx = i * n + j;
+            if output_physical_idx >= output_data.len() {
+                 return Err(NeuraRustError::InternalError(
+                    format!("Matmul kernel output index out of bounds ({},{}) -> Out[{}]", i, j, output_physical_idx)
+                ));
+            }
+            output_data[output_physical_idx] = sum;
+        }
+    }
+    Ok(output_data)
+}
 
 // --- matmul_internal Implementation (Core Logic, No Autograd Setup) ---
 
@@ -140,40 +193,37 @@ where
         });
     }
 
-    // --- Calculation ---
+    // --- Extract data for kernel ---
+    let a_buffer_arc = a_guard.data.cpu_data()?.clone();
+    let b_buffer_arc = b_guard.data.cpu_data()?.clone();
+    let a_buffer_slice = a_buffer_arc.as_slice();
+    let b_buffer_slice = b_buffer_arc.as_slice();
+
+    // Clone strides and offset BEFORE dropping the guards
+    let a_strides = a_guard.strides.clone();
+    let b_strides = b_guard.strides.clone();
+    let a_offset = a_guard.offset;
+    let b_offset = b_guard.offset;
+
+    // Release guards before calling kernel
+    drop(a_guard);
+    drop(b_guard);
+
+    // --- Call Kernel ---
     let output_shape = vec![m, n];
-    let mut output_data = vec![T::zero(); m * n];
-    let output_strides = TensorData::<T>::calculate_contiguous_strides(&output_shape);
+    let output_data = matmul_kernel(
+        m,
+        k1, // k1 == k2
+        n,
+        a_buffer_slice,
+        &a_strides, // Pass as slice
+        a_offset,
+        b_buffer_slice,
+        &b_strides, // Pass as slice
+        b_offset,
+    )?;
 
-    let a_buffer = a_guard.data.cpu_data()?.clone();
-    let b_buffer = b_guard.data.cpu_data()?.clone();
-
-    for i in 0..m { // Row of output
-        for j in 0..n { // Col of output
-            let mut sum = T::zero();
-            for k_idx in 0..k1 { // Inner dimension
-                // Calculate physical index for A[i, k_idx]
-                let a_coords = [i, k_idx]; // Logical coordinates
-                let mut a_physical_idx = a_guard.offset;
-                for dim in 0..a_guard.shape.len() {
-                    a_physical_idx += a_coords[dim] * a_guard.strides[dim];
-                }
-
-                // Calculate physical index for B[k_idx, j]
-                let b_coords = [k_idx, j]; // Logical coordinates
-                let mut b_physical_idx = b_guard.offset;
-                 for dim in 0..b_guard.shape.len() {
-                    b_physical_idx += b_coords[dim] * b_guard.strides[dim];
-                }
-
-                sum += a_buffer[a_physical_idx] * b_buffer[b_physical_idx];
-            }
-            // Calculate physical index for Output[i, j] (Contiguous)
-            let output_physical_idx = i * output_strides[0] + j * output_strides[1];
-            output_data[output_physical_idx] = sum;
-        }
-    }
-
+    // --- Create Output Tensor ---
     Tensor::new(output_data, output_shape)
 }
 
