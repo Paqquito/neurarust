@@ -10,6 +10,7 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{AddAssign, Neg, Sub};
+use std::ops::Add;
 use std::sync::{Arc, RwLockReadGuard};
 
 // --- Backward Operation Structure ---
@@ -33,26 +34,26 @@ where
         + Copy
         + Send
         + Sync
-        + Zero
-        + AddAssign
         + 'static
+        + Clone
         + Default
-        + PartialEq
-        + Sum
+        + Zero
         + One
+        + Add<Output = T>
+        + AddAssign
+        + Neg<Output = T>
+        + Sum
+        + PartialEq
         + PartialOrd
-        + Neg<Output = T>,
+        + std::iter::Product,
 {
     fn inputs(&self) -> Vec<NodeId<T>> {
         vec![self.a.get_node_id(), self.b.get_node_id()]
     }
 
     fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
-        // grad_a = grad_output * 1
-        let grad_a = reduce_gradient_to_shape(grad_output, &self.a_shape)?;
-
-        // grad_b = grad_output * (-1)
         let neg_grad_output = crate::ops::arithmetic::neg_op(grad_output)?;
+        let grad_a = reduce_gradient_to_shape(grad_output, &self.a_shape)?;
         let grad_b = reduce_gradient_to_shape(&neg_grad_output, &self.b_shape)?;
 
         Ok(vec![grad_a, grad_b])
@@ -133,7 +134,8 @@ where
         + PartialEq
         + PartialOrd
         + Send
-        + Sync,
+        + Sync
+        + std::iter::Product,
 {
     // --- Autograd Setup ---
     let requires_grad = a.requires_grad() || b.requires_grad();
@@ -374,18 +376,20 @@ fn reduce_gradient_to_shape<T>(
     target_shape: &[usize],
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Debug
-        + Copy
-        + Send
-        + Sync
+    T: Copy
+        + Debug
         + Zero
+        + One
+        + Add<Output = T>
         + AddAssign
-        + 'static
+        + Sum
         + Default
         + PartialEq
-        + std::iter::Sum
-        + num_traits::One
-        + PartialOrd,
+        + PartialOrd
+        + std::iter::Product
+        + Send
+        + Sync
+        + 'static,
 {
     if gradient.shape() == target_shape {
         Ok(gradient.clone())

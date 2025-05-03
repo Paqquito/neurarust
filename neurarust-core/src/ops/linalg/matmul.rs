@@ -17,7 +17,7 @@ use std::sync::{Arc, RwLock};
 #[derive(Debug)]
 struct MatmulBackward<T>
 where
-    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign,
+    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum + std::iter::Product,
 {
     a_node: Arc<RwLock<TensorData<T>>>,
     b_node: Arc<RwLock<TensorData<T>>>,
@@ -29,7 +29,7 @@ where
 
 impl<T> BackwardOp<T> for MatmulBackward<T>
 where
-     T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum, // Added Sum for potential reduce
+    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum + std::iter::Product,
 {
     fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
         let mut input_grads: Vec<Tensor<T>> = Vec::with_capacity(2);
@@ -40,16 +40,14 @@ where
         // Calculate grad_a = grad_output * b.T
         if self.a_requires_grad {
             let b_transposed = transpose_op(&b_tensor, 0, 1)?;
-            // Use internal matmul to avoid autograd setup here
-            let grad_a = matmul_internal(grad_output, &b_transposed)?;
+            let grad_a = matmul_op(grad_output, &b_transposed)?;
             input_grads.push(grad_a);
         }
 
         // Calculate grad_b = a.T * grad_output
         if self.b_requires_grad {
             let a_transposed = transpose_op(&a_tensor, 0, 1)?;
-            // Use internal matmul to avoid autograd setup here
-            let grad_b = matmul_internal(&a_transposed, grad_output)?;
+            let grad_b = matmul_op(&a_transposed, grad_output)?;
             input_grads.push(grad_b);
         }
 
@@ -69,7 +67,7 @@ where
 /// Performs 2D matrix multiplication (A @ B).
 pub fn matmul_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-     T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum,
+    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum + std::iter::Product,
 {
     let a_requires_grad = a.requires_grad();
     let b_requires_grad = b.requires_grad();

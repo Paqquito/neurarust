@@ -33,16 +33,18 @@ where
         + Copy
         + Send
         + Sync
-        + Zero
-        + One // Requis par reduce_gradient
-        + AddAssign // Requis par reduce_gradient
-        + Mul<Output = T> // Requis pour le calcul du gradient
-        + Add<Output = T> // Requis par create_test_tensor dans les tests via utils
         + 'static
         + Default
+        + Clone
+        + Zero
+        + One
+        + AddAssign
+        + Add<Output = T>
+        + Sum
+        + Mul<Output = T>
         + PartialEq
-        + PartialOrd // Requis par reduce_gradient
-        + Sum, // Requis par reduce_gradient
+        + PartialOrd
+        + std::iter::Product,
 {
     fn inputs(&self) -> Vec<NodeId<T>> {
         vec![self.a.get_node_id(), self.b.get_node_id()]
@@ -122,22 +124,22 @@ where
 
 pub fn mul_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    // Doit inclure tous les bounds requis par MulBackward et reduce_gradient
     T: Mul<Output = T>
-        + Add<Output = T> // Requis par MulBackward via tests utils
-        + AddAssign // Requis par reduce_gradient
-        + Copy
-        + Clone // Requis pour cloner dans le contexte backward
+        + Add<Output = T>
+        + AddAssign
+        + Sum
+        + PartialOrd
+        + std::iter::Product
         + Debug
+        + Copy
+        + Send
+        + Sync
+        + 'static
+        + Clone
         + Default
         + Zero
         + One
-        + Sum
-        + 'static
-        + PartialEq
-        + PartialOrd
-        + Send
-        + Sync,
+        + PartialEq,
 {
     // --- Autograd Setup --- (Adapté pour cloner)
     let requires_grad = a.requires_grad() || b.requires_grad();
@@ -226,18 +228,20 @@ fn reduce_gradient_to_shape<T>(
     target_shape: &[usize],
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Debug
-        + Copy
-        + Send
-        + Sync
+    T: Copy
+        + Debug
         + Zero
+        + One
+        + Add<Output = T>
         + AddAssign
-        + 'static
+        + Sum
         + Default
         + PartialEq
-        + std::iter::Sum
-        + num_traits::One
-        + PartialOrd,
+        + PartialOrd
+        + std::iter::Product
+        + Send
+        + Sync
+        + 'static,
 {
     if gradient.shape() == target_shape {
         Ok(gradient.clone())

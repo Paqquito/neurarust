@@ -94,18 +94,19 @@ pub fn add_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustErr
 where
     T: Add<Output = T>
         + AddAssign
-        + Copy
-        + Clone
-        + Debug
-        + Default
-        + Zero
-        + One
         + Sum
-        + 'static
-        + PartialEq
         + PartialOrd
         + Send
-        + Sync,
+        + Sync
+        + std::iter::Product
+        + Debug
+        + Copy
+        + Clone
+        + Default
+        + PartialEq
+        + Zero
+        + One
+        + 'static,
 {
     // --- Autograd Setup ---
     let requires_grad = a.requires_grad() || b.requires_grad();
@@ -225,19 +226,21 @@ unsafe impl<T: Debug + Copy + Send + Sync + 'static> Sync for AddBackward<T> {}
 // Implement `BackwardOp<T>` for `AddBackward<T>`
 impl<T> BackwardOp<T> for AddBackward<T>
 where
-    // Add necessary bounds required by reduce_gradient_to_shape (which uses sum_axes, reshape)
     T: Debug
         + Copy
         + Send
         + Sync
-        + Zero
-        + AddAssign
         + 'static
         + Default
+        + Clone
+        + Zero
+        + One
+        + AddAssign
+        + Sum
+        + Add<Output = T>
         + PartialEq
-        + std::iter::Sum
-        + num_traits::One
-        + PartialOrd,
+        + PartialOrd
+        + std::iter::Product,
 {
     /// Returns the NodeIds of the input tensors involved in the addition.
     fn inputs(&self) -> Vec<NodeId<T>> {
@@ -268,72 +271,70 @@ fn reduce_gradient_to_shape<T>(
     target_shape: &[usize],
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Debug
-        + Copy
-        + Send
-        + Sync
+    T: Copy
+        + Debug
         + Zero
+        + One
+        + Add<Output = T>
         + AddAssign
-        + 'static
+        + Sum
         + Default
         + PartialEq
-        + std::iter::Sum
-        + num_traits::One
-        + PartialOrd,
+        + PartialOrd
+        + Send
+        + Sync
+        + 'static
+        + std::iter::Product,
 {
-    // Add necessary trait bounds used by sum_axes and reshape
-    // T needs Default, PartialEq, Sum, One, PartialOrd (from sum_axes test constraints)
-
     if gradient.shape() == target_shape {
-        Ok(gradient.clone()) // No reduction needed
+        return Ok(gradient.clone());
+    }
+
+    if target_shape.is_empty() {
+        // Use correct path for sum_axes. Keep keep_dims=false for scalar output.
+        crate::ops::reduction::sum_axes(gradient, &[], false)
     } else {
-        // Basic implementation: If target_shape is scalar [], sum all elements.
-        if target_shape.is_empty() {
-            // Use correct path for sum_axes. Keep keep_dims=false for scalar output.
-            crate::ops::reduction::sum_axes(gradient, &[], false)
-        } else {
-            let current_shape = gradient.shape();
-            let rank_diff = current_shape.len().saturating_sub(target_shape.len());
-            let mut axes_to_reduce: Vec<usize> = (0..rank_diff).collect(); // Reduce leading dims
+        let current_shape = gradient.shape();
+        let rank_diff = current_shape.len().saturating_sub(target_shape.len());
+        let mut axes_to_reduce: Vec<usize> = (0..rank_diff).collect(); // Reduce leading dims
 
-            for i in 0..target_shape.len() {
-                if target_shape[i] == 1 && current_shape[rank_diff + i] > 1 {
-                    axes_to_reduce.push(rank_diff + i); // Reduce broadcasted dims
-                } else if target_shape[i] != current_shape[rank_diff + i] && target_shape[i] != 1 {
-                    return Err(NeuraRustError::InternalError(format!(
-                        "Cannot reduce gradient shape {:?} to {:?}: Incompatible dimensions found.",
-                        current_shape, target_shape
-                    )));
-                }
+        for i in 0..target_shape.len() {
+            if target_shape[i] == 1 && current_shape[rank_diff + i] > 1 {
+                axes_to_reduce.push(rank_diff + i); // Reduce broadcasted dims
+            } else if target_shape[i] != current_shape[rank_diff + i] && target_shape[i] != 1 {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Cannot reduce gradient shape {:?} to {:?}: Incompatible dimensions found.",
+                    current_shape, target_shape
+                )));
             }
+        }
 
-            if axes_to_reduce.is_empty() {
-                if current_shape == target_shape {
-                    Ok(gradient.clone())
-                } else {
-                    return Err(NeuraRustError::InternalError(format!(
-                         "Cannot reduce gradient shape {:?} to {:?}: No reduction axes found but shapes differ.",
-                         current_shape, target_shape
-                      )));
-                }
+        if axes_to_reduce.is_empty() {
+            if current_shape == target_shape {
+                Ok(gradient.clone())
             } else {
-                // Use correct path for sum_axes. keep_dims=false is needed before reshape.
-                let reduced_grad =
-                    crate::ops::reduction::sum_axes(gradient, &axes_to_reduce, false)?;
-
-                let final_shape: Vec<usize> = target_shape.to_vec();
-                let reduced_numel: usize = reduced_grad.shape().iter().product();
-                let target_numel: usize = target_shape.iter().product();
-                if reduced_numel != target_numel {
-                    return Err(NeuraRustError::InternalError(format!(
-                         "Gradient reduction produced incompatible shape {:?} (numel {}) for target {:?} (numel {}). Reduction axes: {:?}.",
-                         reduced_grad.shape(), reduced_numel, target_shape, target_numel, axes_to_reduce
-                     )));
-                }
-
-                // Use correct path for reshape_op from ops::view
-                crate::ops::view::reshape_op(&reduced_grad, final_shape)
+                return Err(NeuraRustError::InternalError(format!(
+                     "Cannot reduce gradient shape {:?} to {:?}: No reduction axes found but shapes differ.",
+                     current_shape, target_shape
+                  )));
             }
+        } else {
+            // Use correct path for sum_axes. keep_dims=false is needed before reshape.
+            let reduced_grad =
+                crate::ops::reduction::sum_axes(gradient, &axes_to_reduce, false)?;
+
+            let final_shape: Vec<usize> = target_shape.to_vec();
+            let reduced_numel: usize = reduced_grad.shape().iter().product();
+            let target_numel: usize = target_shape.iter().product();
+            if reduced_numel != target_numel {
+                return Err(NeuraRustError::InternalError(format!(
+                     "Gradient reduction produced incompatible shape {:?} (numel {}) for target {:?} (numel {}). Reduction axes: {:?}.",
+                     reduced_grad.shape(), reduced_numel, target_shape, target_numel, axes_to_reduce
+                 )));
+            }
+
+            // Use correct path for reshape_op from ops::view
+            crate::ops::view::reshape_op(&reduced_grad, final_shape)
         }
     }
 }
@@ -377,26 +378,15 @@ mod tests {
     }
 
     // Helper to create a tensor that requires gradient
-    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
+    fn create_test_tensor_with_grad<T>(
+        data: Vec<T>,
+        shape: Vec<usize>,
+    ) -> Tensor<T>
     where
-        T: Clone
-            + Debug
-            + PartialEq
-            + Zero
-            + One
-            + AddAssign
-            + Copy
-            + Add<Output = T>
-            + Default
-            + Sum
-            + PartialOrd
-            + Send
-            + Sync
-            + 'static,
+        T: Default + Debug + Clone + Copy + PartialEq + Zero + One + Sum + AddAssign + PartialOrd + Send + Sync + 'static
     {
-        let t = Tensor::new(data, shape).expect("Test tensor creation failed");
-        t.set_requires_grad(true)
-            .expect("Failed to set requires_grad");
+        let t = Tensor::new(data, shape).unwrap();
+        t.set_requires_grad(true).unwrap();
         t
     }
 

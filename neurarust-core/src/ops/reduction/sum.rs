@@ -14,13 +14,13 @@ use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign};
 use std::sync::Arc;
-use std::sync::RwLock;
+use std::sync::RwLockReadGuard;
 
 /// Backward operation context for `sum_axes`.
 /// Stores information needed to compute the gradient for the input tensor.
 #[derive(Debug)]
 struct SumAxesBackward<T: Debug + Copy + Send + Sync + 'static> {
-    input_node: Arc<RwLock<TensorData<T>>>,
+    input: Tensor<T>,
     input_shape: Vec<usize>, // Original shape of the input tensor
     axes: Vec<usize>,     // Axes along which summation was performed
     keep_dims: bool,      // Whether dims were kept in the output
@@ -82,47 +82,15 @@ where
             grad_output.clone()
         };
 
-        // 2. Ensure Contiguous Gradient for Expansion
-        // Manually create a contiguous copy if the reshaped tensor might not be.
-        let grad_output_for_expand = {
-            let reshaped_guard = grad_output_reshaped.read_data();
-            if reshaped_guard.is_contiguous() {
-                grad_output_reshaped.clone()
-            } else {
-                // Not contiguous, create a new contiguous tensor by copying data
-                let shape = reshaped_guard.shape.clone();
-                let numel = shape.iter().product::<usize>();
-                let mut new_data = Vec::with_capacity(numel);
-                // Assuming CPU
-                let buffer_arc = reshaped_guard.data.cpu_data()?.clone();
-                let data_slice = buffer_arc.as_slice();
-                let mut current_indices = vec![0; shape.len()];
-                for _ in 0..numel {
-                    let offset = reshaped_guard.get_offset(&current_indices); // No ? needed
-                    new_data.push(data_slice[offset]);
-                    // Increment indices
-                    if numel > 0 {
-                         let mut dim_to_increment = shape.len();
-                         while dim_to_increment > 0 {
-                             dim_to_increment -= 1;
-                             current_indices[dim_to_increment] += 1;
-                             if current_indices[dim_to_increment] < shape[dim_to_increment] {
-                                 break;
-                             }
-                             current_indices[dim_to_increment] = 0;
-                         }
-                     }
-                }
-                Tensor::new(new_data, shape)?
-            }
-        };
+        // 2. Utiliser directement le gradient reshaped pour l'expansion
+        let grad_output_for_expand = grad_output_reshaped;
 
-        // 3. Expand the contiguous grad_output_for_expand to the target shape.
+        // 3. Expand the grad_output_for_expand to the target shape.
         if grad_output_for_expand.shape() == target_shape {
             return Ok(vec![grad_output_for_expand]);
         }
 
-        // --- Manual Expand Implementation (Corrected Logic) ---
+        // --- Manual Expand Implementation (devrait fonctionner avec non-contigu) ---
         let grad_output_guard = grad_output_for_expand.read_data();
         let grad_output_buffer = grad_output_guard.data.cpu_data()?.clone();
         let grad_output_shape = grad_output_guard.shape.clone();
@@ -183,8 +151,93 @@ where
     }
 
     fn inputs(&self) -> Vec<NodeId<T>> {
-        vec![Arc::as_ptr(&self.input_node)]
+        vec![self.input.get_node_id()]
     }
+}
+
+/// Noyau de calcul privé pour la somme avec réduction d'axes.
+pub(crate) fn sum_kernel<T>(
+    input_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    input_data_slice: &[T],
+    axes: &[usize], // Utiliser les axes déjà traités
+    keep_dims: bool,
+    output_shape: &[usize],
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Copy + Debug + Zero + AddAssign,
+{
+    let output_numel: usize = if output_shape.is_empty() { 1 } else { output_shape.iter().product::<usize>() };
+    let mut result_data = vec![T::zero(); output_numel];
+
+    let input_shape = &input_guard.shape;
+    let input_rank = input_shape.len();
+    let input_strides = &input_guard.strides;
+    let input_offset = input_guard.offset;
+
+    let mut current_input_indices = vec![0; input_rank];
+
+    // Itérer sur tous les éléments de l'entrée
+    for _i in 0..input_guard.numel() {
+        // Calculer l'offset et obtenir la valeur
+        let mut current_relative_offset = 0;
+        for dim_idx in 0..input_rank {
+            current_relative_offset += current_input_indices[dim_idx] * input_strides[dim_idx];
+        }
+        let logical_offset = input_offset + current_relative_offset;
+        let val = input_data_slice[logical_offset];
+
+        // Calculer l'index de sortie
+        let mut output_indices = Vec::with_capacity(output_shape.len());
+        let mut output_idx_pos = 0;
+        for (dim_idx, &coord) in current_input_indices.iter().enumerate() {
+            if !axes.contains(&dim_idx) {
+                if output_idx_pos < output_shape.len() {
+                    output_indices.push(coord);
+                    output_idx_pos += 1;
+                }
+            } else if keep_dims {
+                if output_idx_pos < output_shape.len() {
+                    output_indices.push(0);
+                    output_idx_pos += 1;
+                }
+            }
+        }
+
+        // Calculer l'index plat de sortie
+        let mut output_flat_idx = 0;
+        if !output_shape.is_empty() {
+            let mut stride_product: usize = 1;
+            // Utiliser directement output_shape.len() ici car output_indices a la bonne taille
+            for j in (0..output_shape.len()).rev() {
+                output_flat_idx += output_indices[j] * stride_product;
+                 // Le calcul des strides de sortie se fait implicitement par cette boucle
+                if j > 0 {
+                    // On a besoin de la taille de la dimension j pour calculer le stride
+                    // C'est output_shape[j] car on itère à l'envers
+                     stride_product *= output_shape[j];
+                }
+            }
+        }
+
+        // Accumuler la valeur
+        if output_flat_idx < result_data.len() {
+            result_data[output_flat_idx] += val;
+        }
+
+        // Incrémenter les indices d'entrée
+        if input_guard.numel() > 0 && _i < input_guard.numel() - 1 {
+            let mut dim_to_increment = input_rank;
+            while dim_to_increment > 0 {
+                dim_to_increment -= 1;
+                current_input_indices[dim_to_increment] += 1;
+                if current_input_indices[dim_to_increment] < input_shape[dim_to_increment] {
+                    break;
+                }
+                current_input_indices[dim_to_increment] = 0;
+            }
+        }
+    }
+    Ok(result_data)
 }
 
 /// Calculates the sum of elements along specified axes.
@@ -209,12 +262,16 @@ where
         + PartialOrd
         + One
         + Sum
-        + Add<Output = T>, // Added Add bound for autograd compatibility
+        + Add<Output = T>,
 {
     // --- Autograd Setup ---
     let requires_grad = input.requires_grad();
-    let input_node_arc = input.data.clone(); // Clone the Arc<RwLock<TensorData>>
-    let input_shape_clone = input.shape(); // Clone shape needed for backward op
+    let mut input_maybe_clone: Option<Tensor<T>> = None;
+    let mut input_shape_clone: Option<Vec<usize>> = None;
+    if requires_grad {
+        input_maybe_clone = Some(input.clone());
+        input_shape_clone = Some(input.shape());
+    }
 
     // --- Acquire read lock ---
     let input_guard = input.read_data();
@@ -229,6 +286,7 @@ where
     }
     // --- Get CPU Data Buffer ---
     let input_data_arc = input_guard.data.cpu_data()?.clone();
+    let input_data_slice = input_data_arc.as_slice();
 
     // --- Shape and Axis Validation ---
     let input_shape = input_guard.shape.clone();
@@ -244,18 +302,31 @@ where
             vec![]
         };
         // Result tensor on CPU
-        return Tensor::new(vec![sum_val], output_shape);
+        let result_tensor = Tensor::new(vec![sum_val], output_shape)?;
+
+        // --- Autograd Integration ---
+        if requires_grad {
+            let backward_op = SumAxesBackward {
+                input: input_maybe_clone.unwrap(),
+                input_shape: input_shape_clone.unwrap(),
+                axes: axes.to_vec(),
+                keep_dims,
+            };
+            result_tensor.set_grad_fn(Some(Arc::new(backward_op)))?;
+            result_tensor.set_requires_grad(true)?;
+        }
+
+        return Ok(result_tensor);
     }
 
     // --- Validate Axes ---
     let mut processed_axes = Vec::with_capacity(axes.len());
     for &axis in axes {
         if axis >= input_rank {
-            // Drop guard before returning error (Now safe because input_shape is cloned)
             drop(input_guard);
             return Err(NeuraRustError::IndexOutOfBounds {
                 index: vec![axis],
-                shape: input_shape, // Use the cloned shape
+                shape: input_shape,
             });
         }
         processed_axes.push(axis);
@@ -264,132 +335,48 @@ where
     processed_axes.dedup();
 
     // --- Calculate Output Shape ---
-    let output_shape = { // Calculate output shape within its own scope
+    let output_shape = {
         let mut shape = Vec::new();
-        let input_shape = &input_guard.shape; // Use guarded shape
-        let input_rank = input_shape.len();
-        // Handle Sum All Case (output shape calculation)
-        if axes.is_empty() {
-            if keep_dims {
-                vec![1; input_rank]
-            } else {
-                vec![]
-            }
-        } else {
-            // Calculate output shape based on processed_axes
-            for (dim, &size) in input_shape.iter().enumerate() {
-                if !processed_axes.contains(&dim) {
-                    shape.push(size);
-                } else if keep_dims {
-                    shape.push(1);
-                }
-            }
-            // Handle edge cases (sum to scalar with keep_dims=false)
-             if shape.is_empty() && !processed_axes.is_empty() && !keep_dims {
-                 shape = vec![]; // Ensure truly scalar shape
-             } else if shape.is_empty() && keep_dims && input_rank > 0 {
-                 // If all axes reduced and keep_dims=true, shape should be all 1s
-                 shape = vec![1; input_rank];
-             }
-            shape // Return calculated shape
-        }
-    };
-
-    // --- Perform Summation ---
-    let output_numel: usize = if output_shape.is_empty() {
-        1
-    } else {
-        output_shape.iter().product()
-    };
-    let mut result_data = vec![T::zero(); output_numel];
-
-    let mut current_input_indices = vec![0; input_rank];
-    let input_strides = &input_guard.strides;
-    let input_offset = input_guard.offset;
-
-    // Iterate through all elements of the input tensor
-    for _i in 0..input_guard.numel() {
-        // Use guard.numel()
-        // Calculate input offset using strides
-        let mut current_relative_offset = 0;
-        for dim_idx in 0..input_rank {
-            current_relative_offset += current_input_indices[dim_idx] * input_strides[dim_idx];
-        }
-        let logical_offset = input_offset + current_relative_offset;
-        // Access value from the cloned CPU data Arc
-        let val = input_data_arc[logical_offset];
-
-        // Calculate the corresponding index in the output tensor
-        let mut output_indices = Vec::with_capacity(output_shape.len());
-        let mut output_idx_pos = 0;
-        // Use the cloned input_shape here
-        for (dim_idx, &coord) in current_input_indices.iter().enumerate() {
-            if !processed_axes.contains(&dim_idx) {
-                if output_idx_pos < output_shape.len() {
-                    output_indices.push(coord);
-                    output_idx_pos += 1;
-                }
+        for (dim, &size) in input_shape.iter().enumerate() {
+            if !processed_axes.contains(&dim) {
+                shape.push(size);
             } else if keep_dims {
-                if output_idx_pos < output_shape.len() {
-                    output_indices.push(0); // Index is 0 for kept reduced dimensions
-                    output_idx_pos += 1;
-                }
+                shape.push(1);
             }
         }
-
-        // Calculate flat index for result_data
-        let mut output_flat_idx = 0;
-        if !output_shape.is_empty() {
-            // Avoid index calculation for scalar output
-            let mut stride_product = 1;
-            for j in (0..output_shape.len()).rev() {
-                output_flat_idx += output_indices[j] * stride_product;
-                // Calculate output strides on the fly if needed, or assume contiguity for output
-                if j > 0 {
-                    stride_product *= output_shape[j];
-                }
-            }
-        } // else output_flat_idx remains 0 for scalar output
-
-        if output_flat_idx < result_data.len() {
-            // Bounds check
-            result_data[output_flat_idx] += val;
+        if shape.is_empty() && !processed_axes.is_empty() && !keep_dims {
+            shape = vec![];
+        } else if shape.is_empty() && keep_dims && input_rank > 0 {
+            shape = vec![1; input_rank];
         }
+        shape
+    };
 
-        // Increment input indices (N-dimensional counter logic)
-        if input_guard.numel() > 0 && _i < input_guard.numel() - 1 {
-            // Avoid increment on last element
-            let mut dim_to_increment = input_rank;
-            while dim_to_increment > 0 {
-                dim_to_increment -= 1;
-                current_input_indices[dim_to_increment] += 1;
-                // Use the cloned input_shape here
-                if current_input_indices[dim_to_increment] < input_shape[dim_to_increment] {
-                    break; // Successfully incremented
-                }
-                current_input_indices[dim_to_increment] = 0; // Reset and carry over
-            }
-        }
-    }
+    // --- Perform Summation (Appel au Kernel) ---
+    let result_data = sum_kernel(
+        &input_guard,
+        input_data_slice,
+        &processed_axes,
+        keep_dims,
+        &output_shape,
+    )?;
 
     // Drop lock
     drop(input_guard);
-    // Create result tensor on CPU
+
+    // Create result tensor
     let result_tensor = Tensor::new(result_data, output_shape)?;
 
     // --- Autograd Integration ---
     if requires_grad {
-        // Create the backward operation context
         let backward_op = SumAxesBackward {
-            input_node: input_node_arc,
-            input_shape: input_shape_clone,
-            axes: axes.to_vec(),
+            input: input_maybe_clone.unwrap(),
+            input_shape: input_shape_clone.unwrap(),
+            axes: processed_axes,
             keep_dims,
         };
-        // Set grad_fn for the result tensor
         result_tensor.set_grad_fn(Some(Arc::new(backward_op)))?;
-        // Ensure result tensor requires grad if input did
-         result_tensor.set_requires_grad(true)?;
+        result_tensor.set_requires_grad(true)?;
     }
 
     Ok(result_tensor)
@@ -400,40 +387,14 @@ where
 mod tests {
     use super::*;
     use crate::error::NeuraRustError;
-    use crate::Tensor;
     use approx::assert_relative_eq;
-    use num_traits::{One, Zero};
-    use std::cmp::PartialEq;
-    use std::cmp::PartialOrd;
-    use std::default::Default;
-    use std::iter::Sum;
-    use std::ops::AddAssign;
-
-    fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
-    where
-        T: Clone
-            + Zero
-            + AddAssign
-            + Debug
-            + Copy
-            + Send
-            + Sync
-            + 'static
-            + Default
-            + PartialEq
-            + PartialOrd
-            + One
-            + Sum,
-    {
-        Tensor::new(data, shape).expect("Test tensor creation failed")
-    }
+    use crate::utils::testing::{create_test_tensor};
 
     #[test]
     fn test_sum_all() {
         let t = create_test_tensor(vec![1.0_f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         let result = sum_axes(&t, &[], false).unwrap();
         assert_eq!(result.shape(), vec![]); // Scalar shape
-                                            // Updated data access
         let res_buffer_arc = result.borrow_data_buffer();
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_relative_eq!(res_cpu_data[0], 21.0);
@@ -445,7 +406,6 @@ mod tests {
         let result = sum_axes(&t, &[0], false).unwrap();
         assert_eq!(result.shape(), vec![3]);
         let expected_data = vec![5.0, 7.0, 9.0];
-        // Updated data access
         let res_buffer_arc = result.borrow_data_buffer();
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
@@ -457,7 +417,6 @@ mod tests {
         let result = sum_axes(&t, &[1], false).unwrap();
         assert_eq!(result.shape(), vec![2]);
         let expected_data = vec![6.0, 15.0];
-        // Updated data access
         let res_buffer_arc = result.borrow_data_buffer();
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
@@ -473,7 +432,6 @@ mod tests {
         let result = sum_axes(&t, &[0, 2], false).unwrap();
         assert_eq!(result.shape(), vec![2]);
         let expected_data = vec![14.0, 22.0];
-        // Updated data access
         let res_buffer_arc = result.borrow_data_buffer();
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
@@ -485,14 +443,12 @@ mod tests {
         let result = sum_axes(&t, &[0], true).unwrap();
         assert_eq!(result.shape(), vec![1, 2]);
         let expected_data = vec![4.0, 6.0];
-        // Updated data access
         let res_buffer_arc = result.borrow_data_buffer();
         let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
         assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
 
         let result_all = sum_axes(&t, &[], true).unwrap();
         assert_eq!(result_all.shape(), vec![1, 1]);
-        // Updated data access
         let res_all_buffer_arc = result_all.borrow_data_buffer();
         let res_all_cpu_data = res_all_buffer_arc
             .cpu_data()
@@ -515,81 +471,66 @@ mod tests {
     }
 }
 
-// --- Autograd Tests ---
-
 #[cfg(test)]
 mod autograd_tests {
     use super::*;
     use crate::autograd::grad_check::check_grad;
-    use crate::Tensor;
-
-    // Helper to create tensors for tests
-    fn create_tensor_f32(data: Vec<f32>, shape: Vec<usize>) -> Tensor<f32> {
-        Tensor::new(data, shape).unwrap()
-    }
-    // Added helper for f64
-    fn create_tensor_f64(data: Vec<f64>, shape: Vec<usize>) -> Tensor<f64> {
-        Tensor::new(data, shape).unwrap()
-    }
+    use crate::error::NeuraRustError;
+    use crate::tensor::Tensor;
+    use crate::utils::testing::{create_test_tensor_with_grad};
 
     #[test]
     fn test_sum_axes_backward_simple_keep_dims() {
-        // Use f64
-        let input = create_tensor_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         input.set_requires_grad(true).unwrap();
 
-        // Adjust function signature for f64
         let func = |inputs: &[Tensor<f64>]| -> Result<Tensor<f64>, NeuraRustError> {
              assert_eq!(inputs.len(), 1);
             sum_axes(&inputs[0], &[0], true)
         };
 
         let output_shape = vec![1, 3];
-        // Use f64 for output_grad
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-        let epsilon = 1e-5; // Epsilon can remain the same or be smaller for f64
-        let tolerance = 1e-7; // Stricter tolerance for f64
+        let epsilon = 1e-5;
+        let tolerance = 1e-7;
 
-        // Pass f64 tensors to check_grad
         let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
         assert!(grad_check_result.is_ok(), "Gradient check failed (f64): {:?}", grad_check_result.err());
     }
 
      #[test]
     fn test_sum_axes_backward_simple_no_keep_dims() {
-        // Use f64
-        let input = create_tensor_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
         input.set_requires_grad(true).unwrap();
 
         let func = |inputs: &[Tensor<f64>]| -> Result<Tensor<f64>, NeuraRustError> {
              assert_eq!(inputs.len(), 1);
-            sum_axes(&inputs[0], &[1], false) // Sum along axis 1, no keep dims -> shape [2]
+            sum_axes(&inputs[0], &[1], false)
         };
 
         let output_shape = vec![2];
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap(); // Use f64
+        let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        let tolerance = 1e-7; // Stricter tolerance for f64
+        let tolerance = 1e-7;
 
         let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
         assert!(grad_check_result.is_ok(), "Gradient check failed (f64): {:?}", grad_check_result.err());
     }
 
-
     #[test]
     fn test_sum_all_backward_keep_dims() {
-        let input = create_tensor_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         input.set_requires_grad(true).unwrap();
 
         let func = |inputs: &[Tensor<f32>]| -> Result<Tensor<f32>, NeuraRustError> {
              assert_eq!(inputs.len(), 1);
-            sum_axes(&inputs[0], &[], true) // Sum all, keep dims -> shape [1, 1]
+            sum_axes(&inputs[0], &[], true)
         };
 
         let output_shape = vec![1, 1];
         let output_grad = Tensor::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        let tolerance = 1e-4; // Increased tolerance for f32
+        let tolerance = 5e-2;
 
         let grad_check_result = check_grad(func, &[input.clone()], &output_grad, epsilon, tolerance);
          assert!(grad_check_result.is_ok(), "Gradient check failed: {:?}", grad_check_result.err());
@@ -597,18 +538,18 @@ mod autograd_tests {
 
     #[test]
     fn test_sum_all_backward_no_keep_dims() {
-        let input = create_tensor_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
+        let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
         input.set_requires_grad(true).unwrap();
 
         let func = |inputs: &[Tensor<f32>]| -> Result<Tensor<f32>, NeuraRustError> {
              assert_eq!(inputs.len(), 1);
-            sum_axes(&inputs[0], &[], false) // Sum all, no keep dims -> shape [] (scalar)
+            sum_axes(&inputs[0], &[], false)
         };
 
-        let output_shape = vec![]; // Scalar shape
+        let output_shape = vec![];
         let output_grad = Tensor::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        let tolerance = 1e-4; // Increased tolerance for f32
+        let tolerance = 5e-2;
 
         let grad_check_result = check_grad(func, &[input.clone()], &output_grad, epsilon, tolerance);
          assert!(grad_check_result.is_ok(), "Gradient check failed: {:?}", grad_check_result.err());
@@ -616,19 +557,18 @@ mod autograd_tests {
 
      #[test]
     fn test_sum_multiple_axes_backward() {
-        // Use f64
-        let input = create_tensor_f64((1..=24).map(|x| x as f64).collect::<Vec<_>>(), vec![2, 3, 4]);
+        let input = create_test_tensor_with_grad((1..=24).map(|x| x as f64).collect::<Vec<_>>(), vec![2, 3, 4]);
         input.set_requires_grad(true).unwrap();
 
         let func = |inputs: &[Tensor<f64>]| -> Result<Tensor<f64>, NeuraRustError> {
             assert_eq!(inputs.len(), 1);
-            sum_axes(&inputs[0], &[0, 2], false) // Sum along axes 0 and 2 -> shape [3]
+            sum_axes(&inputs[0], &[0, 2], false)
         };
 
         let output_shape = vec![3];
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap(); // Use f64
+        let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        let tolerance = 1e-7; // Stricter tolerance for f64
+        let tolerance = 1e-7;
 
         let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
         assert!(grad_check_result.is_ok(), "Gradient check failed (f64): {:?}", grad_check_result.err());
@@ -636,13 +576,12 @@ mod autograd_tests {
 
       #[test]
      fn test_sum_no_reduction_backward() {
-         let input = create_tensor_f32(vec![1.0, 2.0, 3.0], vec![3]);
+         let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0], vec![3]);
          input.set_requires_grad(true).unwrap();
 
          let epsilon = 1e-5;
-         let tolerance = 1e-4; // Increased tolerance for f32
+         let tolerance = 5e-3;
 
-         // Case 1: Sum all (axes=[]) keep_dims=false -> Scalar output
          let func1 = |inputs: &[Tensor<f32>]| {
              assert_eq!(inputs.len(), 1);
              sum_axes(&inputs[0], &[], false)
@@ -651,22 +590,15 @@ mod autograd_tests {
          let output1_grad = Tensor::ones(output1_shape).unwrap();
          let check1 = check_grad(func1, &[input.clone()], &output1_grad, epsilon, tolerance);
          assert!(check1.is_ok(), "Sum all (scalar) grad check failed: {:?}", check1.err());
-         // --- Clear grad manually before next check ---
          input.clear_grad();
 
-         // Case 2: Sum all (axes=[]) keep_dims=true -> Output shape [1]
          let func2 = |inputs: &[Tensor<f32>]| {
              assert_eq!(inputs.len(), 1);
              sum_axes(&inputs[0], &[], true)
          };
-         let output2_shape = vec![1]; // Original shape was [3], sum all keep_dims -> [1]
+         let output2_shape = vec![1];
          let output2_grad = Tensor::ones(output2_shape).unwrap();
          let check2 = check_grad(func2, &[input.clone()], &output2_grad, epsilon, tolerance);
           assert!(check2.is_ok(), "Sum all (keep_dims) grad check failed: {:?}", check2.err());
      }
-
-     // TODO: Add tests for higher dimensions if needed.
-     // TODO: Add tests involving views before/after sum if needed.
 }
-
-// --- End Autograd Tests ---

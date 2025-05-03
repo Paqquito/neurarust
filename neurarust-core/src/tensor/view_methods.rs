@@ -3,7 +3,7 @@ use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use std::fmt::Debug; // Keep Debug for T bound and contiguous helper
-use std::iter::{Product, Sum}; // Added Sum
+use std::iter::Sum; // Added Sum
 use std::marker::Copy; // Keep Copy for T bound and contiguous helper
 use std::ops::AddAssign; // Added AddAssign
 use num_traits::{One, Zero}; // Added One, Zero
@@ -44,7 +44,7 @@ impl<T: 'static + Debug + Copy + Default + Send + Sync + Zero + One + AddAssign 
     /// Creates a view of the tensor by slicing along specified dimensions.
     pub fn slice(&self, ranges: &[crate::ops::view::SliceArg]) -> Result<Self, NeuraRustError>
     where
-        T: Default + Send + Sync,
+        // T: std::iter::Product,
     {
         crate::ops::view::slice_op(self, ranges)
     }
@@ -52,7 +52,7 @@ impl<T: 'static + Debug + Copy + Default + Send + Sync + Zero + One + AddAssign 
     /// Creates a view of the tensor with two dimensions transposed.
     pub fn transpose(&self, dim1: usize, dim2: usize) -> Result<Self, NeuraRustError>
     where
-        T: Default + Send + Sync,
+        // T: std::iter::Product,
     {
         crate::ops::view::transpose_op(self, dim1, dim2)
     }
@@ -60,7 +60,7 @@ impl<T: 'static + Debug + Copy + Default + Send + Sync + Zero + One + AddAssign 
     /// Creates a view of the tensor with dimensions permuted according to the specified order.
     pub fn permute(&self, dims: &[usize]) -> Result<Self, NeuraRustError>
     where
-        T: Default + Send + Sync,
+        // T: std::iter::Product,
     {
         crate::ops::view::permute_op(self, dims)
     }
@@ -68,7 +68,7 @@ impl<T: 'static + Debug + Copy + Default + Send + Sync + Zero + One + AddAssign 
     /// Creates a view of the tensor with a different shape.
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<Self, NeuraRustError>
     where
-        T: Default + Send + Sync,
+        // T: std::iter::Product,
     {
         crate::ops::view::reshape_op(self, new_shape)
     }
@@ -76,7 +76,9 @@ impl<T: 'static + Debug + Copy + Default + Send + Sync + Zero + One + AddAssign 
     /// Returns a contiguous version of the tensor.
     pub fn contiguous(&self) -> Result<Self, NeuraRustError>
     where
-        T: Product,
+        // Contiguous ne devrait pas appeler d'ops nécessitant Product
+        T: Clone + Send + Sync,
+        // + std::iter::Product,
     {
         if self.is_contiguous() {
             Ok(self.clone()) // Use Self::clone() which is defined in traits.rs

@@ -98,7 +98,8 @@ where
         + AbsDiffEq<Epsilon = T>
         + RelativeEq<Epsilon = T>
         + UlpsEq<Epsilon = T> // For approx comparison
-        + 'static,
+        + 'static
+        + std::iter::Product,
     F: Fn(&[Tensor<T>]) -> Result<Tensor<T>, NeuraRustError>,
 {
     // --- Constants ---

@@ -295,13 +295,42 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
     *   ✅ **Implement `MatmulBackward` (2D):** Define, implement `BackwardOp` (matrix math), modify forward op (`matmul_op`), test.
 
 *   **1.10 Tensor API & Data Type Expansion [🚧 In Progress]**
-    *   🎯 Goal: Enhance `Tensor` usability and type support. *(Content from original 1.4)*
-    *   ✅ Implement Creation Methods (`arange`, `linspace`, `eye`, `rand`, `randn`).
-    *   ⏳ `DType` Handling.
-    *   ⏳ Type Promotion Logic.
-    *   ⏳ Implement Type Conversion (`Tensor::cast`).
-    *   ⏳ Implement `detach()`.
-    *   ⏳ Implement In-place Ops (`add_`, `mul_`, ...).
+    *   🎯 Goal: Enhance `Tensor` usability and type support.
+    *   ✅ Implement Creation Methods (`arange`, `linspace`, `eye`, `rand`, `randn`). *(Note: Will need dtype argument later)*
+    *   **`DType` Handling (Decomposed):**
+        *   **Phase 1.10.A: Foundations (F32 Only) [⏳ To Do]**
+            *   ⏳ Define `DType` enum (in `src/types.rs`?) with `F32`.
+            *   ⏳ Define `Buffer` enum (in `src/buffer.rs`) with `Cpu(CpuBuffer)` and `CpuBuffer::F32(Arc<Vec<f32>>)`.
+            *   ⏳ Adapt `TensorData`: Remove `<T>`, add `dtype: DType`, use `Buffer`, adapt methods for `F32`.
+            *   ⏳ Adapt `Tensor`: Remove `<T>`, adapt methods, `Tensor::new` for `Vec<f32>`.
+            *   ⏳ Adapt `add_op`: Make non-generic, `match` for `(F32, F32)` only, consider `add_kernel_f32` extraction.
+            *   ⏳ Adapt `AddBackward`: Make non-generic, adapt logic for `F32`, adapt `reduce_gradient_to_shape`.
+            *   ⏳ Implement `Tensor::detach()`: Create view detached from autograd graph.
+            *   ⏳ Update tests for `TensorData`, `Tensor`, `add_op`, `AddBackward`, `detach` to use non-generic API with `f32`.
+        *   **Phase 1.10.B: Add Second DType (e.g., I64) [⏳ To Do]**
+            *   ⏳ Extend `DType` enum with `I64`.
+            *   ⏳ Extend `Buffer`/`CpuBuffer` enums with `I64` variant.
+            *   ⏳ Adapt creation functions (`Tensor::new`, `zeros`, `ones`, `full`) to accept `DType::I64`.
+            *   ⏳ Extend `add_op`: Add `match` branch for `(I64, I64)`, implement `add_kernel_i64`.
+            *   ⏳ Verify/adapt `AddBackward` for `I64` gradients.
+            *   ⏳ Add tests for creation and `add_op` with `I64`.
+        *   **Phase 1.10.C: Mixed Types & Conversion [⏳ To Do]**
+            *   ⏳ Implement Type Promotion Logic: Define rules (e.g., `f32 + i64 -> f32`) and implement in `add_op` `match`.
+            *   ⏳ Implement `Tensor::cast(dtype: DType)`: Logic to convert between buffer types.
+            *   ⏳ Finalize promotion logic in `add_op` using `cast`.
+            *   ⏳ Add tests for `cast` and `add_op` with mixed types.
+        *   **Phase 1.10.D: Extend to Other Ops & DTypes [⏳ To Do]**
+            *   ⏳ Adapt other ops (`mul`, `div`, `matmul`, `relu`, `sum`, etc.) progressively, handling DType dispatch, kernels, and promotion.
+            *   ⏳ Add other DTypes (`Bool`, `F64`, etc.) progressively, updating `DType`, `Buffer`, creation, and relevant ops.
+        *   **Phase 1.10.E: In-place Operations [⏳ To Do]**
+            *   ⏳ Implement in-place ops (`add_`, `mul_`, ...) for supported DTypes.
+            *   ⏳ Ensure strict DType matching (no implicit promotion).
+            *   ⏳ Handle autograd implications (e.g., error if modifying tensor needed for backward, or implement versioning).
+            *   ⏳ Dependency: Requires corresponding standard op (e.g., `add`) to support the necessary DTypes (from Phase 1.10.D).
+    *   *(Type Promotion Logic covered by 1.10.C)*
+    *   *(Type Conversion (`Tensor::cast`) covered by 1.10.C)*
+    *   *(detach() covered by 1.10.A)*
+    *   *(In-place Ops covered by 1.10.E)*
 
 *   **1.11 Testing & Documentation Consolidation [⏳ To Do]**
     *   🎯 Goal: Ensure comprehensive testing and documentation for Phase 1 features. *(Content from original 1.5)*

@@ -6,4 +6,4 @@ pub mod mean;
 
 // Add re-export for sum_axes
 pub use sum::sum_axes;
-pub use mean::mean_op;
+pub use mean::mean_axes;

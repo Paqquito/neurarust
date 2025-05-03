@@ -1,21 +1,22 @@
 use crate::autograd::graph::NodeId;
 use crate::autograd::BackwardOp;
-// use crate::device::StorageDevice; // Removed unused import
 use crate::error::NeuraRustError;
-use crate::ops::reduction::sum::sum_axes;
+use crate::device::StorageDevice;
+use crate::ops::reduction::sum::{sum_kernel};
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use num_traits::{FromPrimitive, One, Zero};
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Div, Neg};
-use std::sync::{Arc, RwLock};
+use std::ops::{Add, AddAssign, Div, Neg, Sub, Mul};
+use std::sync::{Arc, RwLockReadGuard};
+use std::iter::Sum;
 
 // --- MeanBackward Definition ---
 
 /// Backward operation context for `mean_axes`.
 #[derive(Debug)]
 struct MeanBackward<T: Debug + Copy + Send + Sync + 'static> {
-    input_node: Arc<RwLock<TensorData<T>>>,
+    input: Tensor<T>,
     input_shape: Vec<usize>,
     axes: Vec<usize>,
     keep_dims: bool,
@@ -38,10 +39,13 @@ where
         + AddAssign
         + Div<Output = T>
         + Neg<Output = T>
+        + Mul<Output = T>
         + Default
         + PartialEq
         + std::iter::Sum
-        + PartialOrd,
+        + PartialOrd
+        + Sub<Output = T>
+        + std::iter::Product,
 {
     fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
         // Calculate gradient scaled by 1/N
@@ -177,82 +181,199 @@ where
     }
 
     fn inputs(&self) -> Vec<NodeId<T>> {
-        vec![Arc::as_ptr(&self.input_node)]
+        vec![self.input.get_node_id()]
     }
+}
+
+// --- Kernel de Calcul ---
+
+/// Noyau de calcul privé pour la moyenne avec réduction d'axes.
+fn mean_kernel<T>(
+    input_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    input_data_slice: &[T],
+    axes: &[usize],
+    keep_dims: bool,
+    output_shape: &[usize], // La shape après réduction
+    n: T,                   // Le nombre d'éléments moyennés (déjà calculé)
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Copy
+        + Debug
+        + Zero
+        + AddAssign
+        + Div<Output = T> // Ajout pour la division
+        + Send // Ajoutés pour correspondre aux appels internes si nécessaire
+        + Sync
+        + PartialEq // Ajout pour la comparaison n == T::zero()
+        + 'static,
+{
+    // 1. Calculer la somme en utilisant le kernel de sum
+    let sum_data = sum_kernel(input_guard, input_data_slice, axes, keep_dims, output_shape)?;
+
+    // 2. Diviser chaque élément par N
+    // Vérifier si N est zéro pour éviter la division par zéro.
+    // Bien que N soit généralement > 0, une bonne pratique est de vérifier.
+    if n == T::zero() {
+        // Que faire ? Retourner une erreur ou un vecteur de zéros/NaN ?
+        // Retourner une erreur semble plus sûr.
+        return Err(NeuraRustError::DivisionByZero);
+    }
+
+    let mean_data: Vec<T> = sum_data.into_iter().map(|val| val / n).collect();
+
+    Ok(mean_data)
 }
 
 // --- mean_op Implementation ---
 
 /// Calculates the mean of elements along specified axes.
-/// Currently supports CPU only.
-pub fn mean_op<T>(
+/// Requires the tensor to be on CPU.
+/// Supports autograd.
+pub fn mean_axes<T>(
     input: &Tensor<T>,
     axes: &[usize],
     keep_dims: bool,
 ) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Clone
-        + Zero
-        + One // For division in backward
+    T: Div<Output = T>
+        + Mul<Output = T>
+        + Neg<Output = T>
+        + Sub<Output = T>
+        + FromPrimitive
+        + Add<Output = T>
         + AddAssign
-        + Div<Output = T> // For division by N
-        + FromPrimitive // To convert usize N to T
-        + Debug
-        + Copy
+        + Sum
+        + PartialOrd
+        + std::iter::Product
         + Send
         + Sync
         + 'static
+        + Debug
+        + Copy
+        + Clone
         + Default
         + PartialEq
-        + PartialOrd
-        + std::iter::Sum
-        + Add<Output = T>
-        + Neg<Output = T>,
+        + Zero
+        + One,
 {
-    // Calculate sum using sum_axes
-    let sum_result = sum_axes(input, axes, keep_dims)?;
+    // --- Autograd Setup ---
+    let requires_grad = input.requires_grad();
+    let mut input_maybe_clone: Option<Tensor<T>> = None;
+    if requires_grad {
+        input_maybe_clone = Some(input.clone());
+    }
 
-    // Calculate N (number of elements summed over)
-    let n = {
-        let input_shape = input.shape();
-        let input_rank = input_shape.len();
-        if axes.is_empty() {
-            input.numel()
-        } else {
-            let mut count = 1;
+    // --- Acquire read lock ---
+    let input_guard = input.read_data();
+
+    // --- Device Check ---
+    let device = input_guard.device;
+    if device != StorageDevice::CPU {
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Mean operation is currently only supported on CPU, not {:?}",
+            device
+        )));
+    }
+
+    // --- Get CPU Data Buffer ---
+    let input_data_arc = input_guard.data.cpu_data()?.clone();
+    let input_data_slice = input_data_arc.as_slice();
+
+    // --- Shape and Axis Validation / Calculation de N ---
+    let input_shape = input_guard.shape.clone();
+    let input_rank = input_shape.len();
+
+    let processed_axes = {
+        let mut pa = Vec::new();
+        if !axes.is_empty() {
             for &axis in axes {
-                if axis < input_rank {
-                    count *= input_shape[axis];
+                if axis >= input_rank {
+                    drop(input_guard);
+                    return Err(NeuraRustError::IndexOutOfBounds {
+                        index: vec![axis],
+                        shape: input_shape.clone(),
+                    });
                 }
-                // Ignore invalid axes for count, sum_axes would have errored already
+                pa.push(axis);
             }
-            count
+            pa.sort_unstable();
+            pa.dedup();
         }
+        pa
     };
 
-    // Convert N to type T
+    let n = {
+        if processed_axes.is_empty() {
+            input_guard.numel()
+        } else {
+            processed_axes.iter().map(|&axis| input_shape[axis]).product()
+        }
+    };
     let n_t = T::from_usize(n).ok_or_else(|| {
         NeuraRustError::InternalError("Failed to convert element count N to tensor type T".to_string())
     })?;
+    if n_t == T::zero() && n > 0 {
+         return Err(NeuraRustError::InternalError("Calculated N > 0 but T::from_usize(N) resulted in T::zero()".to_string()));
+    }
 
-    // Divide sum by N
-    let n_tensor = Tensor::full(sum_result.shape(), n_t)?;
-    let mean_result = crate::ops::arithmetic::div::div_op(&sum_result, &n_tensor)?;
+    // --- Calculate Output Shape ---
+    let output_shape = {
+        let mut shape = Vec::new();
+        for (dim, &size) in input_shape.iter().enumerate() {
+            if !processed_axes.contains(&dim) {
+                shape.push(size);
+            } else if keep_dims {
+                shape.push(1);
+            }
+        }
+        if shape.is_empty() && !processed_axes.is_empty() && !keep_dims {
+            shape = vec![]; // Reduce to scalar
+        } else if shape.is_empty() && keep_dims && input_rank > 0 {
+            // keep_dims=true and all axes reduced or input was scalar
+             shape = vec![1; input_rank];
+        } else if shape.is_empty() && input_rank == 0 {
+             // Input was scalar, output is scalar
+             shape = vec![];
+        } else if processed_axes.is_empty() && !keep_dims {
+            shape = vec![]; // mean_all sans keep_dims -> scalaire
+        }
+        shape
+    };
+
+
+    // --- Perform Mean Calculation (Appel au Kernel) ---
+    let result_data = mean_kernel(
+        &input_guard,
+        input_data_slice,
+        &processed_axes,
+        keep_dims,
+        &output_shape,
+        n_t, // Passer n_t calculé
+    )?;
+
+    // Drop lock
+    drop(input_guard);
+
+    // --- Create Result Tensor ---
+    let result_tensor = Tensor::new(result_data, output_shape)?;
+
 
     // --- Autograd Integration ---
-    if input.requires_grad() {
+    if requires_grad {
+        // On utilise input_maybe_clone.unwrap() car on a vérifié requires_grad
+        let input_clone = input_maybe_clone.unwrap();
         let grad_fn = MeanBackward {
-            input_node: input.data.clone(),
-            input_shape: input.shape(),
-            axes: axes.to_vec(),
+            input: input_clone.clone(), // Passer le Tensor cloné
+            input_shape: input_clone.shape(), // Obtenir la shape du clone
+            axes: processed_axes,
             keep_dims,
             n: n_t,
         };
-        mean_result.set_grad_fn(Some(Arc::new(grad_fn)))?;
-         mean_result.set_requires_grad(true)?;
+        result_tensor.set_grad_fn(Some(Arc::new(grad_fn)))?;
+         result_tensor.set_requires_grad(true)?;
     }
 
-    Ok(mean_result)
+    Ok(result_tensor)
 }
 
 // --- Tests ---
@@ -269,7 +390,7 @@ mod tests {
     #[test]
     fn test_mean_all() {
         let t = create_tensor_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let result = mean_op(&t, &[], false).unwrap();
+        let result = mean_axes(&t, &[], false).unwrap();
         assert_eq!(result.shape(), vec![]);
         assert_relative_eq!(result.get(&[]).unwrap(), 3.5);
     }
@@ -277,7 +398,7 @@ mod tests {
     #[test]
     fn test_mean_axis_0() {
         let t = create_tensor_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let result = mean_op(&t, &[0], false).unwrap();
+        let result = mean_axes(&t, &[0], false).unwrap();
         assert_eq!(result.shape(), vec![3]);
         let expected_data = vec![2.5, 3.5, 4.5]; // (1+4)/2, (2+5)/2, (3+6)/2
         let res_data = result.read_data().data.cpu_data().unwrap().clone();
@@ -301,7 +422,7 @@ mod tests {
     #[test]
     fn test_mean_all_backward() {
         let input = create_tensor_f64_with_grad(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let func = |inputs: &[Tensor<f64>]| mean_op(&inputs[0], &[], false);
+        let func = |inputs: &[Tensor<f64>]| mean_axes(&inputs[0], &[], false);
 
         let output_shape = vec![];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
@@ -315,7 +436,7 @@ mod tests {
     #[test]
     fn test_mean_axis_0_backward() {
         let input = create_tensor_f64_with_grad(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let func = |inputs: &[Tensor<f64>]| mean_op(&inputs[0], &[0], false);
+        let func = |inputs: &[Tensor<f64>]| mean_axes(&inputs[0], &[0], false);
 
         let output_shape = vec![3];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
@@ -329,7 +450,7 @@ mod tests {
      #[test]
     fn test_mean_axis_1_keep_dims_backward() {
         let input = create_tensor_f64_with_grad(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
-        let func = |inputs: &[Tensor<f64>]| mean_op(&inputs[0], &[1], true);
+        let func = |inputs: &[Tensor<f64>]| mean_axes(&inputs[0], &[1], true);
 
         let output_shape = vec![2, 1];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
@@ -343,7 +464,7 @@ mod tests {
     #[test]
     fn test_mean_multiple_axes_backward() {
         let input = create_tensor_f64_with_grad((1..=24).map(|x| x as f64).collect(), vec![2, 3, 4]);
-        let func = |inputs: &[Tensor<f64>]| mean_op(&inputs[0], &[0, 2], false);
+        let func = |inputs: &[Tensor<f64>]| mean_axes(&inputs[0], &[0, 2], false);
 
         let output_shape = vec![3];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();

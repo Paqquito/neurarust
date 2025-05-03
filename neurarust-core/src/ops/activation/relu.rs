@@ -6,7 +6,8 @@ use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use num_traits::{One, Zero};
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign};
+use std::ops::{Add, AddAssign, Mul};
+use std::iter::Sum;
 use std::sync::{Arc, RwLock};
 
 // --- ReluBackward Definition (Corrected) ---
@@ -27,16 +28,17 @@ where
         + Send
         + Sync
         + 'static
+        + Default
         + Clone
         + Zero
         + One
-        + Add<Output = T> // For autograd context propagation
-        + AddAssign // For autograd context propagation
-        + std::ops::Mul<Output = T> // For grad_output * mask
-        + PartialOrd // For comparison > 0
-        + Default
+        + AddAssign
+        + Add<Output = T>
+        + Mul<Output = T>
+        + Sum
         + PartialEq
-        + std::iter::Sum, // For autograd context propagation
+        + PartialOrd
+        + std::iter::Product,
 {
     fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
         let input_guard = self.input_node.read().map_err(|poison_err| {
@@ -95,7 +97,7 @@ where
 
 // --- relu_op Implementation (Corrected Autograd Linkage) ---
 
-/// Applies the Rectified Linear Unit (ReLU) function element-wise.
+/// Applies the Rectified Linear Unit (ReLU) activation function element-wise.
 /// ReLU(x) = max(0, x)
 /// Currently supports CPU only.
 pub fn relu_op<T>(input: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
@@ -114,7 +116,8 @@ where
         + std::ops::Mul<Output = T> // For backward
         + Default
         + PartialEq
-        + std::iter::Sum, // For backward autograd context
+        + std::iter::Sum
+        + std::iter::Product, // GARDER Product
 {
     let requires_grad = input.requires_grad();
     // Clone the Arc for the input node *before* reading data

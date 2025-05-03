@@ -16,7 +16,8 @@ where
         + PartialEq
         + Sum
         + num_traits::One
-        + PartialOrd,
+        + PartialOrd
+        + std::iter::Product,
 {
     /// Reduces the tensor (gradient) to match a target shape by summing along broadcasted dimensions.
     ///
@@ -31,7 +32,7 @@ where
     /// # Returns
     /// * `Ok(Tensor<T>)` containing the reduced tensor.
     /// * `Err(NeuraRustError)` if reduction is not possible or an internal error occurs.
-    pub fn reduce_sum_for_broadcast(
+    pub fn reduce_to_shape(
         &self,
         target_shape: &[usize],
     ) -> Result<Tensor<T>, NeuraRustError> {
@@ -115,6 +116,105 @@ where
                 // the dimensions that were 1 in the target shape.
                 // Let's try reshaping directly.
                  crate::ops::view::reshape_op(&reduced_grad, target_shape.to_vec())
+            }
+        }
+    }
+
+    /// Expands a gradient tensor to match the shape of the original tensor it corresponds to.
+    ///
+    /// # Arguments
+    /// * `target_shape`: The shape the gradient tensor should be expanded to.
+    ///
+    /// # Returns
+    /// * `Ok(Tensor<T>)` containing the expanded gradient tensor.
+    /// * `Err(NeuraRustError)` if expansion is not possible or an internal error occurs.
+    pub fn expand_gradient_to_shape(
+        &self, // The gradient tensor
+        target_shape: &[usize],
+    ) -> Result<Tensor<T>, NeuraRustError>
+    where
+        T: Clone // Clone is necessary for Tensor::new
+    {
+        let current_shape = self.shape();
+
+        // If shapes match, no expansion needed.
+        if current_shape == target_shape {
+            return Ok(self.clone());
+        }
+
+        // Handle expansion to scalar
+        if target_shape.is_empty() {
+            if self.numel() == 1 {
+                 // Already effectively scalar, reshape if needed (e.g., from [1])
+                 return crate::ops::view::reshape_op(self, vec![]);
+            }
+            // Sum all elements if target is scalar and current is not
+            let axes_to_expand: Vec<usize> = (0..current_shape.len()).collect();
+            return sum_axes(self, &axes_to_expand, false);
+        }
+
+        let current_rank = current_shape.len();
+        let target_rank = target_shape.len();
+
+        // Check if ranks are compatible for broadcast expansion
+        if current_rank > target_rank {
+            return Err(NeuraRustError::InternalError(format!(
+                "Cannot expand gradient shape {:?} to target {:?}: Current rank is greater than target rank.",
+                current_shape, target_shape
+            )));
+        }
+
+        let rank_diff = target_rank - current_rank;
+        let mut axes_to_expand: Vec<usize> = (0..rank_diff).collect(); // Axes added during broadcast
+
+        for i in 0..current_rank {
+            let current_dim = current_shape[i];
+            let target_dim = target_shape[i];
+
+            if current_dim != target_dim {
+                if current_dim == 1 {
+                    // This dimension was expanded from 1, expand along it.
+                    axes_to_expand.push(i);
+                } else {
+                    // Shapes mismatch in a non-broadcastable way (current is not 1)
+                    return Err(NeuraRustError::InternalError(format!(
+                        "Cannot expand gradient shape {:?} to target {:?}: Incompatible dimension {} (size {} vs target size {}).",
+                        current_shape, target_shape, i, current_dim, target_dim
+                    )));
+                }
+            }
+        }
+
+        if axes_to_expand.is_empty() {
+             // This case should ideally be caught by the initial `current_shape == target_shape` check,
+             // but we add a safeguard.
+            if current_shape == target_shape { // Double check shapes if no axes found
+                Ok(self.clone())
+            } else {
+                 Err(NeuraRustError::InternalError(format!(
+                     "Cannot expand gradient shape {:?} to {:?}: Shapes differ but no expansion axes identified.",
+                     current_shape, target_shape
+                 )))
+            }
+        } else {
+            // Perform expansion along the identified axes.
+            // keep_dims=true simplifies reshaping later.
+            let expanded_grad = sum_axes(self, &axes_to_expand, true)?;
+
+            // Reshape the result to match the target shape EXACTLY.
+            // sum_axes with keep_dims=true will keep the rank, but dimensions summed will be 1.
+            // Reshape is needed to remove these dimensions if the target_shape doesn't have them
+            // (e.g., expanding [2, 5] to [2, 5] should result in shape [2, 5], not [1, 2, 5]).
+            // However, reshape might fail if the tensor is not contiguous after sum_axes.
+            // TODO: Ensure sum_axes output is contiguous or handle non-contiguous reshape.
+            // For now, assume sum_axes output is contiguous or reshape can handle it.
+            if expanded_grad.shape() == target_shape {
+                 Ok(expanded_grad)
+            } else {
+                // If shapes don't match after sum_axes(keep_dims=true), it means we need to expand
+                // the dimensions that were 1 in the current shape.
+                // Let's try reshaping directly.
+                 crate::ops::view::reshape_op(&expanded_grad, target_shape.to_vec())
             }
         }
     }

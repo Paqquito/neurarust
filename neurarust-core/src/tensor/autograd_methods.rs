@@ -53,7 +53,7 @@ impl<
     /// Accumulates the given gradient into the tensor's `grad` field.
     pub fn acc_grad(&self, grad_to_add: Tensor<T>) -> Result<(), NeuraRustError>
     where
-        T: Add<Output = T> + AddAssign + Zero + One + Sum + PartialEq + Default + Send + Sync,
+        T: Add<Output = T> + AddAssign + Zero + One + Sum + PartialEq + Default + Send + Sync + std::iter::Product,
     {
         let mut guard = self.write_data();
 

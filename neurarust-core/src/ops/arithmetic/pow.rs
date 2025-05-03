@@ -44,7 +44,8 @@ where
         + Default
         + PartialEq
         + PartialOrd
-        + std::iter::Sum, // For reduce_sum_for_broadcast
+        + std::iter::Sum
+        + std::iter::Product, // Added Product
 {
     fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
         let mut input_grads: Vec<Tensor<T>> = Vec::with_capacity(2);
@@ -147,7 +148,7 @@ where
             }
             let grad_base_unreduced = Tensor::new(grad_base_data, output_broadcast_shape.clone())?;
             // Reduce gradient if base was broadcasted
-            let grad_base = grad_base_unreduced.reduce_sum_for_broadcast(&base_guard.shape)?;
+            let grad_base = grad_base_unreduced.reduce_to_shape(&base_guard.shape)?;
             input_grads.push(grad_base);
         }
 
@@ -217,7 +218,7 @@ where
             }
             let grad_exponent_unreduced = Tensor::new(grad_exp_data, output_broadcast_shape.clone())?;
             // Reduce gradient if exponent was broadcasted
-            let grad_exponent = grad_exponent_unreduced.reduce_sum_for_broadcast(&exponent_guard.shape)?;
+            let grad_exponent = grad_exponent_unreduced.reduce_to_shape(&exponent_guard.shape)?;
             input_grads.push(grad_exponent);
         }
 
@@ -255,7 +256,8 @@ where
         + Default
         + PartialEq
         + PartialOrd
-        + std::iter::Sum,
+        + std::iter::Sum
+        + std::iter::Product,
 {
     let base_requires_grad = base.requires_grad();
     let exponent_requires_grad = exponent.requires_grad();
