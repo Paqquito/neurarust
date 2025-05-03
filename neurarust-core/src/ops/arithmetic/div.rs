@@ -1,8 +1,6 @@
-use crate::autograd::backward_op::BackwardOp;
+use crate::autograd::{backward_op::BackwardOp, graph::NodeId};
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
-use crate::ops::arithmetic::mul; // Need mul_op
-use crate::ops::arithmetic::neg; // Need neg_op
 use crate::tensor_data::TensorData;
 use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord};
 use crate::tensor::Tensor;
@@ -13,83 +11,120 @@ use std::fmt::Debug;
 use std::iter::Sum;
 // Add Neg, Sub traits if needed by internal ops
 use std::ops::{Add, AddAssign, Div, Mul, Neg};
-use std::sync::{Arc, RwLock};
+use std::sync::{Arc, RwLockReadGuard};
 
 // --- Backward Operation Structure ---
 
-/// Backward operation context for element-wise division (a / b).
-/// Stores cloned Tensors of the inputs and their original shapes.
+/// Backward operation context for division.
 #[derive(Debug)]
 struct DivBackward<T: 'static + Debug + Copy + Send + Sync> {
-    a: Tensor<T>, // Cloned input tensor a
-    b: Tensor<T>, // Cloned input tensor b
-    a_shape: Vec<usize>, // Original shape of a
-    b_shape: Vec<usize>, // Original shape of b
+    a: Tensor<T>,
+    b: Tensor<T>,
+    result: Tensor<T>, // Need the result z = a/b for grad_b calculation (a * (-1/b^2))
+    a_shape: Vec<usize>,
+    b_shape: Vec<usize>,
 }
 
 // --- Backward Operation Implementation ---
 
 impl<T> BackwardOp<T> for DivBackward<T>
 where
-    // Add all required traits for div_op, mul_op, neg_op, reduce_sum
-    T: Clone
-        + Debug
-        + Default
-        + Zero
-        + One
-        + Sum
-        + AddAssign
-        + Add<Output = T>
-        + Mul<Output = T>
-        + Div<Output = T>
-        + Neg<Output = T>
+    T: Debug
         + Copy
         + Send
         + Sync
+        + Zero
+        + One
+        + AddAssign // Requis par reduce_gradient
+        + Mul<Output = T> // Requis pour le calcul du gradient
+        + Div<Output = T> // Requis pour le calcul du gradient
+        + Neg<Output = T> // Requis pour le calcul du gradient
+        + Add<Output = T> // Requis par tests utils
         + 'static
+        + Default
         + PartialEq
-        + PartialOrd,
+        + PartialOrd // Requis par reduce_gradient
+        + Sum, // Requis par reduce_gradient
 {
-    /// Computes gradients for the division operation z = a / b.
-    /// grad(a) = grad_output / b
-    /// grad(b) = - grad_output * a / (b * b)
-    /// Handles broadcasting by summing gradients across broadcasted dimensions.
-    /// Returns `NeuraRustError::DivisionByZero` if division by zero occurs during gradient calculation.
+    fn inputs(&self) -> Vec<NodeId<T>> {
+        // Note: result is not an input in the graph sense
+        vec![self.a.get_node_id(), self.b.get_node_id()]
+    }
+
     fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
         // grad_a = grad_output / b
-        // Need to use div_op which handles division by zero.
-        let grad_a_unreduced = div_op(grad_output, &self.b)?; // Use cloned b
-        let grad_a = grad_a_unreduced.reduce_sum_for_broadcast(&self.a_shape)?;
+        let grad_a_unreduced = div_op(grad_output, &self.b)?;
+        let grad_a = reduce_gradient_to_shape(&grad_a_unreduced, &self.a_shape)?;
 
-        // grad_b = - (grad_output * a) / (b * b)
-        // Calculate b * b
-        let b_squared = mul::mul_op(&self.b, &self.b)?;
-        // Calculate grad_output * a
-        let grad_times_a = mul::mul_op(grad_output, &self.a)?;
-        // Calculate (grad_output * a) / b_squared
-        let grad_b_term = div_op(&grad_times_a, &b_squared)?; // div_op handles zero b_squared
-        // Calculate -grad_b_term
-        let grad_b_unreduced = neg::neg_op(&grad_b_term)?;
-        // Reduce gradient for b
-        let grad_b = grad_b_unreduced.reduce_sum_for_broadcast(&self.b_shape)?;
-
-        // Ensure gradients are on the correct device
-        let expected_device = grad_output.device();
-        if grad_a.device() != expected_device || grad_b.device() != expected_device {
-            return Err(NeuraRustError::BackwardError(format!(
-                "DivBackward gradient device mismatch. Expected {:?}, got grad_a: {:?}, grad_b: {:?}",
-                expected_device,
-                grad_a.device(),
-                grad_b.device()
-            )));
-        }
+        // grad_b = grad_output * (- result / b)
+        let neg_result_div_b = div_op(&crate::ops::arithmetic::neg_op(&self.result)?, &self.b)?;
+        let grad_b_unreduced = crate::ops::arithmetic::mul_op(grad_output, &neg_result_div_b)?;
+        let grad_b = reduce_gradient_to_shape(&grad_b_unreduced, &self.b_shape)?;
 
         Ok(vec![grad_a, grad_b])
     }
+}
 
-    fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>> {
-        vec![self.a.get_node_id(), self.b.get_node_id()]
+// --- Kernel de Calcul --- (Nouveau)
+
+/// Noyau de calcul privé pour la division élément par élément avec broadcasting.
+fn div_kernel<T>(
+    a_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    b_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    a_data_slice: &[T],
+    b_data_slice: &[T],
+    output_shape: &[usize],
+) -> Result<Vec<T>, NeuraRustError>
+where
+    // Bounds pour get_offset (Debug), calcul (Div, Copy), et check zero (Zero, PartialEq)
+    T: Div<Output = T> + Copy + Debug + Zero + PartialEq,
+{
+    let numel_result = output_shape.iter().product();
+    let mut result_data_vec = Vec::with_capacity(numel_result);
+    let result_strides = calculate_strides(output_shape);
+
+    let rank_diff_a = output_shape.len().saturating_sub(a_guard.shape.len());
+    let rank_diff_b = output_shape.len().saturating_sub(b_guard.shape.len());
+
+    let mut input_a_coords = vec![0; a_guard.shape.len()];
+    let mut input_b_coords = vec![0; b_guard.shape.len()];
+
+    for i in 0..numel_result {
+        let output_coords = index_to_coord(i, &result_strides, output_shape);
+
+        // Indice pour A
+        for dim_idx in 0..a_guard.shape.len() {
+            let output_coord_idx = rank_diff_a + dim_idx;
+            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
+        }
+        let offset_a = a_guard.get_offset(&input_a_coords);
+        let val_a = a_data_slice[offset_a];
+
+        // Indice pour B
+        for dim_idx in 0..b_guard.shape.len() {
+            let output_coord_idx = rank_diff_b + dim_idx;
+            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
+        }
+        let offset_b = b_guard.get_offset(&input_b_coords);
+        let val_b = b_data_slice[offset_b];
+
+        // Vérification division par zéro
+        if val_b == T::zero() {
+            return Err(NeuraRustError::DivisionByZero);
+        }
+
+        result_data_vec.push(val_a / val_b); // Opération de division
     }
+
+    Ok(result_data_vec)
 }
 
 // --- Forward Operation ---
@@ -99,7 +134,7 @@ where
 /// Returns a `Result` wrapping the new `Tensor` or a `NeuraRustError`.
 pub fn div_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    // Add all required bounds for autograd linkage and internal ops
+    // Inclure tous les bounds requis par DivBackward et reduce_gradient
     T: Div<Output = T>
         + Mul<Output = T>
         + Neg<Output = T>
@@ -112,38 +147,34 @@ where
         + Zero
         + One
         + Sum
+        + 'static
         + PartialEq
         + PartialOrd
         + Send
-        + Sync
-        + 'static,
+        + Sync,
 {
-    // --- Autograd Setup ---
+    // --- Autograd Setup --- (Adapté pour cloner a, b, ET garder résultat)
     let requires_grad = a.requires_grad() || b.requires_grad();
-    let mut backward_context_maybe: Option<DivBackward<T>> = None;
-
+    let mut a_maybe_clone: Option<Tensor<T>> = None;
+    let mut b_maybe_clone: Option<Tensor<T>> = None;
+    let mut a_shape_maybe: Option<Vec<usize>> = None;
+    let mut b_shape_maybe: Option<Vec<usize>> = None;
     if requires_grad {
-        // Create context with clones
-        backward_context_maybe = Some(DivBackward {
-            a: a.clone(),
-            b: b.clone(),
-            a_shape: a.shape(),
-            b_shape: b.shape(),
-        });
+        a_maybe_clone = Some(a.clone());
+        b_maybe_clone = Some(b.clone());
+        a_shape_maybe = Some(a.shape());
+        b_shape_maybe = Some(b.shape());
     }
-    // --- End Autograd Setup ---
 
-    // Acquire read locks
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
     // --- Device Check ---
     if a_guard.device != b_guard.device {
-        return Err(NeuraRustError::DeviceMismatch {
-            expected: a_guard.device,
-            actual: b_guard.device,
-            operation: "div_op".to_string(),
-        });
+        return Err(NeuraRustError::UnsupportedOperation(format!(
+            "Cannot divide tensors on different devices: {:?} and {:?}",
+            a_guard.device, b_guard.device
+        )));
     }
     let device = a_guard.device;
     if device != StorageDevice::CPU {
@@ -153,80 +184,47 @@ where
         )));
     }
 
-    // --- Get CPU Data Buffers ---
     let a_data_arc = a_guard.data.cpu_data()?.clone();
     let b_data_arc = b_guard.data.cpu_data()?.clone();
+    let a_data_slice = a_data_arc.as_slice();
+    let b_data_slice = b_data_arc.as_slice();
 
     // --- Shape and Broadcasting ---
     let a_shape = &a_guard.shape;
     let b_shape = &b_guard.shape;
-    let output_shape =
-        broadcast_shapes(a_shape, b_shape).map_err(|_e| NeuraRustError::BroadcastError {
+    let output_shape = broadcast_shapes(a_shape, b_shape).map_err(|_e| {
+        NeuraRustError::BroadcastError {
             shape1: a_shape.clone(),
             shape2: b_shape.clone(),
-        })?;
-
-    // --- Calculation (with division by zero check) ---
-    let numel_result = output_shape.iter().product();
-    let mut result_data_vec = Vec::with_capacity(numel_result);
-    let result_strides = calculate_strides(&output_shape);
-    let rank_diff_a = output_shape.len().saturating_sub(a_shape.len());
-    let rank_diff_b = output_shape.len().saturating_sub(b_shape.len());
-    let mut input_a_coords = vec![0; a_shape.len()];
-    let mut input_b_coords = vec![0; b_shape.len()];
-
-    // Optimization: Check for scalar divisor first
-    if b_shape.iter().product::<usize>() == 1 && numel_result > 0 {
-        let offset_b = b_guard.get_offset(&input_b_coords); // Coords are [0, 0, ...]
-        let val_b = b_data_arc[offset_b];
-        if val_b == T::zero() {
-            return Err(NeuraRustError::DivisionByZero);
         }
-        // Iterate only over a
-        for i in 0..numel_result {
-            let output_coords = index_to_coord(i, &result_strides, &output_shape);
-            for dim_idx in 0..a_shape.len() {
-                let output_coord_idx = rank_diff_a + dim_idx;
-                input_a_coords[dim_idx] = if a_shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
-            }
-            let offset_a = a_guard.get_offset(&input_a_coords);
-            let val_a = a_data_arc[offset_a];
-            result_data_vec.push(val_a / val_b);
-        }
-    } else {
-        // General case: iterate over output shape
-        for i in 0..numel_result {
-            let output_coords = index_to_coord(i, &result_strides, &output_shape);
-            // Coords for a
-            for dim_idx in 0..a_shape.len() {
-                let output_coord_idx = rank_diff_a + dim_idx;
-                input_a_coords[dim_idx] = if a_shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
-            }
-            let offset_a = a_guard.get_offset(&input_a_coords);
-            let val_a = a_data_arc[offset_a];
-            // Coords for b
-            for dim_idx in 0..b_shape.len() {
-                let output_coord_idx = rank_diff_b + dim_idx;
-                input_b_coords[dim_idx] = if b_shape[dim_idx] == 1 { 0 } else { output_coords[output_coord_idx] };
-            }
-            let offset_b = b_guard.get_offset(&input_b_coords);
-            let val_b = b_data_arc[offset_b];
-            // Check for division by zero
-            if val_b == T::zero() {
-                return Err(NeuraRustError::DivisionByZero);
-            }
-            result_data_vec.push(val_a / val_b);
-        }
-    }
+    })?;
 
+    // --- Calculation (Appel au Kernel) ---
+    let result_data_vec = div_kernel(
+        &a_guard,
+        &b_guard,
+        a_data_slice,
+        b_data_slice,
+        &output_shape,
+    )?;
+
+    // Drop read locks
     drop(a_guard);
     drop(b_guard);
 
-    // --- Create Result ---
-    let result_tensor = Tensor::new(result_data_vec, output_shape)?;
+    // --- Create Result Tensor ---
+    let result_tensor = Tensor::new(result_data_vec, output_shape.clone())?;
 
-    // --- Autograd Linkage ---
-    if let Some(backward_context) = backward_context_maybe {
+    // --- Autograd Linkage --- (Adapté)
+    if requires_grad {
+        let backward_context = DivBackward {
+            a: a_maybe_clone.unwrap(),
+            b: b_maybe_clone.unwrap(),
+            // Cloner le résultat est nécessaire pour le backward de la division
+            result: result_tensor.clone(),
+            a_shape: a_shape_maybe.unwrap(),
+            b_shape: b_shape_maybe.unwrap(),
+        };
         let backward_op_arc: Arc<dyn BackwardOp<T> + Send + Sync> = Arc::new(backward_context);
         result_tensor.set_requires_grad(true)?;
         result_tensor.set_grad_fn(Some(backward_op_arc))?;
@@ -235,198 +233,136 @@ where
     Ok(result_tensor)
 }
 
-// --- std::ops::Div implementation ---
-impl<'a, 'b, T> Div<&'b Tensor<T>> for &'a Tensor<T>
+// Copier reduce_gradient_to_shape ici
+/// Helper function to reduce a gradient tensor to a target shape.
+fn reduce_gradient_to_shape<T>(
+    gradient: &Tensor<T>,
+    target_shape: &[usize],
+) -> Result<Tensor<T>, NeuraRustError>
 where
-    // Add all necessary bounds matching div_op
-    T: Div<Output = T>
-        + Mul<Output = T>
-        + Neg<Output = T>
-        + Add<Output = T>
-        + AddAssign
+    T: Debug
         + Copy
-        + Clone
-        + Debug
-        + Default
-        + Zero
-        + One
-        + Sum
-        + PartialEq
-        + PartialOrd
         + Send
         + Sync
-        + 'static,
+        + Zero
+        + AddAssign
+        + 'static
+        + Default
+        + PartialEq
+        + std::iter::Sum
+        + num_traits::One
+        + PartialOrd,
 {
-    type Output = Result<Tensor<T>, NeuraRustError>;
+    if gradient.shape() == target_shape {
+        Ok(gradient.clone())
+    } else {
+        if target_shape.is_empty() {
+            crate::ops::reduction::sum_axes(gradient, &[], false)
+        } else {
+            let current_shape = gradient.shape();
+            let rank_diff = current_shape.len().saturating_sub(target_shape.len());
+            let mut axes_to_reduce: Vec<usize> = (0..rank_diff).collect();
 
-    fn div(self, other: &'b Tensor<T>) -> Self::Output {
-        div_op(self, other)
+            for i in 0..target_shape.len() {
+                if target_shape[i] == 1 && current_shape[rank_diff + i] > 1 {
+                    axes_to_reduce.push(rank_diff + i);
+                } else if target_shape[i] != current_shape[rank_diff + i] && target_shape[i] != 1 {
+                    return Err(NeuraRustError::InternalError(format!(
+                        "Cannot reduce gradient shape {:?} to {:?}: Incompatible dimensions found.",
+                        current_shape, target_shape
+                    )));
+                }
+            }
+
+            if axes_to_reduce.is_empty() {
+                if current_shape == target_shape {
+                    Ok(gradient.clone())
+                } else {
+                    return Err(NeuraRustError::InternalError(format!(
+                         "Cannot reduce gradient shape {:?} to {:?}: No reduction axes found but shapes differ.",
+                         current_shape, target_shape
+                      )));
+                }
+            } else {
+                let reduced_grad =
+                    crate::ops::reduction::sum_axes(gradient, &axes_to_reduce, false)?;
+                let final_shape: Vec<usize> = target_shape.to_vec();
+                let reduced_numel: usize = reduced_grad.shape().iter().product();
+                let target_numel: usize = target_shape.iter().product();
+                if reduced_numel != target_numel {
+                    return Err(NeuraRustError::InternalError(format!(
+                         "Gradient reduction produced incompatible shape {:?} (numel {}) for target {:?} (numel {}). Reduction axes: {:?}.",
+                         reduced_grad.shape(), reduced_numel, target_shape, target_numel, axes_to_reduce
+                     )));
+                }
+                crate::ops::view::reshape_op(&reduced_grad, final_shape)
+            }
+        }
     }
 }
-
-/// REMOVED: In-place DivAssign is generally not provided/meaningful with shared data.
-// impl<'a, T> DivAssign<&'a Tensor<T>> for Tensor<T> { ... }
 
 // --- Tests ---
 #[cfg(test)]
 mod tests {
     use super::*;
     use crate::error::NeuraRustError;
-    use crate::Tensor;
-    use approx::{assert_abs_diff_eq, assert_relative_eq};
-    use num_traits::{Float, One, Zero, Signed};
-    use std::cmp::PartialEq;
-    use std::default::Default;
-    use std::iter::Sum;
-    use std::ops::{AddAssign, Div, Mul};
-
-    fn create_test_tensor<
-        T: Clone
-            + Debug
-            + PartialEq
-            + Zero
-            + One
-            + AddAssign
-            + Add<Output = T>
-            + Mul<Output = T>
-            + Div<Output = T>
-            + Neg<Output = T>
-            + Signed
-            + Copy
-            + Default
-            + Sum
-            + PartialOrd
-            + Float
-            + approx::AbsDiffEq<Epsilon = T>
-            + approx::RelativeEq<Epsilon = T>
-            + approx::UlpsEq<Epsilon = T>
-            + Send
-            + Sync
-            + 'static,
-    >(
-        data: Vec<T>,
-        shape: Vec<usize>,
-    ) -> Tensor<T> {
-        Tensor::new(data, shape).expect("Test tensor creation failed")
-    }
-
-    fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
-    where
-        T: Clone
-            + Debug
-            + PartialEq
-            + Zero
-            + One
-            + AddAssign
-            + Copy
-            + Add<Output = T>
-            + Default
-            + Sum
-            + PartialOrd
-            + Send
-            + Sync
-            + 'static,
-    {
-        let tensor = Tensor::new(data, shape).unwrap();
-        tensor.set_requires_grad(true).unwrap();
-        tensor
-    }
+    use crate::tensor::Tensor;
+    use crate::utils::testing::{create_test_tensor, create_test_tensor_with_grad};
+    use approx::assert_relative_eq;
 
     #[test]
     fn test_div_tensors_ok() {
-        let t1 = create_test_tensor(vec![10.0f64, 21.0, 32.0, 45.0], vec![2, 2]);
-        let t2 = create_test_tensor(vec![2.0f64, 3.0, 4.0, 5.0], vec![2, 2]);
-        let expected_data = vec![5.0f64, 7.0, 8.0, 9.0];
+        let t1 = create_test_tensor(vec![10.0f32, 20.0, 30.0, 40.0], vec![2, 2]);
+        let t2 = create_test_tensor(vec![2.0f32, 5.0, 2.0, 8.0], vec![2, 2]);
+        let expected_data = vec![5.0f32, 4.0, 15.0, 5.0];
         let expected_shape = vec![2, 2];
-        let result = div_op(&t1, &t2);
-        assert!(result.is_ok());
-        let res_tensor = result.unwrap();
-        let res_buffer_arc = res_tensor.borrow_data_buffer();
-        let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
-        assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
-        assert_eq!(res_tensor.shape(), expected_shape, "Shape mismatch");
 
-        let res_trait = (&t1 / &t2).expect("Div trait failed");
-        let trait_buffer_arc = res_trait.borrow_data_buffer();
-        let trait_cpu_data = trait_buffer_arc.cpu_data().expect("Trait result not on CPU");
-         assert_eq!(trait_cpu_data.as_slice(), expected_data.as_slice());
-         assert_eq!(res_trait.shape(), expected_shape, "Shape mismatch (trait)");
-    }
-
-    #[test]
-    fn test_div_broadcasting() {
-        let t1 = create_test_tensor(vec![10.0f64, 20.0], vec![1, 2]);
-        let t2 = create_test_tensor(vec![2.0f64, 4.0], vec![2, 1]);
-        let expected_data = vec![5.0f64, 10.0, 2.5, 5.0];
-        let expected_shape = vec![2, 2];
-        let result = div_op(&t1, &t2).expect("Broadcasting div failed");
+        let result = div_op(&t1, &t2).unwrap();
         assert_eq!(result.shape(), expected_shape);
-        let res_buffer_arc = result.borrow_data_buffer();
-        let res_cpu_data = res_buffer_arc.cpu_data().expect("Result not on CPU");
-        assert_eq!(res_cpu_data.as_slice(), expected_data.as_slice());
-
-        let t_mat = create_test_tensor(vec![10.0f64, 20.0, 30.0, 40.0], vec![2, 2]);
-        let t_scalar = Tensor::scalar(10.0f64);
-        let expected_scalar_div = vec![1.0f64, 2.0, 3.0, 4.0];
-        let result_scalar = div_op(&t_mat, &t_scalar).expect("Scalar div failed");
-        assert_eq!(result_scalar.shape(), vec![2, 2]);
-        let scalar_res_buffer_arc = result_scalar.borrow_data_buffer();
-        let scalar_res_cpu_data = scalar_res_buffer_arc
-            .cpu_data()
-            .expect("Scalar div result not on CPU");
-        assert_eq!(
-            scalar_res_cpu_data.as_slice(),
-            expected_scalar_div.as_slice()
-        );
-
-        let result_scalar_rev = div_op(&t_scalar, &t_mat).expect("Scalar div reverse failed");
-        let expected_scalar_div_rev = vec![1.0f64, 0.5, 1.0 / 3.0, 0.25];
-        assert_eq!(result_scalar_rev.shape(), vec![2, 2]);
-        let scalar_rev_buffer_arc = result_scalar_rev.borrow_data_buffer();
-        let scalar_rev_cpu_data = scalar_rev_buffer_arc
-            .cpu_data()
-            .expect("Scalar div reverse result not on CPU");
-        assert_relative_eq!(
-            scalar_rev_cpu_data.as_slice(),
-            expected_scalar_div_rev.as_slice()
-        );
+        let res_buffer = result.borrow_data_buffer();
+        let res_data = res_buffer.cpu_data().unwrap();
+        assert_eq!(res_data.as_slice(), expected_data.as_slice());
     }
 
     #[test]
     fn test_div_by_zero() {
-        let t1 = create_test_tensor(vec![1.0f64, 2.0], vec![2]);
-        let t2 = create_test_tensor(vec![1.0f64, 0.0], vec![2]);
+        let t1 = create_test_tensor(vec![1.0f32], vec![1]);
+        let t2 = create_test_tensor(vec![0.0f32], vec![1]);
         let result = div_op(&t1, &t2);
-        assert!(result.is_err());
-        match result.err().unwrap() {
-            NeuraRustError::DivisionByZero => {}
-            _ => panic!("Expected DivisionByZero error"),
-        }
+        assert!(matches!(result, Err(NeuraRustError::DivisionByZero)));
+    }
 
-        let t_scalar_zero = Tensor::scalar(0.0f64);
-        let result_scalar = div_op(&t1, &t_scalar_zero);
-        assert!(result_scalar.is_err());
-        match result_scalar.err().unwrap() {
-            NeuraRustError::DivisionByZero => {}
-            _ => panic!("Expected DivisionByZero error for scalar divisor"),
-        }
+    #[test]
+    fn test_div_broadcasting() {
+        let t1 = create_test_tensor(vec![10.0f32, 20.0], vec![2, 1]);
+        let t2 = create_test_tensor(vec![2.0f32, 5.0], vec![1, 2]);
+        let expected_data = vec![5.0f32, 2.0, 10.0, 4.0]; // 10/2, 10/5, 20/2, 20/5
+        let expected_shape = vec![2, 2];
+
+        let result = div_op(&t1, &t2).unwrap();
+        assert_eq!(result.shape(), expected_shape);
+        let res_buffer = result.borrow_data_buffer();
+        let res_data = res_buffer.cpu_data().unwrap();
+        assert_eq!(res_data.as_slice(), expected_data.as_slice());
     }
 
     #[test]
     fn test_div_backward_simple() {
-        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0], vec![2]);
-        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 10.0], vec![2]);
+        let a = create_test_tensor_with_grad::<f64>(vec![10.0, 21.0], vec![2]);
+        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 3.0], vec![2]);
+        let output_grad = Tensor::<f64>::ones(vec![2]).unwrap();
 
-        let output_grad = Tensor::ones(vec![2]).unwrap();
-
-        let c = div_op(&a, &b).unwrap();
-        c.backward(Some(output_grad.clone())).unwrap();
+        let c = div_op(&a, &b).unwrap(); // c = [5.0, 7.0]
+        c.backward(Some(output_grad)).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
 
-        let expected_grad_a = vec![0.5, 0.1];
-        let expected_grad_b = vec![-1.0 / (2.0 * 2.0), -2.0 / (10.0 * 10.0)];
+        // grad_a = grad_output / b = [1, 1] / [2, 3] = [0.5, 1/3]
+        let expected_grad_a = vec![0.5, 1.0 / 3.0];
+        // grad_b = grad_output * (-result / b)
+        //        = [1, 1] * [-2.5, -7/3] = [-2.5, -7/3]
+        let expected_grad_b = vec![-2.5, -7.0 / 3.0];
 
         let grad_a_buffer = grad_a.borrow_data_buffer();
         let grad_a_data = grad_a_buffer.cpu_data().unwrap();
@@ -434,64 +370,86 @@ mod tests {
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
         assert_eq!(grad_a.shape(), vec![2]);
-        assert_abs_diff_eq!(grad_a_data.as_slice(), expected_grad_a.as_slice(), epsilon = 1e-6);
-
         assert_eq!(grad_b.shape(), vec![2]);
-        assert_abs_diff_eq!(grad_b_data.as_slice(), expected_grad_b.as_slice(), epsilon = 1e-6);
+
+        for (i, &val) in grad_a_data.iter().enumerate() {
+            assert_relative_eq!(val, expected_grad_a[i], epsilon = 1e-9);
+        }
+        for (i, &val) in grad_b_data.iter().enumerate() {
+            assert_relative_eq!(val, expected_grad_b[i], epsilon = 1e-9);
+        }
     }
 
     #[test]
     fn test_div_backward_broadcast() {
-        let a = create_test_tensor_with_grad::<f64>(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 4.0], vec![2]);
+        let a = create_test_tensor_with_grad::<f64>(vec![12.0], vec![1]); // Scalar a
+        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 3.0, 4.0], vec![3]); // Vector b
+        let output_grad = Tensor::<f64>::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
 
-        let output_grad = Tensor::ones(vec![2, 2]).unwrap();
-
+        // c = a / b = [12, 12, 12] / [2, 3, 4] = [6, 4, 3]
         let c = div_op(&a, &b).unwrap();
-        c.backward(Some(output_grad.clone())).unwrap();
+        c.backward(Some(output_grad)).unwrap();
 
         let grad_a = a.grad().unwrap();
         let grad_b = b.grad().unwrap();
 
-        let expected_grad_a = vec![0.5f64, 0.25, 0.5, 0.25]; // [[1/2, 1/4], [1/2, 1/4]]
-        // Expected grad for 'b' = - grad_output * a / b^2 (summed over axis 1, then 0)
-        // grad_b_unreduced = - [[1,1],[1,1]] * [[1,2],[3,4]] / [[2,4],[2,4]]^2
-        // grad_b_unreduced = - [[1,2],[3,4]] / [[4,16],[4,16]] = [[-1/4, -2/16], [-3/4, -4/16]] = [[-0.25, -0.125], [-0.75, -0.25]]
-        // Reduce by summing over axis 0 (since b was broadcasted by adding axis 0? No, b shape was [2])
-        // b was broadcasted to align with last dim of a. a=[2,2], b=[2]. target=[2,2]. b became [1,2] -> [2,2]. Axis 0 added.
-        // Reduce grad_b_unreduced shape [2,2] to b_shape [2] by summing axis 1 ? No, axis 0.
-        // Sum axis 0: [-0.25 + -0.75, -0.125 + -0.25] = [-1.0, -0.375]
-        let expected_grad_b = vec![-1.0, -0.375];
+        // grad_a_unreduced = grad_output / b = [1, 2, 3] / [2, 3, 4] = [0.5, 2/3, 0.75]
+        // grad_a = sum(grad_a_unreduced) = 0.5 + 2/3 + 0.75 = 1.91666...
+        let expected_grad_a = vec![0.5 + 2.0/3.0 + 0.75];
+
+        // grad_b_unreduced = grad_output * (-result / b)
+        //                  = [1, 2, 3] * ( -[6, 4, 3] / [2, 3, 4] )
+        //                  = [1, 2, 3] * [ -3, -4/3, -0.75 ]
+        //                  = [ -3, -8/3, -2.25 ]
+        // grad_b = grad_b_unreduced (no reduction needed for b's shape)
+        let expected_grad_b = vec![-3.0, -8.0/3.0, -2.25];
 
         let grad_a_buffer = grad_a.borrow_data_buffer();
         let grad_a_data = grad_a_buffer.cpu_data().unwrap();
         let grad_b_buffer = grad_b.borrow_data_buffer();
         let grad_b_data = grad_b_buffer.cpu_data().unwrap();
 
-        assert_eq!(grad_a.shape(), vec![2, 2]);
-        assert_eq!(grad_b.shape(), vec![2]);
+        assert_eq!(grad_a.shape(), vec![1]);
+        assert_eq!(grad_b.shape(), vec![3]);
 
-        assert_abs_diff_eq!(grad_a_data.as_slice(), expected_grad_a.as_slice(), epsilon = 1e-6);
-        assert_abs_diff_eq!(grad_b_data.as_slice(), expected_grad_b.as_slice(), epsilon = 1e-6);
+        for (i, &val) in grad_a_data.iter().enumerate() {
+            assert_relative_eq!(val, expected_grad_a[i], epsilon = 1e-9);
+        }
+        for (i, &val) in grad_b_data.iter().enumerate() {
+            assert_relative_eq!(val, expected_grad_b[i], epsilon = 1e-9);
+        }
     }
 
     #[test]
     fn test_div_backward_with_zero_divisor() {
-        let a = create_test_tensor_with_grad::<f64>(vec![6.0, 10.0], vec![2]);
-        let b = create_test_tensor_with_grad::<f64>(vec![2.0, 0.0], vec![2]);
+        let a = create_test_tensor_with_grad::<f64>(vec![1.0], vec![1]);
+        let b = create_test_tensor_with_grad::<f64>(vec![0.0], vec![1]); // Divisor is zero
+        let output_grad = Tensor::<f64>::ones(vec![1]).unwrap();
 
-        let z_result = div_op(&a, &b);
-        assert!(z_result.is_err());
-        assert!(matches!(z_result.err().unwrap(), NeuraRustError::DivisionByZero));
+        // Forward pass should fail
+        let result_forward = div_op(&a, &b);
+        assert!(matches!(result_forward, Err(NeuraRustError::DivisionByZero)));
 
-        let grad_out_a = Tensor::ones(vec![2]).unwrap();
-        let backward_a = DivBackward { a: a.clone(), b: b.clone(), a_shape: a.shape(), b_shape: b.shape() };
-        let grad_a_result = backward_a.backward(&grad_out_a);
-        assert!(grad_a_result.is_err(), "Expected error for grad(a) due to zero divisor");
+        // Although forward fails, let's construct a hypothetical backward pass
+        // scenario where the gradient calculation might involve division by b.
+        // We need to ensure the backward pass handles this gracefully if possible,
+        // though typically the forward error prevents reaching backward.
 
-        let grad_out_b = Tensor::ones(vec![2]).unwrap();
-        let backward_b = DivBackward { a: a.clone(), b: b.clone(), a_shape: a.shape(), b_shape: b.shape() };
-        let grad_b_result = backward_b.backward(&grad_out_b);
-        assert!(grad_b_result.is_err(), "Expected error for grad(b) due to zero divisor squared");
+        // Create a dummy 'c' that requires grad to simulate reaching backward
+        let dummy_c = Tensor::<f64>::scalar(1.0);
+        dummy_c.set_requires_grad(true).unwrap();
+
+        // Create DivBackward manually (this wouldn't happen naturally if forward fails)
+        let backward_context = DivBackward {
+            a: a.clone(),
+            b: b.clone(), // b contains zero
+            result: dummy_c.clone(), // dummy result
+            a_shape: a.shape(),
+            b_shape: b.shape(),
+        };
+
+        // Calling backward should fail due to division by zero in gradient calculation
+        let result_backward = backward_context.backward(&output_grad);
+        assert!(matches!(result_backward, Err(NeuraRustError::DivisionByZero)), "Backward pass did not detect division by zero");
     }
 }

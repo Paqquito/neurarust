@@ -12,6 +12,75 @@ use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign};
 use std::sync::Arc;
+use crate::tensor_data::TensorData;
+use std::sync::RwLockReadGuard;
+
+// --- Kernel de Calcul ---
+
+/// Noyau de calcul privé pour l'addition élément par élément avec broadcasting.
+/// Gère l'itération, le calcul d'indices/offsets et l'opération arithmétique.
+fn add_kernel<T>(
+    a_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    b_guard: &RwLockReadGuard<'_, TensorData<T>>,
+    a_data_slice: &[T],
+    b_data_slice: &[T],
+    output_shape: &[usize],
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Add<Output = T>
+        + Copy
+        + Debug
+        + Default
+        + Send
+        + Sync
+        + Zero
+        + One
+        + AddAssign
+        + PartialEq
+        + PartialOrd
+        + Sum
+        + 'static,
+{
+    let numel_result = output_shape.iter().product();
+    let mut result_data_vec = Vec::with_capacity(numel_result);
+    let result_strides = calculate_strides(output_shape);
+
+    let rank_diff_a = output_shape.len().saturating_sub(a_guard.shape.len());
+    let rank_diff_b = output_shape.len().saturating_sub(b_guard.shape.len());
+
+    let mut input_a_coords = vec![0; a_guard.shape.len()];
+    let mut input_b_coords = vec![0; b_guard.shape.len()];
+
+    for i in 0..numel_result {
+        let output_coords = index_to_coord(i, &result_strides, output_shape);
+
+        for dim_idx in 0..a_guard.shape.len() {
+            let output_coord_idx = rank_diff_a + dim_idx;
+            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
+        }
+        let offset_a = a_guard.get_offset(&input_a_coords);
+        let val_a = a_data_slice[offset_a];
+
+        for dim_idx in 0..b_guard.shape.len() {
+            let output_coord_idx = rank_diff_b + dim_idx;
+            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 {
+                0
+            } else {
+                output_coords[output_coord_idx]
+            };
+        }
+        let offset_b = b_guard.get_offset(&input_b_coords);
+        let val_b = b_data_slice[offset_b];
+
+        result_data_vec.push(val_a + val_b);
+    }
+
+    Ok(result_data_vec)
+}
 
 // --- Forward Operation ---
 
@@ -23,7 +92,6 @@ use std::sync::Arc;
 /// This operation creates a new Tensor with copied data on the same device.
 pub fn add_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    // Add Send + Sync required by Tensor structure and autograd methods
     T: Add<Output = T>
         + AddAssign
         + Copy
@@ -40,18 +108,13 @@ where
         + Sync,
 {
     // --- Autograd Setup ---
-    // Determine if the output requires gradient tracking
     let requires_grad = a.requires_grad() || b.requires_grad();
-    // Store necessary info for backward pass if needed (IDs and original shapes)
-    // Note: We capture this info *before* locking the tensors for calculation,
-    //       to minimize lock contention if shapes/IDs were complex to get.
     let mut a_id_maybe: Option<NodeId<T>> = None;
     let mut a_shape_maybe: Option<Vec<usize>> = None;
     let mut b_id_maybe: Option<NodeId<T>> = None;
     let mut b_shape_maybe: Option<Vec<usize>> = None;
 
     if requires_grad {
-        // Use the pub(crate) method from Tensor accessors
         a_id_maybe = Some(a.get_node_id());
         a_shape_maybe = Some(a.shape());
         b_id_maybe = Some(b.get_node_id());
@@ -63,112 +126,66 @@ where
     let b_guard = b.read_data();
 
     // --- Device Check ---
-    // Ensure both tensors are on the same device (and implicitly CPU for now)
     if a_guard.device != b_guard.device {
         return Err(NeuraRustError::UnsupportedOperation(format!(
             "Cannot add tensors on different devices: {:?} and {:?}",
             a_guard.device, b_guard.device
         )));
     }
-    let device = a_guard.device; // Device for the output tensor
-                                 // Ensure the operation is supported on this device (currently only CPU)
+    let device = a_guard.device;
     if device != StorageDevice::CPU {
         return Err(NeuraRustError::UnsupportedOperation(format!(
             "Addition is currently only supported on CPU, not {:?}",
             device
         )));
     }
+
     // --- Get CPU Data Buffers ---
-    // We know they are on CPU, so unwrap the result of cpu_data()
-    // Note: cpu_data() returns Result<&Arc<Vec<T>>, _>, so we dereference it
-    // and clone the Arc for safe access later.
-    let a_data_arc = a_guard.data.cpu_data()?.clone(); // Clone the Arc<Vec<T>>
-    let b_data_arc = b_guard.data.cpu_data()?.clone(); // Clone the Arc<Vec<T>>
+    let a_data_arc = a_guard.data.cpu_data()?.clone();
+    let b_data_arc = b_guard.data.cpu_data()?.clone();
+    let a_data_slice = a_data_arc.as_slice();
+    let b_data_slice = b_data_arc.as_slice();
 
     // --- Shape and Broadcasting ---
     let a_shape = &a_guard.shape;
     let b_shape = &b_guard.shape;
 
     let output_shape =
-        broadcast_shapes(a_shape, b_shape).map_err(|_e| NeuraRustError::BroadcastError {
-            shape1: a_shape.clone(),
-            shape2: b_shape.clone(),
+        broadcast_shapes(a_shape, b_shape).map_err(|_e| {
+            NeuraRustError::BroadcastError {
+                shape1: a_shape.clone(),
+                shape2: b_shape.clone(),
+            }
         })?;
 
-    // --- Calculation ---
-    let numel_result = output_shape.iter().product();
-    let mut result_data_vec = Vec::with_capacity(numel_result);
-
-    let result_strides = calculate_strides(&output_shape);
-    let rank_diff_a = output_shape.len().saturating_sub(a_guard.shape.len());
-    let rank_diff_b = output_shape.len().saturating_sub(b_guard.shape.len());
-
-    let mut input_a_coords = vec![0; a_guard.shape.len()];
-    let mut input_b_coords = vec![0; b_guard.shape.len()];
-
-    for i in 0..numel_result {
-        let output_coords = index_to_coord(i, &result_strides, &output_shape);
-
-        for dim_idx in 0..a_guard.shape.len() {
-            let output_coord_idx = rank_diff_a + dim_idx;
-            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 {
-                0
-            } else {
-                output_coords[output_coord_idx]
-            };
-        }
-        // Get offset using the guard's metadata
-        let offset_a = a_guard.get_offset(&input_a_coords);
-        // Access data using the cloned Arc<Vec<T>>
-        let val_a = a_data_arc[offset_a];
-
-        for dim_idx in 0..b_guard.shape.len() {
-            let output_coord_idx = rank_diff_b + dim_idx;
-            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 {
-                0
-            } else {
-                output_coords[output_coord_idx]
-            };
-        }
-        // Get offset using the guard's metadata
-        let offset_b = b_guard.get_offset(&input_b_coords);
-        // Access data using the cloned Arc<Vec<T>>
-        let val_b = b_data_arc[offset_b];
-
-        result_data_vec.push(val_a + val_b);
-    }
+    // --- Calculation (Appel au Kernel) ---
+    let result_data_vec = add_kernel(
+        &a_guard,
+        &b_guard,
+        a_data_slice,
+        b_data_slice,
+        &output_shape,
+    )?;
 
     // Drop read locks explicitly (although they drop implicitly at end of scope)
     drop(a_guard);
     drop(b_guard);
 
     // --- Create Result Tensor ---
-    // The result tensor is created on the same device as the inputs (CPU here)
     let result_tensor = Tensor::new(result_data_vec, output_shape.clone())?;
 
     // --- Autograd Linkage (The General Pattern) ---
-    // If any input requires grad, the output also requires grad
-    // and needs a `grad_fn` to link it back to the inputs in the computation graph.
     if requires_grad {
-        // 1. Create the backward context struct (`AddBackward` here)
-        //    It stores references (NodeIds) to the inputs and any other
-        //    data needed for the backward pass (like original shapes for broadcasting).
         let backward_context = AddBackward {
-            a_id: a_id_maybe.unwrap(), // Safe to unwrap due to requires_grad check
-            a_shape: a_shape_maybe.unwrap(), // Use the shapes captured *before* locking
-            b_id: b_id_maybe.unwrap(), // Safe to unwrap
-            b_shape: b_shape_maybe.unwrap(), // Use the shapes captured *before* locking
+            a_id: a_id_maybe.unwrap(),
+            a_shape: a_shape_maybe.unwrap(),
+            b_id: b_id_maybe.unwrap(),
+            b_shape: b_shape_maybe.unwrap(),
         };
-        // 2. Wrap the context in an Arc<dyn BackwardOp Trait>
-        //    This allows shared ownership and dynamic dispatch.
         let backward_op_arc: Arc<dyn BackwardOp<T> + Send + Sync> = Arc::new(backward_context);
-
-        // 3. Set autograd properties on the result tensor.
-        //    This involves acquiring a write lock on the result's TensorData.
         result_tensor.set_requires_grad(true)?;
         result_tensor.set_grad_fn(Some(backward_op_arc))?;
     }
-    // --- End Autograd Linkage ---
 
     Ok(result_tensor)
 }
