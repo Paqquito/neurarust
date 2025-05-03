@@ -1,237 +1,179 @@
+use crate::autograd::backward_op::BackwardOp;
 use crate::autograd::graph::NodeId;
-use crate::autograd::BackwardOp;
-use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
-use num_traits::{One, Zero};
-use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Mul};
-use std::iter::Sum;
 use std::sync::{Arc, RwLock};
+use std::fmt::Debug;
 
-// --- ReluBackward Definition (Corrected) ---
+use crate::device::StorageDevice;
+use crate::types::DType;
 
-/// Backward operation context for `relu_op`.
-/// Stores the input tensor to compute the gradient mask.
+// --- Relu Operation ---
+
+/// Backward pass structure for ReLU.
 #[derive(Debug)]
-struct ReluBackward<T: Debug + Copy + Send + Sync + 'static> {
-    input_node: Arc<RwLock<TensorData<T>>>, // Store input node Arc<RwLock>
+struct ReluBackward {
+    input_node: Arc<RwLock<TensorData>>,
 }
 
-// --- BackwardOp Implementation for ReluBackward (Corrected) ---
+impl BackwardOp for ReluBackward {
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        let input_guard = self.input_node.read().expect("Failed to lock input node for read");
 
-impl<T> BackwardOp<T> for ReluBackward<T>
-where
-    T: Debug
-        + Copy
-        + Send
-        + Sync
-        + 'static
-        + Default
-        + Clone
-        + Zero
-        + One
-        + AddAssign
-        + Add<Output = T>
-        + Mul<Output = T>
-        + Sum
-        + PartialEq
-        + PartialOrd
-        + std::iter::Product,
-{
-    fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
-        let input_guard = self.input_node.read().map_err(|poison_err| {
-            // Correctly instantiate LockError with named fields
-            NeuraRustError::LockError {
-                lock_type: "read".to_string(),
-                reason: format!("Failed to lock input node in ReluBackward: {}", poison_err),
-            }
-        })?;
-
-        // Create the gradient mask: 1.0 where input > 0.0, 0.0 otherwise
-        if input_guard.device != StorageDevice::CPU {
-            return Err(NeuraRustError::UnsupportedOperation(
-                "ReLU backward currently only supports CPU".to_string(),
-            ));
-        }
-        let input_buffer = input_guard.data.cpu_data()?.clone();
-        let input_slice = input_buffer.as_slice();
-
-        // Iterate using the input tensor's properties (offset, numel)
-        let mask_data: Vec<T> = input_slice[input_guard.offset..]
-            .iter()
-            .take(input_guard.numel())
-            .map(|&x| if x > T::zero() { T::one() } else { T::zero() })
-            .collect();
-
-        if mask_data.len() != input_guard.numel() {
-             return Err(NeuraRustError::InternalError(format!(
-                 "ReLU backward mask creation length mismatch. Expected {}, got {}.",
-                 input_guard.numel(), mask_data.len()
-             )));
-        }
-
-        // Create mask tensor with the same shape as the input (and thus the output)
-        let mask_tensor = Tensor::new(mask_data, input_guard.shape.clone())?;
-
-        if mask_tensor.device() != grad_output.device() {
+        let grad_output_guard = grad_output.read_data();
+        if input_guard.device != grad_output_guard.device {
             return Err(NeuraRustError::DeviceMismatch {
-                expected: grad_output.device(),
-                actual: mask_tensor.device(),
-                operation: "relu_backward (mask * grad_output)".to_string(),
+                expected: input_guard.device,
+                actual: grad_output_guard.device,
+                operation: "ReLU backward".to_string(),
             });
         }
+        if input_guard.device != StorageDevice::CPU || input_guard.dtype != DType::F32 {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "ReLU backward currently only supports F32 tensors on CPU.".to_string(),
+            ));
+        }
 
-        // Compute input gradient: grad_output * mask
-        let input_gradient = crate::ops::arithmetic::mul::mul_op(grad_output, &mask_tensor)?;
+        let input_buffer_arc = input_guard.buffer().try_get_cpu_f32()?.clone();
+        let grad_output_buffer_arc = grad_output_guard.buffer().try_get_cpu_f32()?.clone();
+        let input_slice = input_buffer_arc.as_slice();
+        let grad_output_slice = grad_output_buffer_arc.as_slice();
 
-        Ok(vec![input_gradient])
+        let mut grad_input_data = vec![0.0f32; input_guard.numel()];
+
+        let input_offset = input_guard.offset;
+        let grad_output_offset = grad_output_guard.offset;
+        let len = grad_input_data.len();
+
+        for i in 0..len {
+            if input_slice[input_offset + i] > 0.0 {
+                grad_input_data[i] = grad_output_slice[grad_output_offset + i];
+            }
+        }
+
+        let grad_input_tensor = Tensor::new(grad_input_data, input_guard.shape.clone())?;
+
+        Ok(vec![grad_input_tensor])
     }
 
-    fn inputs(&self) -> Vec<NodeId<T>> {
-        // Return the input node ID
+    fn inputs(&self) -> Vec<NodeId> {
         vec![Arc::as_ptr(&self.input_node)]
     }
 }
 
-// --- relu_op Implementation (Corrected Autograd Linkage) ---
-
 /// Applies the Rectified Linear Unit (ReLU) activation function element-wise.
+///
 /// ReLU(x) = max(0, x)
-/// Currently supports CPU only.
-pub fn relu_op<T>(input: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
-where
-    T: Copy
-        + PartialOrd
-        + Zero
-        + Debug
-        + Send
-        + Sync
-        + 'static
-        + Clone
-        + One // For backward
-        + Add<Output = T> // For backward autograd context
-        + AddAssign // For backward autograd context
-        + std::ops::Mul<Output = T> // For backward
-        + Default
-        + PartialEq
-        + std::iter::Sum
-        + std::iter::Product, // GARDER Product
-{
-    let requires_grad = input.requires_grad();
-    // Clone the Arc for the input node *before* reading data
-    let input_node_arc = if requires_grad { Some(input.data.clone()) } else { None };
-
+///
+/// Currently only supports F32 tensors on the CPU.
+pub fn relu_op(input: &Tensor) -> Result<Tensor, NeuraRustError> {
     let input_guard = input.read_data();
 
-    // Device check
-    if input_guard.device != StorageDevice::CPU {
+    if input_guard.device != StorageDevice::CPU || input_guard.dtype != DType::F32 {
         return Err(NeuraRustError::UnsupportedOperation(
-            "ReLU forward currently only supports CPU".to_string(),
+            "Relu op currently only supports F32 tensors on CPU.".to_string(),
         ));
     }
+    let input_buffer_arc = input_guard.buffer().try_get_cpu_f32()?.clone();
+    let input_slice = input_buffer_arc.as_slice();
 
-    // Apply ReLU element-wise
-    let input_buffer = input_guard.data.cpu_data()?.clone();
-    let input_slice = input_buffer.as_slice();
-    let output_data: Vec<T> = input_slice[input_guard.offset..]
-        .iter()
-        .take(input_guard.numel())
-        .map(|&x| if x > T::zero() { x } else { T::zero() })
-        .collect();
-
-    let output_shape = input_guard.shape.clone();
-
-    // Check data length
-     if output_data.len() != input_guard.numel() {
-         return Err(NeuraRustError::InternalError(format!(
-             "ReLU forward output data length mismatch. Expected {}, got {}.",
-             input_guard.numel(), output_data.len()
-         )));
-    }
-
-    // Create result tensor (will have contiguous strides by default)
-    let result_tensor = Tensor::new(output_data, output_shape)?;
-
-    // --- Autograd Integration ---
-    if requires_grad {
-        if let Some(input_arc) = input_node_arc {
-            let grad_fn = ReluBackward { input_node: input_arc };
-            result_tensor.set_grad_fn(Some(Arc::new(grad_fn)))?;
-            result_tensor.set_requires_grad(true)?;
-        } else {
-             // Should not happen if requires_grad is true, but add safety check
-             return Err(NeuraRustError::InternalError(
-                 "Input requires_grad but Arc could not be cloned".to_string(),
-             ));
+    let mut output_data = vec![0.0f32; input_guard.numel()];
+    let offset = input_guard.offset;
+    for i in 0..output_data.len() {
+        let val = input_slice[offset + i];
+        if val > 0.0 {
+            output_data[i] = val;
         }
     }
 
-    Ok(result_tensor)
+    let output_tensor = Tensor::new(output_data, input_guard.shape.clone())?;
+
+    if input.requires_grad() {
+        let backward_op = ReluBackward { input_node: Arc::clone(&input.data) };
+        let mut output_write_guard = output_tensor.write_data();
+        output_write_guard.grad_fn = Some(Arc::new(backward_op));
+        output_write_guard.requires_grad = true;
+    }
+
+    Ok(output_tensor)
 }
 
-// Link to the external test file
-#[path = "relu_test.rs"]
-mod tests;
-
-// Add autograd tests
 #[cfg(test)]
-mod autograd_tests {
+mod tests {
     use super::*;
-    use crate::autograd::grad_check::check_grad;
-    use crate::Tensor;
 
-    // Helper for f64 tests
-    fn create_tensor_f64_with_grad(data: Vec<f64>, shape: Vec<usize>) -> Tensor<f64> {
-        let t = Tensor::new(data, shape).unwrap();
-        t.set_requires_grad(true).unwrap();
-        t
+    fn get_f32_data(tensor: &Tensor) -> Vec<f32> {
+        let guard = tensor.read_data();
+        assert_eq!(guard.dtype, DType::F32);
+        assert_eq!(guard.device, StorageDevice::CPU);
+        let buffer_arc = guard.buffer().try_get_cpu_f32().unwrap().clone();
+        buffer_arc.to_vec()
+    }
+
+    fn assert_tensor_eq(actual: &Tensor, expected_data: &[f32], expected_shape: &[usize]) {
+        assert_eq!(actual.shape(), expected_shape, "Shape mismatch");
+        let actual_data = get_f32_data(actual);
+        assert_eq!(actual_data.as_slice(), expected_data, "Data mismatch");
     }
 
     #[test]
-    fn test_relu_backward_basic() {
-        // Use input containing 0.0, but increase tolerance for check_grad
-        let input = create_tensor_f64_with_grad(vec![-2.0, -1.0, 0.0, 1.0, 2.0], vec![5]);
-        let func = |inputs: &[Tensor<f64>]| relu_op(&inputs[0]);
-
-        let output_shape = vec![5];
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-        let epsilon = 1e-5;
-        // Increase tolerance to account for numerical gradient difference at x=0 (0.5 vs 0.0)
-        let tolerance = 0.51;
-
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
-        assert!(grad_check_result.is_ok(), "ReLU basic backward grad check failed: {:?}", grad_check_result.err());
+    fn test_relu_forward() -> Result<(), NeuraRustError> {
+        let input = Tensor::new(vec![-1.0, 0.0, 1.0, 2.0], vec![2, 2])?;
+        let output = relu_op(&input)?;
+        let expected_data = vec![0.0, 0.0, 1.0, 2.0];
+        assert_tensor_eq(&output, &expected_data, &[2, 2]);
+        Ok(())
     }
 
-     #[test]
-    fn test_relu_backward_all_positive() {
-        let input = create_tensor_f64_with_grad(vec![1.0, 2.0, 3.0], vec![3]);
-        let func = |inputs: &[Tensor<f64>]| relu_op(&inputs[0]);
+    #[test]
+    fn test_relu_backward() -> Result<(), NeuraRustError> {
+        let input = Tensor::new(vec![-1.0, 0.0, 1.0, 2.0], vec![2, 2])?;
+        let _ = input.set_requires_grad(true);
 
-        let output_shape = vec![3];
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-        let epsilon = 1e-5;
-        let tolerance = 1e-7; // Standard tolerance is fine here
+        let output = relu_op(&input)?;
+        assert!(output.requires_grad());
+        assert!(output.grad_fn().is_some());
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
-         assert!(grad_check_result.is_ok(), "ReLU all positive backward grad check failed: {:?}", grad_check_result.err());
+        let grad_output = Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
+
+        let grad_fn = output.grad_fn().unwrap();
+        let grad_inputs = grad_fn.backward(&grad_output)?;
+
+        assert_eq!(grad_inputs.len(), 1);
+        let grad_input = &grad_inputs[0];
+        let expected_grad_input = vec![0.0, 0.0, 0.3, 0.4];
+        assert_tensor_eq(grad_input, &expected_grad_input, &[2, 2]);
+
+        Ok(())
     }
 
-     #[test]
-    fn test_relu_backward_all_negative_or_zero() {
-        // Use input containing 0.0, but increase tolerance
-        let input = create_tensor_f64_with_grad(vec![-2.0, -1.0, 0.0], vec![3]);
-        let func = |inputs: &[Tensor<f64>]| relu_op(&inputs[0]);
+    #[test]
+    fn test_relu_forward_zeros() -> Result<(), NeuraRustError> {
+        let input = Tensor::new(vec![0.0, 0.0, 0.0], vec![3])?;
+        let output = relu_op(&input)?;
+        assert_tensor_eq(&output, &vec![0.0, 0.0, 0.0], &[3]);
+        Ok(())
+    }
 
-        let output_shape = vec![3];
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-        let epsilon = 1e-5;
-        // Increase tolerance to account for numerical gradient difference at x=0
-        let tolerance = 0.51;
+    #[test]
+    fn test_relu_forward_positive() -> Result<(), NeuraRustError> {
+        let input = Tensor::new(vec![1.0, 10.0, 0.1], vec![3])?;
+        let output = relu_op(&input)?;
+        assert_tensor_eq(&output, &vec![1.0, 10.0, 0.1], &[3]);
+        Ok(())
+    }
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
-         assert!(grad_check_result.is_ok(), "ReLU all negative/zero backward grad check failed: {:?}", grad_check_result.err());
+    #[test]
+    fn test_relu_backward_mixed() -> Result<(), NeuraRustError> {
+        let input = Tensor::new(vec![-2.0, 3.0, 0.0, -5.0, 6.0], vec![5])?;
+        let _ = input.set_requires_grad(true);
+        let output = relu_op(&input)?;
+        let grad_output = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 1.0], vec![5])?;
+        let grad_fn = output.grad_fn().unwrap();
+        let grad_inputs = grad_fn.backward(&grad_output)?;
+        assert_eq!(grad_inputs.len(), 1);
+        assert_tensor_eq(&grad_inputs[0], &vec![0.0, 1.0, 0.0, 0.0, 1.0], &[5]);
+        Ok(())
     }
 } 

@@ -2,88 +2,101 @@
 
 use crate::device::StorageDevice;
 use crate::tensor::Tensor;
+ // Import DType
+use crate::buffer::{Buffer, CpuBuffer}; // Import Buffer types
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
-use std::marker::Copy;
+// use std::marker::Copy; // No longer needed for impls
 use std::sync::Arc;
 use std::cmp::PartialEq;
 
 // --- Trait Implementations ---
 
-// Add bounds here
-impl<T: 'static + Debug + Copy> Clone for Tensor<T> {
+// Remove <T> and bounds
+impl Clone for Tensor {
     /// Clones the Tensor. This is a shallow clone that increases the reference count
     /// of the underlying shared data. Modifications through one clone will be visible
     /// through others.
     fn clone(&self) -> Self {
         Tensor {
-            data: Arc::clone(&self.data),
+            data: Arc::clone(&self.data), // Clone the Arc
         }
     }
 }
 
-// Add bounds here, merge with existing Debug
-impl<T: 'static + Debug + Copy> Debug for Tensor<T> {
+// Remove <T> and bounds
+impl Debug for Tensor {
     /// Formats the Tensor for debugging. Shows shape, device, strides, offset,
-    /// and a preview of the data if it's on the CPU.
+    /// dtype, and a preview of the data if it's on the CPU.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        // Need read_data access
-        let td = self.read_data();
+        // Use read lock on self.data
+        let td_guard = self.data.read().map_err(|_| fmt::Error)?; // Handle poisoned lock
+        let td = &*td_guard;
 
         write!(
             f,
-            "Tensor(shape={:?}, device={:?}, strides={:?}, offset={}, data=",
-            td.shape, td.device, td.strides, td.offset
+            "Tensor(shape={:?}, device={:?}, dtype={:?}, strides={:?}, offset={}, data=",
+            td.shape, td.device, td.dtype, td.strides, td.offset // Access fields from guard
         )?;
 
-        match td.device {
-            StorageDevice::CPU => {
-                match td.data.cpu_data() {
-                    Ok(_cpu_data) => {
-                        // Simplified display
-                        write!(f, "[... ~{} elements on CPU ...]", td.numel())?;
+        // Match on buffer type and device
+        match (&*td.buffer, td.device) {
+            (Buffer::Cpu(cpu_buffer), StorageDevice::CPU) => {
+                // Match on specific CPU buffer type (only F32 for now)
+                match cpu_buffer {
+                    CpuBuffer::F32(data_arc) => {
+                        // Get slice for preview (limit number of elements shown)
+                        let data_slice: &Vec<f32> = data_arc;
+                        let numel = td.numel();
+                        let preview_len = std::cmp::min(numel, 10); // Show max 10 elements
+                        write!(f, "[... ~{} elements (F32): ", numel)?;
+                        // TODO: This preview ignores strides/offset for simplicity
+                        for i in 0..preview_len {
+                            write!(f, "{:?}{}", data_slice.get(i).unwrap_or(&f32::NAN), if i < preview_len - 1 { ", " } else { "" })?;
+                        }
+                        if numel > preview_len { write!(f, ", ...")?; }
+                        write!(f, "]")?;
                     }
-                    Err(_) => write!(f, "<Error getting CPU data>")?,
+                    // Add arms for other CpuBuffer types later
+                    // _ => write!(f, "<Other CPU Buffer Type>")?,
                 }
             }
-            StorageDevice::GPU => write!(f, "<GPU Buffer>")?,
+            (Buffer::Gpu{..}, StorageDevice::GPU) => write!(f, "<GPU Buffer>")?,
+            // Handle inconsistent state (e.g., CPU buffer on GPU device marker?)
+            _ => write!(f, "<Inconsistent Buffer/Device State>")?,
         }
 
-        write!(f, ")")
+        // Add requires_grad info
+        write!(f, ", requires_grad={})", td.requires_grad)?;
+
+        Ok(())
     }
 }
 
-// Add bounds here, merge with existing PartialEq
-impl<T> PartialEq for Tensor<T>
-where
-    T: 'static + Debug + Copy + PartialEq,
-{
+// Remove <T> and bounds
+impl PartialEq for Tensor {
     /// Checks for logical equality between two Tensors.
     ///
-    /// Two tensors are considered equal if they have the same device, shape, strides,
-    /// offset, and underlying data content according to their view parameters.
-    ///
-    /// Gradient information (`grad`, `requires_grad`, `grad_fn`) is NOT considered
-    /// in this equality check.
-    ///
-    /// Note: This currently only implements comparison for tensors residing on the CPU.
+    /// Two tensors are considered equal if they have the same device, dtype, shape,
+    /// strides, offset, and underlying data content according to their view parameters.
+    /// Gradient information is NOT considered.
     fn eq(&self, other: &Self) -> bool {
         if Arc::ptr_eq(&self.data, &other.data) {
-            return true;
+            return true; // Same underlying TensorData instance
         }
 
-        // Use read lock directly via the data field
         let self_guard = match self.data.read() {
             Ok(guard) => guard,
-            Err(_) => return false, // Poisoned lock, consider unequal
+            Err(_) => return false,
         };
         let other_guard = match other.data.read() {
             Ok(guard) => guard,
             Err(_) => return false,
         };
 
-        // Compare metadata
+        // Compare metadata first (including dtype)
         if self_guard.device != other_guard.device
+            || self_guard.dtype != other_guard.dtype // Add dtype check
             || self_guard.shape != other_guard.shape
             || self_guard.strides != other_guard.strides
             || self_guard.offset != other_guard.offset
@@ -91,71 +104,68 @@ where
             return false;
         }
 
-        // Compare buffer contents for CPU tensors
-        if self_guard.device == StorageDevice::CPU {
-            let self_buffer_arc = match self_guard.data.cpu_data() {
-                Ok(arc) => arc,
-                Err(_) => return false, // Failed to get CPU data
-            };
-            let other_buffer_arc = match other_guard.data.cpu_data() {
-                Ok(arc) => arc,
-                Err(_) => return false,
-            };
+        // Compare buffer contents based on device and dtype
+        match ((&*self_guard.buffer, self_guard.device), (&*other_guard.buffer, other_guard.device)) {
+            ((Buffer::Cpu(CpuBuffer::F32(self_arc)), StorageDevice::CPU),
+             (Buffer::Cpu(CpuBuffer::F32(other_arc)), StorageDevice::CPU)) => {
+                // Both are F32 CPU buffers
+                if Arc::ptr_eq(self_arc, other_arc) {
+                    return true; // Same underlying data Arc
+                }
+                let self_data_slice: &Vec<f32> = self_arc;
+                let other_data_slice: &Vec<f32> = other_arc;
 
-            // Optimization: If underlying data Arcs are the same, data is equal
-            if Arc::ptr_eq(self_buffer_arc, other_buffer_arc) {
-                return true;
-            }
-
-            let self_data_slice = self_buffer_arc.as_slice();
-            let other_data_slice = other_buffer_arc.as_slice();
-
-            let numel = self_guard.shape.iter().product();
-            if numel == 0 {
-                return true; // Empty tensors are equal
-            }
-
-            // Use nd_iter or direct index calculation for element comparison
-            // Need index_to_coord and get_offset from TensorData
-            let shape = &self_guard.shape;
-            let self_strides = &self_guard.strides;
-            // No need for other_strides if shapes/strides already matched
-
-            for i in 0..numel {
-                 // Need to qualify index_to_coord if it's in utils
-                let coords = super::utils::index_to_coord(i, self_strides, shape);
-                let self_offset = self_guard.get_offset(&coords);
-                let other_offset = other_guard.get_offset(&coords);
-
-                if self_offset >= self_data_slice.len() || other_offset >= other_data_slice.len() {
-                    return false; // Offset out of bounds
+                let numel = self_guard.numel();
+                if numel == 0 {
+                    return true; // Empty tensors are equal
                 }
 
-                if self_data_slice[self_offset] != other_data_slice[other_offset] {
-                    return false;
+                // Element-wise comparison respecting strides/offset
+                let shape = &self_guard.shape;
+                let self_strides = &self_guard.strides;
+                // No need for other_strides if shapes/strides already matched
+
+                for i in 0..numel {
+                    // Use the utility function from the tensor module directly
+                    let coords = crate::tensor::utils::index_to_coord(i, self_strides, shape);
+                    let self_abs_offset = self_guard.get_offset(&coords);
+                    let other_abs_offset = other_guard.get_offset(&coords);
+
+                    // Bounds check before accessing slices
+                    if self_abs_offset >= self_data_slice.len() || other_abs_offset >= other_data_slice.len() {
+                         eprintln!("Warning: Offset out of bounds during PartialEq check. This might indicate incorrect strides or shape.");
+                        return false;
+                    }
+
+                    // Compare f32 values (consider using approx::relative_eq! for tolerance later?)
+                    if self_data_slice[self_abs_offset] != other_data_slice[other_abs_offset] {
+                        return false;
+                    }
                 }
+                true // All elements matched
             }
-            // All elements matched
-            true
-        } else {
-            // For non-CPU tensors, rely on metadata comparison for now
-            eprintln!(
-                "Warning: PartialEq comparison for non-CPU tensors relies on metadata only."
-            );
-            true // Metadata already matched
+            // TODO: Add arms for other matching DTypes (I64 == I64, etc.) later
+            // ((Buffer::Cpu(CpuBuffer::I64(..)), StorageDevice::CPU), (Buffer::Cpu(CpuBuffer::I64(..)), StorageDevice::CPU)) => { ... }
+
+            // Add arms for GPU comparison later if possible/meaningful
+            // ((Buffer::Gpu{..}, StorageDevice::GPU), (Buffer::Gpu{..}, StorageDevice::GPU)) => { ... }
+
+            // All other combinations (different devices, different dtypes, CPU vs GPU) are considered unequal
+            _ => false,
         }
     }
 }
 
-// Add bounds here, merge with existing Eq
-impl<T: Eq + 'static + Debug + Copy> Eq for Tensor<T> {} // Eq follows from PartialEq
+// Remove <T> and bounds
+impl Eq for Tensor {} // Eq follows from PartialEq
 
-// Add bounds here
-impl<T: Hash + 'static + Debug + Copy> Hash for Tensor<T> {
+// Remove <T> and bounds
+impl Hash for Tensor {
     /// Hashes the Tensor based on the pointer address of the `RwLock<TensorData>`.
+    /// This allows using Tensors as keys in HashMaps/HashSets where object identity matters.
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // Need id_ptr access
-        self.id_ptr().hash(state);
+        // Hash the address of the Arc's contained RwLock<TensorData>
+        Arc::as_ptr(&self.data).hash(state);
     }
 }
 

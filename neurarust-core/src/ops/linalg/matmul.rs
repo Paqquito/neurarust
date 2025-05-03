@@ -5,57 +5,61 @@ use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use crate::ops::view::transpose_op; // Needed for backward
+use crate::types::DType;
 
-use num_traits::{One, Zero};
 use std::fmt::Debug;
-use std::ops::{Add, AddAssign, Mul, MulAssign};
 use std::sync::{Arc, RwLock};
 
 // --- MatmulBackward Definition ---
 
 /// Backward operation context for `matmul_op`.
 #[derive(Debug)]
-struct MatmulBackward<T>
-where
-    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum + std::iter::Product,
-{
-    a_node: Arc<RwLock<TensorData<T>>>,
-    b_node: Arc<RwLock<TensorData<T>>>,
+struct MatmulBackward {
+    // Store Arc<RwLock<TensorData>> for Send + Sync safety
+    a_node: Arc<RwLock<TensorData>>,
+    b_node: Arc<RwLock<TensorData>>,
     a_requires_grad: bool,
     b_requires_grad: bool,
 }
 
 // --- BackwardOp Implementation for MatmulBackward ---
 
-impl<T> BackwardOp<T> for MatmulBackward<T>
-where
-    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum + std::iter::Product,
-{
-    fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
-        let mut input_grads: Vec<Tensor<T>> = Vec::with_capacity(2);
+impl BackwardOp for MatmulBackward {
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        let mut input_grads: Vec<Tensor> = Vec::with_capacity(2);
 
+        // Create Tensors by cloning the Arcs stored in self
         let a_tensor = Tensor { data: self.a_node.clone() };
         let b_tensor = Tensor { data: self.b_node.clone() };
 
-        // Calculate grad_a = grad_output * b.T
+        // Calculate grad_a = grad_output @ b.T
         if self.a_requires_grad {
-            let b_transposed = transpose_op(&b_tensor, 0, 1)?;
+            // Ensure b_transposed is contiguous before matmul
+            let b_transposed = transpose_op(&b_tensor, 0, 1)?.contiguous()?;
             let grad_a = matmul_op(grad_output, &b_transposed)?;
             input_grads.push(grad_a);
-        }
+        } // Else: No grad needed for a
 
-        // Calculate grad_b = a.T * grad_output
+        // Calculate grad_b = a.T @ grad_output
         if self.b_requires_grad {
-            let a_transposed = transpose_op(&a_tensor, 0, 1)?;
+             // Ensure a_transposed is contiguous before matmul
+            let a_transposed = transpose_op(&a_tensor, 0, 1)?.contiguous()?;
             let grad_b = matmul_op(&a_transposed, grad_output)?;
+            // Ensure grads are pushed in the correct order relative to `inputs()`
+            // If a_grad wasn't pushed, grad_b is the first element.
+            // If a_grad was pushed, grad_b is the second.
+            // Let's assume the graph expects grads only for inputs that required them.
+            
             input_grads.push(grad_b);
-        }
+        } // Else: No grad needed for b
 
         Ok(input_grads)
     }
 
-    fn inputs(&self) -> Vec<NodeId<T>> {
+    fn inputs(&self) -> Vec<NodeId> {
         let mut ids = Vec::new();
+        // Return the NodeId (raw pointer) for inputs that required grad
+        // Order should match the original op's input order (a, then b)
         if self.a_requires_grad { ids.push(Arc::as_ptr(&self.a_node)); }
         if self.b_requires_grad { ids.push(Arc::as_ptr(&self.b_node)); }
         ids
@@ -65,15 +69,13 @@ where
 // --- matmul_op Implementation (Public API with Autograd) ---
 
 /// Performs 2D matrix multiplication (A @ B).
-pub fn matmul_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
-where
-    T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign + PartialEq + PartialOrd + std::iter::Sum + std::iter::Product,
-{
+/// Currently only supports F32 tensors on CPU.
+pub fn matmul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_requires_grad = a.requires_grad();
     let b_requires_grad = b.requires_grad();
     let requires_grad = a_requires_grad || b_requires_grad;
 
-    // Clone Arcs needed for backward pass *before* calling internal matmul
+    // Clone Arcs for TensorData if grad is needed
     let a_node_arc = if requires_grad { Some(a.data.clone()) } else { None };
     let b_node_arc = if requires_grad { Some(b.data.clone()) } else { None };
 
@@ -82,18 +84,21 @@ where
 
     // --- Autograd Integration ---
     if requires_grad {
+        // We need both Arcs if any grad is required by MatmulBackward's current structure
         if let (Some(a_arc), Some(b_arc)) = (a_node_arc, b_node_arc) {
-            let grad_fn = MatmulBackward {
+             let grad_fn = MatmulBackward {
                 a_node: a_arc,
                 b_node: b_arc,
                 a_requires_grad,
                 b_requires_grad,
             };
-            output_tensor.set_grad_fn(Some(Arc::new(grad_fn)))?;
-            output_tensor.set_requires_grad(true)?;
+            let mut output_write_guard = output_tensor.write_data();
+            output_write_guard.grad_fn = Some(Arc::new(grad_fn));
+            output_write_guard.requires_grad = true;
         } else {
-            return Err(NeuraRustError::InternalError(
-                "Input requires_grad but Arc could not be cloned for Matmul".to_string(),
+            // This case should not happen if requires_grad is true and we correctly cloned
+             return Err(NeuraRustError::InternalError(
+                "Matmul requires grad but Arc<TensorData> unavailable".to_string(),
             ));
         }
     }
@@ -103,29 +108,25 @@ where
 
 // --- matmul_kernel (Private Calculation Core) ---
 
-/// Private kernel for matrix multiplication calculation.
-/// Assumes shapes are validated and buffers are accessible.
-fn matmul_kernel<T>(
+/// Private kernel for matrix multiplication calculation. F32 CPU implementation.
+fn matmul_kernel(
     m: usize,
     k: usize, // Inner dimension (k1 == k2)
     n: usize,
-    a_buffer: &[T],
+    a_buffer: &[f32],
     a_strides: &[usize],
     a_offset: usize,
-    b_buffer: &[T],
+    b_buffer: &[f32],
     b_strides: &[usize],
     b_offset: usize,
-) -> Result<Vec<T>, NeuraRustError>
-where
-     T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign,
-{
-    let mut output_data = vec![T::zero(); m * n];
+) -> Result<Vec<f32>, NeuraRustError> {
+    let mut output_data = vec![0.0f32; m * n];
     // Output is contiguous, calculate its strides implicitly or pass them?
     // For simplicity, calculate index directly: output_physical_idx = i * n + j;
 
     for i in 0..m { // Row of output
         for j in 0..n { // Col of output
-            let mut sum = T::zero();
+            let mut sum = 0.0f32;
             for k_idx in 0..k { // Inner dimension
                 // Calculate physical index for A[i, k_idx]
                 let a_physical_idx = a_offset + i * a_strides[0] + k_idx * a_strides[1];
@@ -157,45 +158,50 @@ where
 
 // --- matmul_internal Implementation (Core Logic, No Autograd Setup) ---
 
-/// Internal implementation of 2D matrix multiplication without autograd setup.
-fn matmul_internal<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
-where
-     T: Debug + Copy + Send + Sync + 'static + Default + Zero + One + Add<Output = T> + AddAssign + Mul<Output = T> + MulAssign,
-{
+/// Internal implementation of 2D matrix multiplication without autograd setup. F32 CPU.
+fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
-    // --- Device Checks --- (Simplified: Assume CPU)
-    if a_guard.device != StorageDevice::CPU || b_guard.device != StorageDevice::CPU {
+    // --- Rank Check ---
+    let a_shape = a_guard.shape.clone();
+    let b_shape = b_guard.shape.clone();
+    if a_shape.len() != 2 || b_shape.len() != 2 {
+        return Err(NeuraRustError::ShapeMismatch {
+            operation: "matmul (rank check)".to_string(),
+            // Format shapes/ranks into Strings
+            expected: format!("rank 2"), // Indicating rank 2
+            actual: format!("rank {} and {}", a_shape.len(), b_shape.len()),
+        });
+    }
+
+    // --- Inner Dimension Check ---
+    let m = a_shape[0];
+    let k1 = a_shape[1];
+    let k2 = b_shape[0];
+    let n = b_shape[1];
+    if k1 != k2 {
+        return Err(NeuraRustError::ShapeMismatch {
+            operation: "matmul (inner dim)".to_string(),
+            // Format shapes into Strings
+            expected: format!("[{}, {}]", m, k1), // Or some way to show inner dim match
+            actual: format!("[{}, {}]", k2, n),
+        });
+    }
+
+    // --- Device Check ---
+    if a_guard.device != StorageDevice::CPU || b_guard.device != StorageDevice::CPU
+        || a_guard.dtype != DType::F32 || b_guard.dtype != DType::F32
+    {
+        // Provide more specific error?
         return Err(NeuraRustError::UnsupportedOperation(
-            "Matmul currently only supports CPU".to_string(),
+            "Matmul currently only supports F32 tensors on CPU".to_string(),
         ));
     }
 
-    // --- Shape Checks ---
-    if a_guard.shape.len() != 2 || b_guard.shape.len() != 2 {
-        return Err(NeuraRustError::ShapeMismatch {
-            expected: vec![2], // Indicating rank 2
-            actual: if a_guard.shape.len() != 2 { a_guard.shape.clone() } else { b_guard.shape.clone() },
-            operation: "matmul (inputs must be 2D)".to_string(),
-        });
-    }
-    let m = a_guard.shape[0];
-    let k1 = a_guard.shape[1];
-    let k2 = b_guard.shape[0];
-    let n = b_guard.shape[1];
-
-    if k1 != k2 {
-         return Err(NeuraRustError::ShapeMismatch {
-            expected: vec![m, k1], // Or some way to show inner dim match
-            actual: vec![k2, n],
-            operation: format!("matmul (inner dimensions must match: {} != {})", k1, k2),
-        });
-    }
-
     // --- Extract data for kernel ---
-    let a_buffer_arc = a_guard.data.cpu_data()?.clone();
-    let b_buffer_arc = b_guard.data.cpu_data()?.clone();
+    let a_buffer_arc = a_guard.buffer().try_get_cpu_f32()?.clone();
+    let b_buffer_arc = b_guard.buffer().try_get_cpu_f32()?.clone();
     let a_buffer_slice = a_buffer_arc.as_slice();
     let b_buffer_slice = b_buffer_arc.as_slice();
 

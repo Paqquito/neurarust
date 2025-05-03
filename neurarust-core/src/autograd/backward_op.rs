@@ -10,7 +10,7 @@ use std::sync::RwLock;
 /// Trait for operations that support backward pass in the computation graph.
 /// Implementors define how to compute gradients for their inputs given the output gradient.
 /// Needs Send + Sync bounds because the Arc<dyn BackwardOp> might be shared across threads.
-pub trait BackwardOp<T: 'static + Debug + Copy + Send + Sync>: Debug + Send + Sync {
+pub trait BackwardOp: Debug + Send + Sync {
     /// Performs the backward pass.
     ///
     /// # Arguments
@@ -22,15 +22,15 @@ pub trait BackwardOp<T: 'static + Debug + Copy + Send + Sync>: Debug + Send + Sy
     /// input tensor of the forward operation, or a `NeuraRustError` if the backward
     /// pass fails (e.g., device mismatch, invalid shape). The order must match the
     /// order of inputs in the forward pass.
-    fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError>;
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError>;
 
     /// Returns identifiers for the input `TensorData` nodes used in the forward pass.
     ///
     /// This is used to traverse the computation graph backwards.
-    /// Returning raw pointers (`*const RwLock<TensorData<T>>>`) provides a stable identifier
+    /// Returning raw pointers (`*const RwLock<TensorData>`) provides a stable identifier
     /// for each `TensorData` involved, suitable for use in graph structures (e.g., HashMap keys).
     /// It's crucial that these pointers remain valid for the lifetime of the graph traversal.
-    /// Using `Arc::as_ptr` on the `Arc<RwLock<TensorData<T>>>` held by the corresponding
+    /// Using `Arc::as_ptr` on the `Arc<RwLock<TensorData>>` held by the corresponding
     /// input `Tensor`s is a common way to obtain these pointers.
-    fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>>;
+    fn inputs(&self) -> Vec<*const RwLock<TensorData>>;
 }

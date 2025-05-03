@@ -1,45 +1,31 @@
 use crate::tensor::Tensor;
-use num_traits::{One, Zero};
-use std::fmt::Debug;
 
 /// Checks if two tensors are approximately equal (shape and data within tolerance).
-/// Assumes the actual tensor is on the CPU.
+/// Assumes the actual tensor is F32 and on the CPU.
 /// Panics if shapes differ or data differs significantly.
-pub fn check_tensor_near<T>(
-    actual: &Tensor<T>,
+pub fn check_tensor_near(
+    actual: &Tensor,
     expected_shape: &[usize],
-    expected_data: &[T],
-    tolerance: T,
-) where
-    T: PartialEq + PartialOrd + Debug + Copy + std::ops::Sub<Output = T> + Zero + One,
-{
+    expected_data: &[f32],
+    tolerance: f32,
+) {
     assert_eq!(actual.shape(), expected_shape, "Shape mismatch");
 
-    // Access CPU data buffer
-    let actual_buffer_arc = actual.borrow_data_buffer();
-    let actual_data_arc = actual_buffer_arc
-        .cpu_data()
-        .expect("Actual tensor not on CPU in check_tensor_near");
+    // Use get_f32_data to access data
+    let actual_data_vec = actual
+        .get_f32_data()
+        .expect("Failed to get F32 CPU data in check_tensor_near");
 
     assert_eq!(
-        actual_data_arc.len(),
+        actual_data_vec.len(),
         expected_data.len(),
         "Data length mismatch"
     );
 
-    // Iterate over the CPU data slice
-    for (i, (a, e)) in actual_data_arc.iter().zip(expected_data.iter()).enumerate() {
-        let diff = *a - *e;
-        // Check if the difference is outside the tolerance range [ -tolerance, +tolerance ]
-        // Equivalent to checking !(diff >= -tolerance && diff <= tolerance)
-        // Requires PartialOrd trait
-        let is_outside_tolerance = if diff > T::zero() {
-            diff > tolerance // Check against positive tolerance
-        } else {
-            diff < T::zero() - tolerance // Check against negative tolerance equivalent (0 - tol)
-        };
-
-        if is_outside_tolerance {
+    // Iterate over the f32 data slice
+    for (i, (a, e)) in actual_data_vec.iter().zip(expected_data.iter()).enumerate() {
+        let diff = (*a - *e).abs(); // Use abs() for f32 comparison
+        if diff > tolerance {
             panic!(
                 "Data mismatch at index {}: actual={:?}, expected={:?}, diff={:?}, tolerance={:?}",
                 i, a, e, diff, tolerance
@@ -48,49 +34,24 @@ pub fn check_tensor_near<T>(
     }
 }
 
-#[cfg(test)]
-pub(crate) fn create_test_tensor<T>(
-    data: Vec<T>,
+/// Helper to create a simple f32 tensor for testing purposes.
+pub(crate) fn create_test_tensor(
+    data: Vec<f32>,
     shape: Vec<usize>,
-) -> Tensor<T>
-where
-    T: Default
-        + Debug
-        + Clone
-        + Copy
-        + PartialEq
-        + PartialOrd
-        + Zero
-        + One
-        + std::iter::Sum
-        + Send
-        + Sync
-        + 'static,
-{
-    Tensor::new(data, shape).unwrap()
+) -> Tensor {
+    Tensor::new(data, shape).expect("Failed to create test tensor")
 }
 
-#[cfg(test)]
-pub(crate) fn create_test_tensor_with_grad<T>(
-    data: Vec<T>,
+/// Helper to create a simple f32 tensor that requires gradient for testing.
+pub(crate) fn create_test_tensor_with_grad(
+    data: Vec<f32>,
     shape: Vec<usize>,
-) -> Tensor<T>
-where
-    T: Default
-        + Debug
-        + Clone
-        + Copy
-        + PartialEq
-        + PartialOrd
-        + Zero
-        + One
-        + std::iter::Sum
-        + Send
-        + Sync
-        + 'static
-        + std::ops::AddAssign,
-{
-    let tensor = Tensor::new(data, shape).unwrap();
-    tensor.set_requires_grad(true).unwrap();
+) -> Tensor {
+    let tensor = Tensor::new(data, shape).expect("Failed to create test tensor with grad");
+    // Manually set requires_grad on TensorData
+    {
+        let mut tensor_data_guard = tensor.data.write().unwrap();
+        tensor_data_guard.requires_grad = true;
+    }
     tensor
 }

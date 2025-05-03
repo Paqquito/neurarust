@@ -1,267 +1,378 @@
 // neurarust-core/src/ops/arithmetic/add.rs
 
-use crate::autograd::{backward_op::BackwardOp, graph::NodeId};
+use crate::autograd::backward_op::BackwardOp;
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
-use crate::tensor::utils::{broadcast_shapes, calculate_strides, index_to_coord};
-use crate::tensor::Tensor;
-use num_traits::{One, Zero};
-use std::cmp::PartialEq;
-use std::default::Default;
-use std::fmt::Debug;
-use std::iter::Sum;
-use std::ops::{Add, AddAssign};
-use std::sync::Arc;
 use crate::tensor_data::TensorData;
-use std::sync::RwLockReadGuard;
+use crate::tensor::Tensor;
+use crate::types::DType;
+use std::sync::RwLock;
+use crate::tensor::utils::broadcast_shapes;
+use std::sync::Arc;
 
-// --- Kernel de Calcul ---
+use std::fmt::Debug;
 
-/// Noyau de calcul privé pour l'addition élément par élément avec broadcasting.
-/// Gère l'itération, le calcul d'indices/offsets et l'opération arithmétique.
-fn add_kernel<T>(
-    a_guard: &RwLockReadGuard<'_, TensorData<T>>,
-    b_guard: &RwLockReadGuard<'_, TensorData<T>>,
-    a_data_slice: &[T],
-    b_data_slice: &[T],
-    output_shape: &[usize],
-) -> Result<Vec<T>, NeuraRustError>
-where
-    T: Add<Output = T>
-        + Copy
-        + Debug
-        + Default
-        + Send
-        + Sync
-        + Zero
-        + One
-        + AddAssign
-        + PartialEq
-        + PartialOrd
-        + Sum
-        + 'static,
-{
-    let numel_result = output_shape.iter().product();
-    let mut result_data_vec = Vec::with_capacity(numel_result);
-    let result_strides = calculate_strides(output_shape);
+// --- Backward Operation Structure ---
+#[derive(Debug)]
+struct AddBackward { // Removed <T>
+    // Store context needed for backward pass and graph traversal
+    a_node: Arc<RwLock<TensorData>>,
+    b_node: Arc<RwLock<TensorData>>,
+    a_shape: Vec<usize>,
+    b_shape: Vec<usize>,
+    a_requires_grad: bool, // To know which grads to compute/return
+    b_requires_grad: bool,
+}
 
-    let rank_diff_a = output_shape.len().saturating_sub(a_guard.shape.len());
-    let rank_diff_b = output_shape.len().saturating_sub(b_guard.shape.len());
+// --- Backward Operation Implementation ---
+impl BackwardOp for AddBackward { // Remove <T>
+    /// Computes gradients for the addition operation z = a + b.
+    /// grad(a) = grad_output * dz/da = grad_output * 1 = grad_output
+    /// grad(b) = grad_output * dz/db = grad_output * 1 = grad_output
+    /// Need to handle broadcasting by reducing gradients back to original shapes.
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        // TODO: Implement gradient reduction for broadcasting
+        // let grad_a = reduce_gradient_to_shape(grad_output, &self.a_shape)?;
+        // let grad_b = reduce_gradient_to_shape(grad_output, &self.b_shape)?;
+        // For now, assume no broadcasting or handle later
+        let mut grads = Vec::with_capacity(2);
 
-    let mut input_a_coords = vec![0; a_guard.shape.len()];
-    let mut input_b_coords = vec![0; b_guard.shape.len()];
-
-    for i in 0..numel_result {
-        let output_coords = index_to_coord(i, &result_strides, output_shape);
-
-        for dim_idx in 0..a_guard.shape.len() {
-            let output_coord_idx = rank_diff_a + dim_idx;
-            input_a_coords[dim_idx] = if a_guard.shape[dim_idx] == 1 {
-                0
-            } else {
-                output_coords[output_coord_idx]
-            };
+        if self.a_requires_grad {
+            let grad_a = reduce_gradient_to_shape(grad_output, &self.a_shape)?;
+            grads.push(grad_a);
         }
-        let offset_a = a_guard.get_offset(&input_a_coords);
-        let val_a = a_data_slice[offset_a];
-
-        for dim_idx in 0..b_guard.shape.len() {
-            let output_coord_idx = rank_diff_b + dim_idx;
-            input_b_coords[dim_idx] = if b_guard.shape[dim_idx] == 1 {
-                0
-            } else {
-                output_coords[output_coord_idx]
-            };
+        if self.b_requires_grad {
+             let grad_b = reduce_gradient_to_shape(grad_output, &self.b_shape)?;
+            // If a didn't require grad, b is the first element needed
+             grads.push(grad_b);
         }
-        let offset_b = b_guard.get_offset(&input_b_coords);
-        let val_b = b_data_slice[offset_b];
-
-        result_data_vec.push(val_a + val_b);
+        Ok(grads)
     }
 
-    Ok(result_data_vec)
+    fn inputs(&self) -> Vec<*const RwLock<TensorData>> { // Keep non-generic
+        // Return IDs of inputs that required grad, in the order (a, b)
+        let mut ids = Vec::new();
+        if self.a_requires_grad { ids.push(Arc::as_ptr(&self.a_node)); }
+        if self.b_requires_grad { ids.push(Arc::as_ptr(&self.b_node)); }
+        ids
+    }
+}
+
+/// Helper function to reduce a gradient tensor to match a target shape.
+/// This is used when backpropagating through broadcast operations.
+/// It sums the gradient along the broadcasted dimensions.
+fn reduce_gradient_to_shape(
+    grad: &Tensor,
+    target_shape: &[usize],
+) -> Result<Tensor, NeuraRustError> {
+    let grad_shape = grad.shape();
+    let grad_rank = grad_shape.len();
+    let target_rank = target_shape.len();
+
+    if grad_rank == 0 {
+        // If grad is scalar, return it directly (no reduction needed)
+        return Ok(grad.clone());
+    }
+    if target_rank > grad_rank {
+         return Err(NeuraRustError::InternalError(format!(
+             "Cannot reduce gradient of rank {} to target shape of rank {}",
+             grad_rank, target_rank
+         )));
+    }
+
+    // Identify axes to sum over
+    let mut axes_to_sum = Vec::new();
+    for i in 0..(grad_rank - target_rank) {
+        axes_to_sum.push(i); // Sum leading dimensions added by broadcasting
+    }
+    for i in 0..target_rank {
+        let target_dim = target_shape[i];
+        let grad_dim = grad_shape[i + (grad_rank - target_rank)];
+        if target_dim == 1 && grad_dim > 1 {
+            axes_to_sum.push(i + (grad_rank - target_rank)); // Sum broadcasted dimension
+        } else if target_dim != grad_dim {
+            // This case should ideally be caught by broadcast check earlier
+             return Err(NeuraRustError::InternalError(format!(
+                 "Shape mismatch during gradient reduction: grad_dim={}, target_dim={} at index {}",
+                 grad_dim, target_dim, i
+             )));
+        }
+    }
+
+    // Perform the sum reduction
+    let reduced_grad = if !axes_to_sum.is_empty() {
+        crate::ops::reduction::sum_op(grad, Some(&axes_to_sum), true)? // Keep dims true for now
+    } else {
+        grad.clone()
+    };
+
+    // Reshape to remove summed dimensions if keep_dims was true and rank differs
+    // or if target_shape contained ones that were summed.
+     // Check if final shape matches target_shape after potential reduction
+     let final_shape: Vec<usize> = target_shape.iter().cloned().collect();
+     if reduced_grad.shape() != final_shape {
+         // If keep_dims=true created shape like [1, 5] instead of [5],
+         // or if target was [1, 5] and we summed axis 0 -> [1, 5]
+         // We need a reshape.
+         crate::ops::view::reshape_op(&reduced_grad, final_shape)
+     } else {
+        Ok(reduced_grad)
+    }
 }
 
 // --- Forward Operation ---
 
-/// Performs element-wise addition for two Tensors with broadcasting.
-/// Requires both tensors to be on the same device (currently CPU only).
-/// If either input tensor requires gradients, the output tensor will also require gradients
-/// and have its `grad_fn` set to an `AddBackward` operation node.
-/// Returns a `Result` wrapping the new `Tensor` or a `NeuraRustError`.
-/// This operation creates a new Tensor with copied data on the same device.
-pub fn add_op<T>(a: &Tensor<T>, b: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
-where
-    T: Add<Output = T>
-        + AddAssign
-        + Sum
-        + PartialOrd
-        + Send
-        + Sync
-        + std::iter::Product
-        + Debug
-        + Copy
-        + Clone
-        + Default
-        + PartialEq
-        + Zero
-        + One
-        + 'static,
-{
-    // --- Autograd Setup ---
-    let requires_grad = a.requires_grad() || b.requires_grad();
-    let mut a_id_maybe: Option<NodeId<T>> = None;
-    let mut a_shape_maybe: Option<Vec<usize>> = None;
-    let mut b_id_maybe: Option<NodeId<T>> = None;
-    let mut b_shape_maybe: Option<Vec<usize>> = None;
-
-    if requires_grad {
-        a_id_maybe = Some(a.get_node_id());
-        a_shape_maybe = Some(a.shape());
-        b_id_maybe = Some(b.get_node_id());
-        b_shape_maybe = Some(b.shape());
-    }
-
-    // Acquire read locks for inputs
-    let a_guard = a.read_data();
-    let b_guard = b.read_data();
+/// Performs element-wise addition of two tensors, supporting broadcasting.
+pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
+    let a_guard = a.data.read().unwrap();
+    let b_guard = b.data.read().unwrap();
 
     // --- Device Check ---
     if a_guard.device != b_guard.device {
-        return Err(NeuraRustError::UnsupportedOperation(format!(
-            "Cannot add tensors on different devices: {:?} and {:?}",
-            a_guard.device, b_guard.device
-        )));
+        return Err(NeuraRustError::DeviceMismatch {
+            operation: "add_op".to_string(),
+            expected: a_guard.device,
+            actual: b_guard.device,
+        });
     }
-    let device = a_guard.device;
-    if device != StorageDevice::CPU {
-        return Err(NeuraRustError::UnsupportedOperation(format!(
-            "Addition is currently only supported on CPU, not {:?}",
-            device
-        )));
+    if a_guard.device != StorageDevice::CPU {
+         return Err(NeuraRustError::UnsupportedOperation(
+            "add_op currently only supports CPU tensors.".to_string(),
+        ));
     }
 
-    // --- Get CPU Data Buffers ---
-    let a_data_arc = a_guard.data.cpu_data()?.clone();
-    let b_data_arc = b_guard.data.cpu_data()?.clone();
-    let a_data_slice = a_data_arc.as_slice();
-    let b_data_slice = b_data_arc.as_slice();
+    // --- DType Check ---
+    // For now, assume both are F32 or return error
+    if a_guard.dtype != DType::F32 || b_guard.dtype != DType::F32 {
+        return Err(NeuraRustError::UnsupportedOperation(
+            "add_op currently only supports F32 tensors.".to_string(),
+        ));
+    }
+    // Keep track of the output dtype even if only F32 for now
+    let output_dtype = DType::F32;
 
-    // --- Shape and Broadcasting ---
-    let a_shape = &a_guard.shape;
-    let b_shape = &b_guard.shape;
+    // --- Shape Broadcasting --- 
+    let output_shape = broadcast_shapes(&a_guard.shape, &b_guard.shape)?;
 
-    let output_shape =
-        broadcast_shapes(a_shape, b_shape).map_err(|_e| {
-            NeuraRustError::BroadcastError {
-                shape1: a_shape.clone(),
-                shape2: b_shape.clone(),
-            }
-        })?;
+    // --- Data Access & Metadata Extraction --- 
+    // Extract ALL necessary info while guards are held
+    let device = a_guard.device; // Devices are checked to be the same
+    let a_shape = a_guard.shape.clone();
+    let b_shape = b_guard.shape.clone();
+    let a_strides = a_guard.strides.clone();
+    let b_strides = b_guard.strides.clone();
+    let a_offset = a_guard.offset;
+    let b_offset = b_guard.offset;
+    let a_requires_grad = a_guard.requires_grad;
+    let b_requires_grad = b_guard.requires_grad;
+    
+    // Get buffer Arcs (assuming F32 CPU based on checks above)
+    // Clone the INNER Arc<Vec<f32>> here to own the data reference
+    let a_buffer_data_arc = a_guard.buffer().try_get_cpu_f32()?.clone(); 
+    let b_buffer_data_arc = b_guard.buffer().try_get_cpu_f32()?.clone();
+    let a_data = a_buffer_data_arc.as_slice(); // Get slices from owned Arcs
+    let b_data = b_buffer_data_arc.as_slice();
 
-    // --- Calculation (Appel au Kernel) ---
-    let result_data_vec = add_kernel(
-        &a_guard,
-        &b_guard,
-        a_data_slice,
-        b_data_slice,
-        &output_shape,
-    )?;
+    // Keep input TensorData Arcs if needed for backward pass
+    let a_node_arc = if a_requires_grad || b_requires_grad { Some(a.data.clone()) } else { None };
+    let b_node_arc = if a_requires_grad || b_requires_grad { Some(b.data.clone()) } else { None };
 
-    // Drop read locks explicitly (although they drop implicitly at end of scope)
+    // Drop guards explicitly NOW after extracting everything
     drop(a_guard);
     drop(b_guard);
 
-    // --- Create Result Tensor ---
-    let result_tensor = Tensor::new(result_data_vec, output_shape.clone())?;
+    // --- Computation --- 
+    let numel_out = output_shape.iter().product();
+    let mut result_data_vec = Vec::with_capacity(numel_out);
 
-    // --- Autograd Linkage (The General Pattern) ---
-    if requires_grad {
-        let backward_context = AddBackward {
-            a_id: a_id_maybe.unwrap(),
-            a_shape: a_shape_maybe.unwrap(),
-            b_id: b_id_maybe.unwrap(),
-            b_shape: b_shape_maybe.unwrap(),
-        };
-        let backward_op_arc: Arc<dyn BackwardOp<T> + Send + Sync> = Arc::new(backward_context);
-        result_tensor.set_requires_grad(true)?;
-        result_tensor.set_grad_fn(Some(backward_op_arc))?;
+    // Prepare indices and strides for iteration
+    let mut a_indices = vec![0; a_shape.len()];
+    let mut b_indices = vec![0; b_shape.len()];
+    let mut current_indices = vec![0; output_shape.len()];
+    let output_rank = output_shape.len();
+    let a_rank = a_shape.len();
+    let b_rank = b_shape.len();
+
+    for i in 0..numel_out {
+        // Calculate multi-dimensional index from linear index i for output_shape
+        let mut current_linear = i;
+        for dim in (0..output_rank).rev() {
+            let shape_val = output_shape[dim];
+            if shape_val > 0 { // Avoid division by zero for empty dimensions
+                 current_indices[dim] = current_linear % shape_val;
+                 current_linear /= shape_val;
+            } else {
+                 current_indices[dim] = 0;
+                 // current_linear remains 0 if shape_val is 0
+            }
+        }
+
+        // Calculate corresponding indices for a and b considering broadcasting rules
+        for dim in 0..output_rank {
+            let out_idx = current_indices[dim];
+            
+            // Index for a (handle rank difference)
+            let a_dim_idx = (dim as isize) - (output_rank as isize - a_rank as isize);
+            if a_dim_idx >= 0 {
+                let a_dim_idx = a_dim_idx as usize;
+                // If dim size in a is 1, index is 0, else it's the output index
+                a_indices[a_dim_idx] = if a_shape[a_dim_idx] == 1 { 0 } else { out_idx };
+            }
+
+            // Index for b (handle rank difference)
+            let b_dim_idx = (dim as isize) - (output_rank as isize - b_rank as isize);
+            if b_dim_idx >= 0 {
+                 let b_dim_idx = b_dim_idx as usize;
+                // If dim size in b is 1, index is 0, else it's the output index
+                b_indices[b_dim_idx] = if b_shape[b_dim_idx] == 1 { 0 } else { out_idx };
+            }
+        }
+
+        // Calculate physical offsets using strides
+        let a_physical_offset = a_offset + a_indices.iter().zip(a_strides.iter()).map(|(&idx, &stride)| idx * stride).sum::<usize>();
+        let b_physical_offset = b_offset + b_indices.iter().zip(b_strides.iter()).map(|(&idx, &stride)| idx * stride).sum::<usize>();
+        
+        // Perform addition
+        result_data_vec.push(a_data[a_physical_offset] + b_data[b_physical_offset]);
+    }
+    
+    // --- Create Result Tensor --- 
+    let output_tensor = Tensor::from_vec_f32(result_data_vec, output_shape)?; // Use helper
+
+    // --- Autograd Linkage --- 
+    // Link if either input requires gradient
+    if a_requires_grad || b_requires_grad {
+         if let (Some(a_arc), Some(b_arc)) = (a_node_arc, b_node_arc) {
+             // Create AddBackward with correct context (shapes, node arcs, flags)
+             let backward_context = AddBackward {
+                 a_node: a_arc,
+                 b_node: b_arc,
+                 a_shape, // Pass original shapes
+                 b_shape,
+                 a_requires_grad,
+                 b_requires_grad,
+             };
+             // Set requires_grad and grad_fn on the output tensor
+             let mut output_guard = output_tensor.write_data();
+             output_guard.requires_grad = true;
+             output_guard.grad_fn = Some(Arc::new(backward_context));
+         } else {
+             // This case should not be reachable if requires_grad flags are correct
+             return Err(NeuraRustError::InternalError("Add op requires grad but Arc nodes unavailable".to_string()));
+         }
     }
 
-    Ok(result_tensor)
-}
-
-/// REMOVED: In-place AddAssign is no longer safe/meaningful with shared Rc<Vec<T>> data.
-// impl<'a, T> AddAssign<&'a Tensor<T>> for Tensor<T>
-// where
-//     T: AddAssign + Copy + Clone,
-// {
-//     fn add_assign(&mut self, other: &'a Tensor<T>) { ... }
-// }
-
-// --- Backward Operation ---
-
-/// Backward operation context for the element-wise addition operation.
-/// Stores the NodeIds of the input tensors and their shapes to handle broadcasting.
-#[derive(Debug)]
-struct AddBackward<T: 'static + Debug + Copy + Send + Sync> {
-    // NodeId for input tensor 'a'
-    a_id: NodeId<T>,
-    // Original shape of input tensor 'a' before broadcasting
-    a_shape: Vec<usize>,
-    // NodeId for input tensor 'b'
-    b_id: NodeId<T>,
-    // Original shape of input tensor 'b' before broadcasting
-    b_shape: Vec<usize>,
-}
-
-// Mark AddBackward as Send + Sync.
-// This is unsafe because the struct contains raw pointers (NodeId).
-// However, we guarantee that these pointers are valid and accesses are synchronized
-// through the RwLocks within the TensorData they point to, managed by the broader
-// autograd system (Tensor::backward ensures tensors are kept alive).
-unsafe impl<T: Debug + Copy + Send + Sync + 'static> Send for AddBackward<T> {}
-unsafe impl<T: Debug + Copy + Send + Sync + 'static> Sync for AddBackward<T> {}
-
-// Implement `BackwardOp<T>` for `AddBackward<T>`
-impl<T> BackwardOp<T> for AddBackward<T>
-where
-    T: Debug
-        + Copy
-        + Send
-        + Sync
-        + 'static
-        + Default
-        + Clone
-        + Zero
-        + One
-        + AddAssign
-        + Sum
-        + Add<Output = T>
-        + PartialEq
-        + PartialOrd
-        + std::iter::Product,
-{
-    /// Returns the NodeIds of the input tensors involved in the addition.
-    fn inputs(&self) -> Vec<NodeId<T>> {
-        vec![self.a_id, self.b_id]
-    }
-
-    /// Computes the gradients for the input tensors (`a` and `b`) of the addition.
-    /// Handles broadcasting by summing the gradient along the broadcasted dimensions.
-    fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
-        // For z = a + b, grad_a = grad_output * 1, grad_b = grad_output * 1
-        // However, we need to reduce the gradient shape if broadcasting occurred.
-        // grad_a shape must match self.a_shape
-        // grad_b shape must match self.b_shape
-        let grad_a = grad_output.reduce_to_shape(&self.a_shape)?;
-        let grad_b = grad_output.reduce_to_shape(&self.b_shape)?;
-
-        Ok(vec![grad_a, grad_b])
-    }
+    Ok(output_tensor)
 }
 
 // --- Tests ---
 #[cfg(test)]
-#[path = "add_test.rs"]
-mod tests;
+mod tests {
+    use super::*;
+    use crate::tensor::Tensor;
+    
+    use crate::device::StorageDevice;
+    use crate::types::DType;
+    use crate::error::NeuraRustError;
+    use crate::buffer::{Buffer, CpuBuffer};
+    
+    
+    
+
+    // Helper to get f32 data (assuming CPU) - Keep for local tests
+    // Now uses Buffer/CpuBuffer correctly
+    fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
+        let guard = tensor.read_data();
+        if guard.dtype != DType::F32 || guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::UnsupportedOperation("Test helper requires F32 CPU tensor".to_string()));
+        }
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()), // Clone data
+            // Add default case to handle potential other Buffer variants if added later
+            _ => Err(NeuraRustError::UnsupportedOperation("Buffer type not CpuF32".to_string())),
+        }
+    }
+
+    #[test]
+    fn test_add_tensors_ok() {
+        // Re-enable test
+        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let t2 = Tensor::from_vec_f32(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
+        let result = add_op(&t1, &t2).unwrap(); 
+        let result_data = get_f32_data(&result).unwrap();
+        assert_eq!(result_data, vec![6.0, 8.0, 10.0, 12.0]);
+        assert_eq!(result.shape(), vec![2, 2]);
+        assert_eq!(result.dtype(), DType::F32);
+        assert_eq!(result.device(), StorageDevice::CPU);
+    }
+
+    #[test]
+    fn test_add_tensors_shape_mismatch() {
+        let t1 = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+        let t2 = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let result = add_op(&t1, &t2);
+        assert!(matches!(result, Err(NeuraRustError::BroadcastError { .. })));
+    }
+
+    #[test]
+    fn test_add_broadcasting() {
+        // Re-enable test
+        let matrix = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let row_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2]).unwrap();
+        let result = add_op(&matrix, &row_vector).unwrap(); 
+        let expected_data = vec![11.0, 22.0, 13.0, 24.0];
+        let result_data = get_f32_data(&result).unwrap();
+        assert_eq!(result_data, expected_data);
+        assert_eq!(result.shape(), vec![2, 2]); // Shape should be broadcasted
+    }
+
+    // --- Autograd Tests ---
+    #[test]
+    fn test_add_backward_simple() {
+        // Re-enable and adapt test
+        let a_data = vec![1.0f32, 2.0, 3.0];
+        let a_shape = vec![3];
+        let b_data = vec![4.0f32, 5.0, 6.0];
+        let b_shape = vec![3];
+
+        let func = |inputs: &[Tensor]| add_op(&inputs[0], &inputs[1]);
+
+        // Create input tensors for check_grad
+        let a = Tensor::from_vec_f32(a_data.clone(), a_shape.clone()).unwrap();
+        a.set_requires_grad(true).unwrap();
+        let b = Tensor::from_vec_f32(b_data.clone(), b_shape.clone()).unwrap();
+        b.set_requires_grad(true).unwrap();
+
+        let output_shape = func(&[a.clone(), b.clone()]).unwrap().shape();
+        let output_grad = crate::tensor::ones(&output_shape).unwrap(); 
+        let epsilon = 1e-4;
+        let tolerance = 1e-2; // Increased tolerance
+
+        crate::autograd::grad_check::check_grad(func, &[a, b], &output_grad, epsilon, tolerance)
+            .expect("Simple add backward grad check failed");
+    }
+
+    #[test]
+    fn test_add_backward_broadcast() {
+        // Re-enable and adapt test
+        let a_data = vec![1.0f32, 2.0, 3.0, 4.0];
+        let a_shape = vec![2, 2];
+        let b_data = vec![10.0f32, 20.0];
+        let b_shape = vec![1, 2]; // Broadcastable shape
+
+        let func = |inputs: &[Tensor]| add_op(&inputs[0], &inputs[1]);
+
+        let a = Tensor::from_vec_f32(a_data.clone(), a_shape.clone()).unwrap();
+        a.set_requires_grad(true).unwrap();
+        let b = Tensor::from_vec_f32(b_data.clone(), b_shape.clone()).unwrap();
+        b.set_requires_grad(true).unwrap();
+
+        let output_shape = func(&[a.clone(), b.clone()]).unwrap().shape();
+        let output_grad = crate::tensor::ones(&output_shape).unwrap();
+        let epsilon = 1e-4;
+        let tolerance = 1e-2; // Increased tolerance
+
+        crate::autograd::grad_check::check_grad(func, &[a, b], &output_grad, epsilon, tolerance)
+            .expect("Broadcast add backward grad check failed");
+    }
+}

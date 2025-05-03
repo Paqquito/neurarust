@@ -20,6 +20,9 @@ pub mod utils;
 // pub mod reduction; // Declaration should be in ops/mod.rs
 // pub mod loss; // Declaration should be in ops/mod.rs
 
+// Declare the new types module
+pub mod types;
+
 // Ré-exporte le type Tensor pour qu'il soit accessible directement via `neurarust_core::Tensor`
 pub use tensor::Tensor;
 // Re-export traits required by public functions/structs
@@ -30,3 +33,13 @@ pub use num_traits;
 
 pub mod error;
 pub use error::NeuraRustError;
+
+// Re-export key components for easier use
+pub use autograd::BackwardOp;
+pub use buffer::Buffer;
+pub use device::StorageDevice;
+pub use types::DType;
+
+// Remove the tests module declaration
+// #[cfg(test)]
+// mod tests;

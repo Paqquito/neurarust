@@ -4,11 +4,17 @@ use thiserror::Error; // Import StorageDevice
 /// Custom error type for the NeuraRust framework.
 #[derive(Error, Debug, PartialEq, Clone)] // PartialEq for easier testing, Clone added
 pub enum NeuraRustError {
-    #[error("Shape mismatch: expected {expected:?}, got {actual:?} during operation {operation}")]
+    #[error("Rank mismatch: expected {expected}, got {actual}")]
+    RankMismatch {
+        expected: usize,
+        actual: usize,
+    },
+
+    #[error("Shape mismatch: expected {expected:?}, got {actual:?}, operation: {operation}")]
     ShapeMismatch {
-        expected: Vec<usize>,
-        actual: Vec<usize>,
-        operation: String, // Added operation field
+        expected: String,
+        actual: String,
+        operation: String,
     },
 
     #[error("Dimension mismatch: expected {expected}, got {actual}")]
@@ -85,12 +91,6 @@ pub enum NeuraRustError {
 
     #[error("Backward pass error: {0}")]
     BackwardError(String),
-
-    #[error("Invalid number of dimensions: Expected {expected}, got {actual}")]
-    RankMismatch {
-        expected: usize,
-        actual: usize,
-    },
 
     #[error("Invalid axis specified: Axis {axis} is out of bounds for rank {rank}")]
     InvalidAxis {

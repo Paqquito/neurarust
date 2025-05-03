@@ -3,50 +3,29 @@ use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor_data::TensorData;
 use crate::tensor::Tensor;
-use num_traits::{One, Zero};
-use std::cmp::{PartialEq, PartialOrd};
-use std::default::Default;
 use std::fmt::Debug;
-use std::iter::Sum;
 // Add Add trait needed for potential acc_grad, Send/Sync for BackwardOp
-use std::ops::{Add, AddAssign, Neg};
 use std::sync::{Arc, RwLock};
+use crate::buffer::{Buffer, CpuBuffer};
+use crate::types::DType;
 
 // --- Backward Operation Structure ---
 
-/// Backward operation context for unary negation (-a).
-/// Stores a cloned Tensor of the input to safely get its NodeId.
+/// Backward operation for the negation function.
 #[derive(Debug)]
-struct NegBackward<T: 'static + Debug + Copy + Send + Sync> {
-    // Store cloned tensor to satisfy Send + Sync and provide NodeId
-    a: Tensor<T>,
+struct NegBackward { // Removed generic <T>
+    // Store the input tensor ID for the graph traversal
+    input_node: Arc<RwLock<TensorData>>,
 }
 
 // --- Backward Operation Implementation ---
 
-impl<T> BackwardOp<T> for NegBackward<T>
-where
-    T: Clone
-        + Debug
-        + Default
-        + Zero
-        + One
-        + Sum
-        + AddAssign
-        + Add<Output = T>
-        + Neg<Output = T> // Required for the backward calculation
-        + Copy
-        + Send
-        + Sync
-        + 'static
-        + PartialEq
-        + PartialOrd, // Keep consistent, although not strictly needed here
-{
+impl BackwardOp for NegBackward {
     /// Computes gradient for the negation operation z = -a.
-    /// grad(a) = grad_output * (-1) = -grad_output
-    fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError> {
+    /// grad(a) = grad_output * (-1) = -neg_output
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // grad_a = -grad_output
-        // Use the existing neg_op for this calculation.
+        // Reuse neg_op for the backward pass
         let grad_a = neg_op(grad_output)?;
 
         // Ensure gradient is on the correct device (although currently CPU only)
@@ -63,146 +42,111 @@ where
         Ok(vec![grad_a])
     }
 
-    fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>> {
-        // Return NodeId from the stored tensor clone
-        vec![self.a.get_node_id()]
+    // inputs() method is no longer needed with the simplified Variable approach for now.
+    // If needed later for graph construction, it would return pointers/IDs of input TensorData.
+    fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
+        // Return the pointer to the stored input node
+        vec![Arc::as_ptr(&self.input_node)]
     }
 }
 
 // --- Forward Operation ---
 
-/// Performs unary negation for a Tensor.
-/// Requires the tensor to be on CPU.
-/// Returns a `Result` wrapping the new `Tensor` or a `NeuraRustError`.
-pub fn neg_op<T>(a: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
-where
-    // Add bounds required for BackwardOp and autograd linkage
-    T: Neg<Output = T>
-        + Add<Output = T>
-        + AddAssign
-        + Copy
-        + Clone
-        + Debug
-        + Default
-        + Zero
-        + One
-        + Sum
-        + PartialEq
-        + PartialOrd
-        + Send
-        + Sync
-        + 'static,
-{
+/// Performs element-wise negation on a tensor.
+/// -input
+/// Currently only supports f32 tensors on CPU.
+pub fn neg_op(input: &Tensor) -> Result<Tensor, NeuraRustError> {
+    // Lock input data for reading
+    let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
+            lock_type: "read".to_string(),
+            reason: "Failed to lock input TensorData for read in neg_op".to_string(),
+        })?;
+
+    // --- Device and DType Check ---
+    if input_data_guard.device != StorageDevice::CPU {
+        return Err(NeuraRustError::DeviceMismatch {
+            operation: "neg_op".to_string(),
+            expected: StorageDevice::CPU,
+            actual: input_data_guard.device,
+        });
+    }
+    if input_data_guard.dtype != DType::F32 {
+        // Use UnsupportedOperation for incorrect dtype for now
+        return Err(NeuraRustError::UnsupportedOperation(
+            format!("neg_op currently only supports F32, got {:?}", input_data_guard.dtype)
+        ));
+    }
+
+    // --- Data Access and Computation ---
+    let output_data_vec: Vec<f32> = match &*input_data_guard.buffer {
+        Buffer::Cpu(cpu_buffer) => match cpu_buffer {
+            CpuBuffer::F32(data_arc) => {
+                // Get slice from buffer based on offset and strides
+                // Use get_f32_slice helper or direct iteration if possible
+                // For now, assume contiguous and use simple iterator
+                // TODO: Handle non-contiguous tensors here if neg needs it (elementwise usually doesn't)
+                if !input_data_guard.is_contiguous() {
+                    // For simplicity, elementwise ops often create contiguous output anyway
+                    // Or could error if non-contiguous input needs special handling not implemented
+                    // Let's assume for now neg creates a new contiguous buffer
+                    // This matches the current collect() behavior
+                    data_arc.iter().map(|&x| -x).collect()
+                } else {
+                    // Apply negation using optimized iterators on the (assumed) contiguous data
+                    data_arc.iter().map(|&x| -x).collect()
+                }
+            }
+            // Non-F32 case is caught by the dtype check above
+        },
+        // Add explicit non-CPU arm
+        _ => return Err(NeuraRustError::DeviceMismatch {
+            operation: "neg_op (buffer access)".to_string(),
+            expected: StorageDevice::CPU,
+            actual: input_data_guard.device,
+        }),
+    };
+
+    // --- Output Tensor Creation ---
+    let output_shape = input_data_guard.shape.clone();
+    // Keep input requires_grad status and node Arc before dropping the read lock
+    let input_requires_grad = input_data_guard.requires_grad;
+    let input_node_arc = if input_requires_grad { Some(Arc::clone(&input.data)) } else { None };
+
+    // Drop the read lock BEFORE creating the new TensorData/Tensor
+    // (to avoid potential deadlocks if new() or set_grad_fn tried to lock again)
+    drop(input_data_guard);
+
+    // Create the output tensor using Tensor::new which handles TensorData creation
+    let output_tensor = Tensor::new(output_data_vec, output_shape)?; // Using Vec<f32> directly
+
     // --- Autograd Setup ---
-    let requires_grad = a.requires_grad();
-    // Store a clone if grad is required
-    let mut a_maybe_clone: Option<Tensor<T>> = None;
-
-    if requires_grad {
-        a_maybe_clone = Some(a.clone());
-    }
-    // --- End Autograd Setup ---
-
-    // Acquire read lock
-    let a_guard = a.read_data();
-
-    // --- Device Check ---
-    let device = a_guard.device;
-    if device != StorageDevice::CPU {
-        return Err(NeuraRustError::UnsupportedOperation(format!(
-            "Negation is currently only supported on CPU, not {:?}",
-            device
-        )));
-    }
-
-    // --- Get CPU Data Buffer ---
-    let a_data_arc = a_guard.data.cpu_data()?.clone();
-
-    // --- Calculation (Handles Strides) ---
-    let output_shape = a_guard.shape.clone();
-    let numel = output_shape.iter().product();
-    let mut result_data_vec = Vec::with_capacity(numel);
-
-    let strides = &a_guard.strides;
-    let offset = a_guard.offset;
-
-    if numel > 0 {
-        // Optimized iteration for contiguous case
-        if a_guard.is_contiguous() {
-            let start = a_guard.offset;
-            let end = start + numel;
-            if end <= a_data_arc.len() { // Check bounds
-                result_data_vec.extend(a_data_arc[start..end].iter().map(|&x| -x));
-            } else {
-                 return Err(NeuraRustError::InternalError(
-                     "Contiguous offset calculation resulted in out-of-bounds access in neg_op".to_string()
-                 ));
-            }
+    // Only set up backward graph if the input requires gradients
+    if input_requires_grad {
+        if let Some(node_arc) = input_node_arc {
+            // Acquire write lock on the NEW output tensor's data
+            let mut output_data_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::LockError {
+                 lock_type: "write".to_string(),
+                 reason: "Failed to lock output TensorData for write (autograd setup in neg_op)".to_string(),
+             })?;
+            output_data_write_guard.requires_grad = true;
+            // Create NegBackward op with the input node Arc
+            let backward_op = NegBackward { input_node: node_arc }; // Removed T
+            // Set the grad_fn for the output tensor
+            output_data_write_guard.grad_fn = Some(Arc::new(backward_op));
         } else {
-            // Non-contiguous case: iterate using coordinates (slower)
-            let mut current_coords = vec![0; output_shape.len()];
-            for linear_idx in 0..numel {
-                let mut relative_offset = 0;
-                for i in 0..output_shape.len() {
-                    relative_offset += current_coords[i] * strides[i];
-                }
-                let logical_offset = offset + relative_offset;
-
-                 if logical_offset < a_data_arc.len() { // Check bounds
-                    let val_a = a_data_arc[logical_offset];
-                    result_data_vec.push(-val_a);
-                 } else {
-                     return Err(NeuraRustError::InternalError(
-                         "Non-contiguous offset calculation resulted in out-of-bounds access in neg_op".to_string()
-                     ));
-                 }
-
-                // Increment coordinates
-                if linear_idx < numel - 1 {
-                    let mut dim_to_inc = output_shape.len() - 1;
-                    loop {
-                        current_coords[dim_to_inc] += 1;
-                        if current_coords[dim_to_inc] < output_shape[dim_to_inc] {
-                            break;
-                        }
-                        current_coords[dim_to_inc] = 0;
-                        if dim_to_inc == 0 {
-                            break;
-                        }
-                        dim_to_inc -= 1;
-                    }
-                }
-            }
+            // This case should not happen if input_requires_grad was true
+            // Return an internal error if it does occur
+             return Err(NeuraRustError::InternalError("Input requires grad but its Node Arc is missing in neg_op".to_string()));
         }
     }
 
-    // Drop lock
-    drop(a_guard);
-
-    // --- Create Result ---
-    let result_tensor = Tensor::new(result_data_vec, output_shape)?;
-
-    // --- Autograd Linkage ---
-    if requires_grad {
-         if let Some(a_clone) = a_maybe_clone {
-             // Pass the clone to the backward context
-             let backward_context = NegBackward { a: a_clone };
-             let backward_op_arc: Arc<dyn BackwardOp<T> + Send + Sync> = Arc::new(backward_context);
-             result_tensor.set_requires_grad(true)?;
-             result_tensor.set_grad_fn(Some(backward_op_arc))?;
-         } else {
-              return Err(NeuraRustError::InternalError(
-                  "requires_grad was true but failed to get input clone in neg_op".to_string()
-              ));
-         }
-    }
-    // --- End Autograd Linkage ---
-
-    Ok(result_tensor)
+    // --- Return Result --- 
+    Ok(output_tensor) // Return the newly created tensor
 }
 
 // --- std::ops::Neg implementation ---
 // Implement the Neg trait for Tensor by calling neg_op
+/* // Remove the generic implementation for now
 impl<T> Neg for &Tensor<T>
 where
     // Bounds must match neg_op requirements
@@ -228,8 +172,67 @@ where
         neg_op(self)
     }
 }
+*/
 
 // --- Tests ---
 #[cfg(test)]
-#[path = "neg_test.rs"]
-mod tests;
+mod tests {
+    use super::*; // Import items from parent module
+    use crate::tensor::Tensor; // Ensure Tensor is in scope
+    use crate::autograd::grad_check::check_grad; // Import gradient checker
+     // For float comparisons
+    use crate::types::DType; // Ensure DType is imported
+    use crate::utils::testing::{check_tensor_near, create_test_tensor_with_grad}; // Import test helpers
+
+    #[test]
+    fn test_neg_ok() {
+        let t1 = Tensor::new(vec![1.0, -2.0, 3.0, -4.0], vec![2, 2]).unwrap();
+        let t2 = neg_op(&t1).unwrap();
+        // Use check_tensor_near for comparison
+        check_tensor_near(&t2, &[2, 2], &[-1.0, 2.0, -3.0, 4.0], 1e-6);
+        assert_eq!(t2.dtype(), DType::F32); // Check dtype
+    }
+
+    #[test]
+    fn test_neg_backward() {
+        // Input data for the test
+        let input_data = vec![1.0f32, -2.0, 3.0, 0.0];
+        let input_shape = vec![4];
+
+        // 1. Create the input Tensor and set requires_grad
+        let input_tensor = Tensor::from_vec_f32(input_data, input_shape.clone()).unwrap();
+        input_tensor.set_requires_grad(true).expect("Failed to set requires_grad"); // Call separately
+
+        // 2. Define the function to be checked
+        let neg_fn_for_check = |inputs: &[Tensor]| -> Result<Tensor, NeuraRustError> {
+             if inputs.len() != 1 {
+                 // Use InternalError for test helper issue
+                 return Err(NeuraRustError::InternalError("neg_fn_for_check expects exactly one input tensor".to_string()));
+             }
+             neg_op(&inputs[0])
+        };
+
+        // 3. Determine the shape of the output of neg_op
+        let output_shape = input_tensor.shape().clone();
+
+        // 4. Create the initial gradient for the output (tensor of ones)
+        // Use the public function from crate::tensor::create
+        let output_grad_tensor = crate::tensor::ones(&output_shape).unwrap();
+
+        // 5. Prepare the input slice for check_grad
+        let inputs_slice = &[input_tensor]; // Slice containing the input tensor
+
+        // 6. Define epsilon and tolerance (use f64 for check_grad internals)
+        let epsilon = 1e-4f64; // Small value for finite difference
+        let tolerance = 1e-2f64; // Looser tolerance for f32 comparisons
+
+        // 7. Call check_grad with the correct arguments
+        check_grad(
+            neg_fn_for_check,   // The function (neg_op wrapper)
+            inputs_slice,       // Slice of input tensors
+            &output_grad_tensor,// Initial output gradient (ones)
+            epsilon,            // Epsilon for finite difference
+            tolerance,          // Tolerance for comparison
+        ).unwrap(); // Panic if check fails
+    }
+}

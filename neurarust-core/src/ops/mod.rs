@@ -29,7 +29,8 @@ pub use arithmetic::{add_op, div_op, mul_op, neg_op, sub_op}; // Keep arithmetic
                                                               // pub use arithmetic::pow_op; // Pow might be Phase 1+
                                                               // Comment out problematic exports
                                                               // pub use linalg::{matmul, transpose}; // Keep existing linalg exports
-pub use reduction::sum_axes; // Keep existing reduction export
+// Replace sum_axes with sum_op
+// pub use reduction::sum_op; // Export sum_op instead of sum_axes - Commented out as sum_op is pub(crate)
 
 // Remove problematic exports causing linter errors
 // pub use math_elem::{exp_op, ln_op, pow_op};

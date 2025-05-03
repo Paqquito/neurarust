@@ -147,198 +147,108 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
 
 *   **1.1 View Semantics & Core Shape Ops [✅ Done]**
     *   🎯 Goal: Implement non-copying views for shape manipulation.
-    *   ✅ **Refine `TensorData::new_view`:** Ensure it's accessible (e.g., `pub(crate)`) and correctly takes `Arc<Buffer<T>>`, `device`, `offset`, `shape`, `strides` to create `TensorData` instances representing views.
-    *   ✅ **Implement `slice` Operation:** -> ✅ **Done**
-        *   ✅ Define `slice_op(tensor: &Tensor<T>, /* slice args */) -> Result<Tensor<T>>`.
-        *   ✅ Inside, acquire read lock on input `tensor.data`.
-        *   ✅ Validate slice arguments against `shape`.
-        *   ✅ Calculate new `shape` and new `offset` based on original offset, slice args, and `strides`.
-        *   ✅ Create new `TensorData` using `new_view` with cloned `Arc<Buffer<T>>`, original `device`, new `offset`, new `shape`, and *original* `strides`.
-        *   ✅ Wrap in `Tensor { data: Arc::new(RwLock::new(new_td)) }`.
-        *   ✅ Implement user-facing `Tensor::slice(...)` method.
-    *   ✅ **Implement `transpose` Operation:** -> ✅ **Done**
-        *   ✅ Define `transpose_op(tensor: &Tensor<T>, dim1: usize, dim2: usize) -> Result<Tensor<T>>`.
-        *   ✅ Acquire read lock, validate `dim1`, `dim2` against rank.
-        *   ✅ Calculate new `shape` (swap dims) and new `strides` (swap strides).
-        *   ✅ Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
-        *   ✅ Implement `Tensor::transpose(...)`.
-    *   ✅ **Implement `permute` Operation:** -> ✅ **Done**
-        *   ✅ Define `permute_op(tensor: &Tensor<T>, dims: &[usize]) -> Result<Tensor<T>>`.
-        *   ✅ Acquire read lock, validate `dims` is a valid permutation for the rank.
-        *   ✅ Calculate new `shape` and new `strides` by reordering according to `dims`.
-        *   ✅ Create view using `new_view` (cloned buffer, original device/offset, new shape/strides).
-        *   ✅ Implement `Tensor::permute(...)`.
-    *   ✅ **Implement `reshape` / `view` Operation:** -> ✅ **Done (Initial: Contiguous Only)**
-        *   ✅ Define `reshape_op(tensor: &Tensor<T>, new_shape: Vec<usize>) -> Result<Tensor<T>>`.
-        *   ✅ Acquire read lock, validate `new_shape` product matches old product.
-        *   ✅ Call `is_contiguous()` on the tensor.
-        *   ✅ If contiguous: Calculate new *contiguous* `strides` for `new_shape`. Create view using `new_view` (cloned buffer, original device/offset, `new_shape`, new strides).
-        *   ✅ If non-contiguous: Check if a view is *still possible* (i.e., if specific stride manipulation can achieve the reshape). If yes, calculate those strides and create view. If not possible as a view, return `Err`. (User must call `.contiguous().reshape(...)` explicitly). -> *(Currently returns Err)*
-        *   ✅ Implement `Tensor::reshape(...)` and potentially `Tensor::view(...)` (alias or stricter view-only version).
-    *   ✅ **Implement `contiguous()` Method:** -> ✅ **Done**
-        *   ✅ Implement `Tensor::contiguous(&self) -> Result<Tensor<T>>`.
-        *   ✅ Call `is_contiguous()`. If true, return `self.clone()`.
-        *   If false:
-            *   ✅ Acquire read lock.
-            *   ✅ Get buffer reference (`cpu_data()?` for now). Get `device`, `shape`, `strides`, `offset`.
-            *   ✅ Allocate a *new*, *contiguous* buffer (`Vec<T>` for now) on the **same `device`**.
-            *   ✅ Iterate multidimensionally over `shape`.
-            *   ✅ For each index set, calculate offset in the *original* buffer using `guard.get_offset()`.
-            *   ✅ Read value from original buffer (CPU read for now).
-            *   ✅ Write value to the *new* buffer at the current linear index.
-            *   ✅ Create and return a *new* `Tensor` using `Tensor::new()` with the new buffer and shape (which calculates contiguous strides).
-    *   ✅ **Implement `is_contiguous()` Check:** -> ✅ **Done**
-        *   ✅ Implement `TensorData::is_contiguous(&self) -> bool`.
-        *   ✅ Calculate expected contiguous strides for `self.shape`.
-        *   ✅ Compare `self.strides` with expected strides (handle 0/1 dim sizes).
-        *   ✅ Implement `Tensor::is_contiguous(&self)` calling the `TensorData` method via read lock.
+    *   ✅ **Refine `TensorData::new_view`:** Ensured accessibility and correct handling of `Arc<Buffer>`, `device`, `offset`, `shape`, `strides`.
+    *   ✅ **Implement `slice` Operation:** -> ✅ **Done**.
+    *   ✅ **Implement `transpose` Operation:** -> ✅ **Done**.
+    *   ✅ **Implement `permute` Operation:** -> ✅ **Done**.
+    *   ✅ **Implement `reshape` / `view` Operation:** -> ✅ **Done (Contiguous Only)**. Returns `Err` for non-contiguous views that cannot be created by manipulating strides. User must call `.contiguous().reshape(...)`.
+    *   ✅ **Implement `contiguous()` Method:** -> ✅ **Done**. Creates a new contiguous tensor if needed.
+    *   ✅ **Implement `is_contiguous()` Check:** -> ✅ **Done**.
 
-*   **1.2 Basic Autograd Infrastructure [✅ Mostly Done]**
+*   **1.2 Basic Autograd Infrastructure [✅ Done]**
     *   🎯 Goal: Establish the foundational components for automatic differentiation.
-    *   ✅ **Add `TensorData` Fields:**
-        *   ✅ `requires_grad: bool` (default `false`).
-        *   ✅ `grad: Option<Tensor<T>>` (holds the gradient tensor, must be on same device).
-        *   ✅ `grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>` (using `Arc` for shared ownership of backward node, requires trait bounds).
-    *   ✅ **Define `BackwardOp<T>` Trait:**
-        *   ✅ `pub trait BackwardOp<T: 'static + ...>: Debug + Send + Sync { ... }` (add relevant bounds for `T`).
-        *   ✅ `fn backward(&self, grad_output: &Tensor<T>) -> Result<Vec<Tensor<T>>, NeuraRustError>;` (Must handle device consistency).
-        *   ✅ `fn inputs(&self) -> Vec<*const RwLock<TensorData<T>>>;` (Returns stable IDs of input tensors).
-    *   ✅ **Implement `Tensor` Autograd Accessors/Mutators:**
-        *   ✅ `fn requires_grad(&self) -> bool;` (read lock).
-        *   ✅ `fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError>;` (write lock, handle potential graph modifications).
-        *   ✅ `fn grad(&self) -> Option<Tensor<T>>;` (read lock, clones `Tensor` if `Some`).
-        *   ✅ `fn acc_grad(&self, grad_to_add: Tensor<T>) -> Result<(), NeuraRustError>;` (write lock, handles `None`, checks device, performs accumulation via device-aware `add_op`).
-        *   ✅ `fn grad_fn(&self) -> Option<Arc<dyn BackwardOp<T> + Send + Sync>>;` (read lock, clones `Arc`).
-        *   ✅ `fn set_grad_fn(&self, grad_fn: Option<Arc<dyn BackwardOp<T> + Send + Sync>>) -> Result<(), NeuraRustError>;` (write lock).
-    *   ✅ **Implement Graph Traversal (`autograd::graph`):**
-        *   ✅ Implement topological sort function (e.g., Kahn's or DFS based).
-        *   ✅ Takes starting `Tensor` pointer/ID.
-        *   ✅ Uses `*const RwLock<TensorData<T>>` as node identifier.
-        *   ✅ Traverses graph via `grad_fn` and `inputs()`. Needs read locks.
-        *   ✅ Handles cycles (returns `Err`).
-        *   ✅ Returns ordered list of node IDs for backward pass.
-    *   ✅ **Implement `Tensor::backward()` Logic:**
-        *   `fn backward(&self, gradient: Option<Tensor<T>>) -> Result<(), NeuraRustError>;`
-        *   Check `self.requires_grad()`.
-        *   Determine initial gradient (use provided `gradient`, or default to `1.0` scalar if `self` is scalar, error otherwise). Ensure initial grad is on `self.device()`.
-        *   Perform topological sort from `self`.
-        *   Prepare gradient accumulation map: `HashMap<NodeId, Tensor<T>>`, initialized with initial gradient for `self`.
-        *   Iterate through sorted nodes:
-            *   Retrieve accumulated grad for current node from map.
-            *   Acquire read lock for current node `TensorData` to get `grad_fn`.
-            *   If `grad_fn` is `Some(op)`:
-                *   Call `op.backward(&accumulated_grad)` -> returns input grads.
-                *   Get input node IDs from `op.inputs()`.
-                *   For each input node ID and its calculated grad:
-                    *   Retrieve the input `Tensor` corresponding to the ID (needs mechanism to map ID back or pass `Tensor`s).
-                    *   If input `tensor.requires_grad()`:
-                        *   Call `input_tensor.acc_grad(calculated_grad)` (handles locking, device checks, accumulation).
-            *   Optionally clear `grad` field for non-leaf nodes after processing (memory optimization).
-            *   Optionally clear `grad_fn` if `retain_graph=false` (default `false`).
+    *   ✅ **Add `TensorData` Fields:** `requires_grad`, `grad`, `grad_fn`.
+    *   ✅ **Define `BackwardOp<T>` Trait:** Defined with `Send + Sync`, `backward` method. *(Inputs handled via struct fields).*
+    *   ✅ **Implement `Tensor` Autograd Accessors/Mutators:** `requires_grad`, `set_requires_grad`, `grad`, `acc_grad`, `grad_fn`, `set_grad_fn`.
+    *   ✅ **Implement Graph Traversal (`autograd::graph`):** Topological sort implemented.
+    *   ✅ **Implement `Tensor::backward()` Logic:** Core backward pass logic implemented, handling gradient accumulation and graph traversal.
 
-*   **1.3 Autograd Integration for `Add` Op [✅ Done - FIRST EXAMPLE]**
-    *   🎯 Goal: Implement the **first end-to-end autograd path** by enabling it for the addition operation. This establishes the **General Pattern** for integrating autograd into Ops.
-    *   ✅ **Define `AddBackward` Struct:** Create the struct to hold necessary context for backward pass (e.g., input shapes/IDs).
-    *   ✅ **Implement `BackwardOp` for `AddBackward`:** Write the `backward` method logic to compute gradients for `a` and `b` based on `grad_output`, handling broadcasting correctly. Implement the `inputs` method.
-    *   ✅ **Modify `add_op` Forward Pass:**
-        *   Check if input tensors (`a`, `b`) require gradients.
-        *   If yes:
-            *   Create an instance of `AddBackward` with needed context.
-            *   Wrap it in `Arc<dyn BackwardOp<T> + Send + Sync>`.
-            *   Get the resulting `Tensor`.
-            *   Acquire write lock on the result's `TensorData`.
-            *   Set `requires_grad = true`.
-            *   Set the `grad_fn` field to the `Arc`'d `AddBackward` instance.
-        *   If no, return the result tensor as before (without `grad_fn`).
-    *   ✅ **Document the Pattern:** Add comments in `add.rs` explaining how the forward op integrates with autograd (checking inputs, creating context, setting `grad_fn`).
+*   **1.3 Autograd Integration for `Add` Op [✅ Done]**
+    *   🎯 Goal: Implement the first end-to-end autograd path.
+    *   ✅ **Define `AddBackward` Struct**.
+    *   ✅ **Implement `BackwardOp` for `AddBackward`**.
+    *   ✅ **Modify `add_op` Forward Pass:** Correctly sets `grad_fn`.
+    *   ✅ **Document the Pattern:** Comments added.
 
 *   **1.4 Numerical Gradient Checking Utility [✅ Done]**
-    *   🎯 Goal: Implement a tool to numerically verify the correctness of analytical gradients computed by `BackwardOp` implementations. Essential for testing. *(Moved from 1.5)*
-    *   ✅ **Implement Utility Function:**
-        *   Function signature like `check_grad(func: F, inputs: &[Tensor<T>], /*...*/ epsilon: T, tolerance: T) -> Result<(), Error>` where `F` is the forward function.
-        *   Handles CPU device: Perturbs inputs on CPU, runs func, calculates finite differences.
-        *   Compares numerical gradient with analytical gradient obtained via `input.grad()` after internal `backward()` call.
-        *   Uses `approx` crate for comparisons.
-        *   Handles data sharing issues by creating independent TensorData for perturbations.
+    *   🎯 Goal: Implement `check_grad` for verifying backward implementations.
+    *   ✅ **Implement Utility Function:** `check_grad` implemented for CPU, using `approx`.
 
 *   **1.5 First Autograd Tests (`Add` Op) [✅ Done]**
-    *   🎯 Goal: Write the first tests that execute `Tensor::backward()` on a graph built by `add_op` and verify results using the numerical checker.
-    *   ✅ **Create Test Cases:**
-        *   ✅ Simple case: `test_add_backward_simple` in `add.rs` checks `a+b`.
-        *   ✅ Broadcasting cases: `test_add_backward_broadcast` in `add.rs` checks broadcasting.
-        *   ✅ Use `check_grad` utility: Both tests use `check_grad` to validate `AddBackward` implicitly by comparing analytical and numerical gradients.
+    *   🎯 Goal: Test the first autograd path using `check_grad`.
+    *   ✅ **Create Test Cases:** `test_add_backward_simple`, `test_add_backward_broadcast` implemented and pass using `check_grad`.
 
-*   **1.6 Autograd Integration for Basic Arithmetic Ops [✅ Done]**
-    *   🎯 Goal: Extend autograd support to other basic arithmetic operations (`sub`, `mul`, `neg`, `div`) following the established pattern.
-    *   ✅ **Implement `SubBackward`, `MulBackward`, `NegBackward`, `DivBackward`:** Define structs, implement `BackwardOp` trait (handle chain rules, division by zero for `DivBackward`).
-    *   ✅ **Modify `sub_op`, `mul_op`, `neg_op`, `div_op`:** Integrate autograd logic (check `requires_grad`, create backward op, set `grad_fn`) like in `add_op`.
-    *   ✅ **Add Tests:** Use `check_grad` utility to validate each new `BackwardOp`.
+*   **1.6 Autograd Integration for Basic Arithmetic Ops [🚧 Partially Done]**
+    *   🎯 Goal: Extend autograd support to other basic arithmetic operations.
+    *   ✅ **Implement Backward Structs:** `MulBackward`, `NegBackward` implemented and tested.
+    *   🚧 **Implement Backward Structs (Issues):** `SubBackward`, `DivBackward`, `PowBackward` structs exist, but compiler indicates `dead_code`. Integration in forward ops (`sub_op`, `div_op`, `pow_op`) needs verification/correction to ensure `grad_fn` is set.
+    *   ✅ **Modify Forward Ops:** `mul_op`, `neg_op` correctly integrate autograd.
+    *   🚧 **Modify Forward Ops (Issues):** `sub_op`, `div_op`, `pow_op` need verification regarding `grad_fn` setting.
+    *   ✅ **Add Tests:** Tests added and pass for `Mul`, `Neg`.
+    *   🚧 **Add Tests (Issues):** Tests for `Sub`, `Div`, `Pow` backward need to be verified/added once `grad_fn` integration is fixed.
 
 *   **1.7 Autograd Integration for View Ops [✅ Done]**
-    *   🎯 Goal: Implement backward passes for the view operations created in 1.1.
-    *   ✅ **Implement `SliceBackward`, `TransposeBackward`, `PermuteBackward`, `ReshapeBackward`:**
-        *   Defined structs. Stored necessary context (e.g., original shape/strides).
-        *   Implemented `BackwardOp` (often involves scattering/accumulating gradients based on view logic). Handled device-awareness (CPU).
-    *   ✅ **Modify `slice_op`, `transpose_op`, `permute_op`, `reshape_op`:** Integrated autograd logic.
-    *   ✅ **Add Tests:** Implemented tests for view backward passes.
+    *   🎯 Goal: Implement backward passes for view operations.
+    *   ✅ **Implement Backward Structs:** `SliceBackward`, `TransposeBackward`, `PermuteBackward`, `ReshapeBackward` defined and implemented.
+    *   ✅ **Modify Forward Ops:** `slice_op`, `transpose_op`, `permute_op`, `reshape_op` integrate autograd logic.
+    *   ✅ **Add Tests:** Tests implemented and pass for view backward passes, although one `transpose` test for >2D is ignored (likely `f32` precision).
 
-*   **1.8 Autograd Integration for Reduction Ops [✅ Done]**
+*   **1.8 Autograd Integration for Reduction Ops [🚧 Partially Done]**
     *   🎯 Goal: Implement backward passes for reduction operations.
-    *   ✅ **Implement `SumAxesBackward`, `MeanBackward`:** Defined structs, implemented `BackwardOp` (handling broadcasting/scaling). Tested with `check_grad`.
-    *   ✅ **Modify `sum_axes_op`, `mean_op`:** Integrated autograd logic.
-    *   ✅ **Add Tests:** Used `check_grad` utility, switched to f64 for numerical stability.
-    *   ⏳ **Implement/Adapt `reduce_gradient` Utility:** (Not needed for current approach).
+    *   ✅ **Implement `SumAxesBackward`:** Defined, implemented, and tested via `check_grad`.
+    *   🚧 **Implement `MeanBackward` (Issues):** Struct defined, but forward op (`mean_op`) is `unused`, and backward tests are `ignored`. Needs integration and testing fixes.
+    *   ✅ **Modify `sum_axes_op`:** Integrates autograd.
+    *   🚧 **Modify `mean_op` (Issues):** Marked as `unused`, needs integration.
+    *   ✅ **Add Tests:** Tests for `SumAxesBackward` pass.
+    *   🚧 **Add Tests (Issues):** Tests for `MeanBackward` are ignored.
 
-*   **1.9 Autograd Integration for Other Core Ops [✅ Done]**
-    *   🎯 Goal: Implement backward passes for remaining essential ops. *(Moved from 1.3)*
-    *   ✅ **Implement `PowBackward`, `ReluBackward`:** Define, implement `BackwardOp`, modify forward ops, test.
-    *   ✅ **Implement `MatmulBackward` (2D):** Define, implement `BackwardOp` (matrix math), modify forward op (`matmul_op`), test.
+*   **1.9 Autograd Integration for Other Core Ops [🚧 Partially Done]**
+    *   🎯 Goal: Implement backward passes for remaining essential ops.
+    *   ✅ **Implement `ReluBackward`:** Defined, implemented, tested.
+    *   🚧 **Implement `MaxBackward` (Issues):** Struct and forward op (`max_op`) exist but are `unused` / `dead_code` with `todo!`. Needs implementation and integration.
+    *   🚧 **Implement `MatmulBackward` (2D - Issues):** Struct exists, forward op exists, but backward tests are `ignored` due to `f32` numerical stability issues with `check_grad`. Requires investigation (e.g., use `f64` for check, adjust tolerance).
+    *   ✅ **Modify `relu_op`:** Integrates autograd.
+    *   🚧 **Modify `max_op`, `matmul_op`:** Need full integration/testing.
+    *   ✅ **Add Tests:** `Relu` backward tests pass.
+    *   🚧 **Add Tests (Issues):** `Max` tests missing. `Matmul` tests ignored.
 
 *   **1.10 Tensor API & Data Type Expansion [🚧 In Progress]**
-    *   🎯 Goal: Enhance `Tensor` usability and type support.
-    *   ✅ Implement Creation Methods (`arange`, `linspace`, `eye`, `rand`, `randn`). *(Note: Will need dtype argument later)*
+    *   🎯 Goal: Enhance `Tensor` usability and type support, **currently focused on adapting all ops to the non-generic `Tensor` with `Buffer`/`DType` for F32/CPU.**
+    *   🚧 **Implement Creation Methods:** `arange`, `linspace`, `eye`, `rand`, `randn` are defined but marked as `unused function`. Need integration into tests or examples.
     *   **`DType` Handling (Decomposed):**
-        *   **Phase 1.10.A: Foundations (F32 Only) [⏳ To Do]**
-            *   ⏳ Define `DType` enum (in `src/types.rs`?) with `F32`.
-            *   ⏳ Define `Buffer` enum (in `src/buffer.rs`) with `Cpu(CpuBuffer)` and `CpuBuffer::F32(Arc<Vec<f32>>)`.
-            *   ⏳ Adapt `TensorData`: Remove `<T>`, add `dtype: DType`, use `Buffer`, adapt methods for `F32`.
-            *   ⏳ Adapt `Tensor`: Remove `<T>`, adapt methods, `Tensor::new` for `Vec<f32>`.
-            *   ⏳ Adapt `add_op`: Make non-generic, `match` for `(F32, F32)` only, consider `add_kernel_f32` extraction.
-            *   ⏳ Adapt `AddBackward`: Make non-generic, adapt logic for `F32`, adapt `reduce_gradient_to_shape`.
-            *   ⏳ Implement `Tensor::detach()`: Create view detached from autograd graph.
-            *   ⏳ Update tests for `TensorData`, `Tensor`, `add_op`, `AddBackward`, `detach` to use non-generic API with `f32`.
-        *   **Phase 1.10.B: Add Second DType (e.g., I64) [⏳ To Do]**
-            *   ⏳ Extend `DType` enum with `I64`.
-            *   ⏳ Extend `Buffer`/`CpuBuffer` enums with `I64` variant.
-            *   ⏳ Adapt creation functions (`Tensor::new`, `zeros`, `ones`, `full`) to accept `DType::I64`.
-            *   ⏳ Extend `add_op`: Add `match` branch for `(I64, I64)`, implement `add_kernel_i64`.
-            *   ⏳ Verify/adapt `AddBackward` for `I64` gradients.
-            *   ⏳ Add tests for creation and `add_op` with `I64`.
-        *   **Phase 1.10.C: Mixed Types & Conversion [⏳ To Do]**
-            *   ⏳ Implement Type Promotion Logic: Define rules (e.g., `f32 + i64 -> f32`) and implement in `add_op` `match`.
-            *   ⏳ Implement `Tensor::cast(dtype: DType)`: Logic to convert between buffer types.
-            *   ⏳ Finalize promotion logic in `add_op` using `cast`.
-            *   ⏳ Add tests for `cast` and `add_op` with mixed types.
-        *   **Phase 1.10.D: Extend to Other Ops & DTypes [⏳ To Do]**
-            *   ⏳ Adapt other ops (`mul`, `div`, `matmul`, `relu`, `sum`, etc.) progressively, handling DType dispatch, kernels, and promotion.
-            *   ⏳ Add other DTypes (`Bool`, `F64`, etc.) progressively, updating `DType`, `Buffer`, creation, and relevant ops.
-        *   **Phase 1.10.E: In-place Operations [⏳ To Do]**
-            *   ⏳ Implement in-place ops (`add_`, `mul_`, ...) for supported DTypes.
-            *   ⏳ Ensure strict DType matching (no implicit promotion).
-            *   ⏳ Handle autograd implications (e.g., error if modifying tensor needed for backward, or implement versioning).
-            *   ⏳ Dependency: Requires corresponding standard op (e.g., `add`) to support the necessary DTypes (from Phase 1.10.D).
-    *   *(Type Promotion Logic covered by 1.10.C)*
-    *   *(Type Conversion (`Tensor::cast`) covered by 1.10.C)*
-    *   *(detach() covered by 1.10.A)*
-    *   *(In-place Ops covered by 1.10.E)*
+        *   **Phase 1.10.A: Foundations (F32 Only) [🚧 In Progress]**
+            *   ✅ **1-6. Core Structures & Methods:** `DType`, `Buffer`, `TensorData`, `Tensor` adapted for non-generic structure. Base methods and creation functions (`zeros`, `ones`, `full`, `zeros_like`, `ones_like`) adapted for `F32/CPU`.
+            *   🚧 **7. Incremental Adaptation of Operations:** **Actively in progress.** Many operations (`add`, `neg`, `mul`, `relu`, `sum`, `slice`, `permute`, `transpose`, `reshape`, `contiguous`) adapted for F32/CPU forward/backward path.
+                *   **Remaining Ops:** Adaptation needed for `sub`, `div`, `pow`, `max`, `mean`, `matmul` and potentially others.
+                *   **Validation:** Ongoing process of fixing compilation errors and ensuring tests pass for each adapted operation. Numerous `warnings` (`unused`, `unreachable`) exist as side-effects of this ongoing refactoring.
+            *   ✅ **8. Continuous Integration & Commits:** Being followed.
+        *   **Phase 1.10.B: Add Second DType (e.g., I64) [⏳ To Do]** (Blocked by 1.10.A completion)
+            *   ⏳ Extend `DType`, `Buffer`/`CpuBuffer`.
+            *   ⏳ Adapt creation functions.
+            *   ⏳ Extend ops (`add_op` example).
+            *   ⏳ Verify/adapt `BackwardOp` for `I64`.
+            *   ⏳ Add tests.
+        *   **Phase 1.10.C: Mixed Types & Conversion [⏳ To Do]** (Blocked by 1.10.B)
+            *   ⏳ Implement Type Promotion Logic.
+            *   ⏳ Implement `Tensor::cast(dtype: DType)`.
+            *   ⏳ Finalize promotion logic in ops.
+            *   ⏳ Add tests.
+        *   **Phase 1.10.D: Extend to Other Ops & DTypes [⏳ To Do]** (Blocked by 1.10.C)
+            *   ⏳ Adapt remaining ops, handle dispatch, kernels, promotion.
+            *   ⏳ Add other DTypes (`Bool`, `F64`, etc.).
+        *   **Phase 1.10.E: In-place Operations [⏳ To Do]** (Blocked by 1.10.D)
+            *   ⏳ Implement `add_`, `mul_`, etc.
+            *   ⏳ Ensure strict DType matching.
+            *   ⏳ Handle autograd implications.
+    *   ✅ **Implement `Tensor::detach()`:** Functionality exists (implicitly via view creation without setting `grad_fn`).
 
-*   **1.11 Testing & Documentation Consolidation [⏳ To Do]**
-    *   🎯 Goal: Ensure comprehensive testing and documentation for Phase 1 features. *(Content from original 1.5)*
-    *   ⏳ Expand Unit Tests (cover all ops, autograd graph cases, errors, device aspects).
+*   **1.11 Testing & Documentation Consolidation [🚧 Partially Done]**
+    *   🎯 Goal: Ensure comprehensive testing and documentation for Phase 1 features.
+    *   🚧 Expand Unit Tests: Good coverage for implemented parts, but needs expansion for ops with issues (`Sub`, `Div`, `Pow`, `Max`, `Mean`, `Matmul`) and to utilize creation functions (`arange`, etc.). Tests ignored for `Mean`, `Matmul`, `Transpose` need fixing.
     *   ⏳ Consider Property-Based Testing (`proptest`).
-    *   ⏳ Documentation (`rustdoc`, Guides): Update/create docs covering autograd, pattern, device awareness (CPU focus), view semantics, new APIs.
+    *   🚧 Documentation (`rustdoc`, Guides): Needs significant updates to reflect the non-generic API, `DType`/`Buffer` structure, current autograd status, and device awareness (CPU).
 
-*   **Overall Status Phase 1:** Views and basic autograd infrastructure (including `Tensor::backward` logic) are implemented. **Next critical step is 1.3:** enabling autograd for the `add` operation to validate the mechanism and establish the core pattern. Subsequent steps focus on implementing numerical gradient checking, testing the first autograd path, then systematically adding backward support for other operations before expanding the Tensor API.
+*   **Overall Status Phase 1:** Foundations (Views, Core Autograd) are solid. **Major refactoring (1.10.A) to non-generic `Tensor` with `DType`/`Buffer` is the primary focus.** This refactoring is mostly complete for core structures but still ongoing for individual operations, causing temporary issues (`dead_code` Backward ops, `unused` functions, ignored tests). **Next critical steps are finishing the op adaptation (1.10.A.7), fixing autograd integration issues (1.6, 1.8, 1.9), and stabilizing/un-ignoring tests (1.11).**
 
 **Phase 2: Neural Network Primitives & Optimization [⏳ To Do]**
 *   🎯 **Goal:** Build foundational `nn` modules, loss functions, and optimization algorithms to enable basic model definition and training, **integrating device management (`CPU`/`GPU` eventually) and leveraging the thread-safe `Tensor` structure.**
@@ -422,139 +332,7 @@ This roadmap outlines the planned development stages for NeuraRust, aiming for e
 *   **Overall Status Phase 3:** **Not started.** All components related to this phase were removed. **DataLoader implementation requires careful consideration of device management, collation, and thread-safety.**
 
 **Phase 4: GPU Acceleration (CUDA First, then Others) [⏳ To Do]**
-*   🎯 **Goal:** Enable high-performance computation using accelerators (starting with NVIDIA GPUs via CUDA), **leveraging the `Buffer`/`StorageDevice` abstraction and thread-safe `Tensor` structure.**
-*   **4.1 Backend Abstraction Layer [⏳]**
-    *   ⏳ Define `StorageDevice` Enum/Struct more concretely if needed (e.g., `CPU`, `Cuda(gpu_id: u32)`). (Already `CPU`/`GPU`, needs refinement for multi-GPU).
-    *   ⏳ Solidify `TensorData` structure containing `device: StorageDevice` and `data: Arc<Buffer<T>>` where `Buffer<T>` can be `Cpu(Arc<Vec<T>>)` or `Gpu(...)`.
-    *   ⏳ Implement `Tensor::device()` method (✅ Already Done, may need refinement for specific GPU IDs).
-    *   ⏳ Implement `Tensor::to(device: StorageDevice)` method: Creates a *new* `Tensor` by copying data to a new `Buffer` allocated on the target device (CPU <-> GPU, GPU <-> GPU). Handles `Arc<RwLock>` correctly.
-    *   ⏳ Design lazy initialization for CUDA contexts/devices.
-*   **4.2 CUDA Integration & Infrastructure [⏳]**
-    *   ⏳ Select and integrate CUDA binding crate (e.g., `cuda-rs`, `cudarc`, `accel`).
-    *   ⏳ Manage CUDA Contexts (creation, destruction, current context per thread).
-    *   ⏳ Manage CUDA Streams (creation, synchronization - `cudaStreamSynchronize`, `cudaEventRecord`/`cudaStreamWaitEvent`) for asynchronous operations.
-*   **4.3 GPU Memory Management [⏳]**
-    *   ⏳ Implement GPU memory allocation/deallocation (`cudaMalloc`, `cudaFree`) within the **`Buffer::Gpu`** variant.
-    *   ⏳ Implement asynchronous data transfers (Host <-> Device, Device <-> Device) using streams (`cudaMemcpyAsync`) as part of `Tensor::to()` and potentially other operations.
-    *   ⏳ Implement Pinned Memory allocation (`cudaMallocHost`/`cudaHostRegister`) to back `Buffer::Cpu` when `pin_memory=true` (used by DataLoader Phase 3).
-    *   ⏳ Explore GPU memory pooling/caching allocators for `Buffer::Gpu` to reduce overhead.
-*   **4.4 CUDA Kernels / Library Integration [⏳]**
-    *   ⏳ **Element-wise Ops:** Implement kernels/bindings operating on pointers extracted from `Buffer::Gpu` inputs, writing to a new `Buffer::Gpu` output.
-    *   ⏳ **Reductions:** Implement kernels/bindings for reductions on `Buffer::Gpu` data.
-    *   ⏳ **Matrix Multiplication:** Integrate cuBLAS (`cublas<t>gemm`), taking GPU buffer pointers as input.
-    *   ⏳ **Convolutions:** Integrate cuDNN (`cudnnConvolution*`), configuring it with descriptors based on tensor metadata and GPU buffer pointers.
-    *   ⏳ **Pooling:** Integrate cuDNN (`cudnnPooling*`).
-    *   ⏳ **Activations:** Implement kernels or use cuDNN (`cudnnActivation*`).
-    *   ⏳ **Indexing/Shape Ops:** Implement GPU kernels for `gather`, `scatter`, `slice`, `cat`, `stack` operating on `Buffer::Gpu`.
-    *   ⏳ **Random Number Generation:** Integrate cuRAND (`curandGenerate*`) to create `Tensor`s with `Buffer::Gpu` directly.
-*   **4.5 Framework Integration [⏳]**
-    *   ⏳ **Ops Dispatch:** Modify all op implementations (`neurarust-core::ops`, e.g., `add_op`) to: check `tensor.device()`; if all inputs are `StorageDevice::GPU`, call the corresponding CUDA kernel/library; if `CPU`, call CPU logic; otherwise error or copy.
-    *   ⏳ **Autograd:** Ensure `BackwardOp` implementations have GPU variants. `backward()` calls must dispatch correctly based on device. Gradient accumulation must happen on the correct device (`Buffer::Gpu` or `Buffer::Cpu`).
-    *   ⏳ **NN Layers (Phase 2):** Modify layers (`neurarust-core::nn`) to:
-        *   Accept `device` on construction for `Parameter` initialization (creating `Buffer::Gpu` or `Buffer::Cpu`).
-        *   Implement `.to(device)` using `Tensor::to()` for parameters/buffers.
-        *   Rely on Ops Dispatch within their `forward` methods.
-    *   ⏳ **DataLoader:** Integrate `pin_memory` option using GPU backend's pinned memory allocation.
-*   **4.6 Mixed-Precision Training (AMP) [⏳]**
-    *   ⏳ Add `f16` / `bf16` support, likely primarily within `Buffer::Gpu`.
-    *   ⏳ Implement `autocast` interacting with Ops Dispatch.
-    *   ⏳ Implement `GradScaler` operating potentially on GPU loss `Tensor`.
-    *   ⏳ Consider FP32 master weights pattern within optimizers.
-*   **4.7 Multi-GPU Support (Single Node) [⏳]**
-    *   ⏳ Refine `StorageDevice::Gpu(id)` for device selection.
-    *   ⏳ Implement basic `DataParallel` utility using `Tensor::to(device)` for placement and GPU communication libraries (e.g., NCCL bindings) operating on `Buffer::Gpu` pointers.
-*   **4.8 Other Backends (Exploratory/Future) [⏳]**
-    *   ⏳ **ROCm (AMD):** Investigate HIP bindings, potential `Buffer::Hip` variant.
-    *   ⏳ **Metal (Apple Silicon):** Investigate Metal bindings, potential `Buffer::Mtl` variant.
-    *   ⏳ **WebGPU:** Explore `wgpu` crate, requires WGSL kernels, potential `Buffer::Wgpu` variant.
-*   **4.9 Testing & Benchmarking [⏳]**
-    *   ⏳ Unit tests for GPU memory (`Buffer::Gpu`), H2D/D2H/D2D copies (`Tensor::to`).
-    *   ⏳ Unit tests for individual GPU kernels/library calls (comparing results with CPU ops via `.to(CPU)`).
-    *   ⏳ Integration tests for Autograd and NN layers operating on GPU `Tensor`s.
-    *   ⏳ Tests for Mixed-Precision and Multi-GPU.
-    *   ⏳ Benchmarks comparing CPU vs GPU performance for ops and models.
-*   **4.10 Build & CI [⏳]**
-    *   ⏳ Implement conditional compilation (`cfg` features) for CUDA.
-    *   ⏳ Set up CI with CUDA toolkit and GPU runners.
-*   **4.11 Documentation [⏳]**
-    *   ⏳ Document CUDA setup.
-    *   ⏳ Document `StorageDevice`, `Buffer::Gpu` concepts, `Tensor::to()`, device handling in ops/layers/training.
-    *   ⏳ Document AMP and Multi-GPU usage.
+*   🎯 **Goal:** Enable high-performance computation using accelerators (starting with NVIDIA GPUs via CUDA), **leveraging the `Buffer`/`StorageDevice` framework.**
+*   **Overall Status Phase 4:** **To Do.**
 
-**Phase 5: Advanced Features, Ecosystem & Usability [⏳ To Do]**
-*   🎯 **Goal:** Implement more complex NN architectures, improve interoperability, and enhance the developer experience, **fully integrating device management and leveraging core abstractions.**
-*   **5.1 Advanced NN Architectures & Modules [⏳]**
-    *   🎯 Goal: Build advanced, reusable NN components aware of device placement.
-    *   ⏳ **Transformer Components:** Implement device-aware `MultiheadAttention`, `TransformerEncoderLayer`, etc., using device-aware ops.
-    *   ⏳ **Advanced RNN Features:** Implement device-aware bidirectionality, `PackedSequence` handling (needs careful buffer/device management).
-    *   ⏳ **Normalization Variants:** Implement `SyncBatchNorm` (requires multi-GPU communication on device buffers - Phase 4).
-    *   ⏳ **Other Potential Modules:** Ensure device compatibility for new activations, attention mechanisms etc.
-*   **5.2 ONNX Export/Import [⏳]**
-    *   🎯 Goal: Allow model exchange, **handling device differences.**
-    *   ⏳ **Exporter:** Access parameters/buffers via locks from their respective devices (copying to CPU for serialization likely needed). Map device-aware NeuraRust ops to ONNX.
-    *   ⏳ **Importer:** Parse ONNX, map ops. Load weights, placing them onto the user-specified `device` (via `map_location`) by creating appropriate `Tensor`s/`Buffer`s.
-    *   ⏳ **Testing & Coverage:** Test exported models vs ONNX Runtime, considering device. Document supported ops and device implications.
-*   **5.3 Python Bindings (PyO3) (`neurarust-py`) [⏳]**
-    *   🎯 Goal: Enable seamless Python integration, **exposing device management APIs.**
-    *   ⏳ **Crate Setup:** Create `neurarust-py` with `PyO3`.
-    *   ⏳ **Tensor Bindings:** Expose `Tensor` including `.device`, `.to(device)`. Handle NumPy conversion carefully regarding devices (copying, errors?). Expose `StorageDevice` enum.
-    *   ⏳ **Autograd Bindings:** Ensure compatibility with device-aware tensors.
-    *   ⏳ **NN Module Bindings:** Expose device-aware `nn.Module` (with `.to()`), layers, losses.
-    *   ⏳ **Optimizer & Scheduler Bindings:** Expose device-aware versions.
-    *   ⏳ **DataLoader Bindings:** Expose device options (`pin_memory`, target device).
-    *   ⏳ **Packaging & Distribution:** Configure `maturin`.
-    *   ⏳ **Testing:** Python-side tests covering device interactions.
-    *   ⏳ **Documentation:** Provide Python API docs with device handling examples.
-*   **5.4 JIT Compilation / Graph Optimization (Exploratory) [⏳]**
-    *   🎯 Goal: Explore static graph optimization, **considering device-specific opportunities.**
-    *   ⏳ **Tracing/Scripting:** Capture device information.
-    *   ⏳ **Intermediate Representation (IR):** Must encode device placement.
-    *   ⏳ **Optimization Passes:** Operator Fusion, etc., must be device-aware.
-    *   ⏳ **Code Generation:** Generate code dispatching to correct device backends (CPU/GPU).
-*   **5.5 Visualization & Debugging [⏳]**
-    *   🎯 Goal: Improve developer experience for understanding device-aware models.
-    *   ⏳ **Training Hooks:** Access data via Buffers/locks (copy to CPU if needed).
-    *   ⏳ **Computation Graph Visualization:** Indicate device placement.
-    *   ⏳ **Debugging Tools:** Numerical gradient checking adapted (Phase 1). Improve device mismatch errors.
-*   **5.6 Documentation, Examples & Tutorials [⏳]**
-    *   🎯 Goal: Provide comprehensive resources covering device management thoroughly.
-    *   ⏳ **Comprehensive User Guide:** Cover `StorageDevice`, `.to()`, device handling in all components, CPU vs GPU training loops.
-    *   ⏳ **API Reference Documentation:** Ensure `rustdoc` clearly explains device parameters/returns/implications.
-    *   ⏳ **Gallery of Examples:** Provide examples running on CPU and GPU.
-    *   ⏳ **Tutorials:** Cover device management explicitly.
-    *   ⏳ **Project Website:** Host all device-aware documentation.
-
-**Phase 6: Deployment, Specialization & Maturity [⏳ To Do]**
-*   🎯 **Goal:** Target deployment platforms, leverage Rust's strengths, implement distributed training, and foster a community, **all built upon the device-aware and thread-safe core.**
-*   **6.1 Deployment Targets [⏳]**
-    *   🎯 Goal: Enable efficient deployment across diverse environments using appropriate backends.
-    *   ⏳ **WebAssembly (WASM):** Compile core targeting CPU backend (`Buffer::Cpu`). Exclude GPU code via `cfg`. Consider single/multi-thread implications for `Arc<RwLock>`. Explore WebGPU backend later (Phase 4.8).
-    *   ⏳ **Native Binary Deployment:** Leverage optimized CPU backend, or GPU backend if built with CUDA `cfg`. Facilitate static linking.
-    *   ⏳ **Edge/Embedded (ARM):** Target performant CPU backend (`Buffer::Cpu`), consider `Arc<RwLock>` overhead and NEON potential.
-    *   ⏳ **Server-Side Inference:** Utilize CPU/GPU backend. Leverage thread-safe `Tensor`s for sharing models across request threads.
-*   **6.2 Inference Optimizations [⏳]**
-    *   🎯 Goal: Reduce model size and accelerate inference speed using device-aware techniques.
-    *   ⏳ **Quantization:** Implement device-aware quantization (PTQ, QAT). Requires quantized kernels/ops for CPU/GPU. May need `Buffer` variants or metadata for quantized types.
-    *   ⏳ **Pruning:** Implement device-aware pruning application. Explore sparse `Buffer` representations/kernels.
-    *   ⏳ **Model Distillation:** Support depends on running device-aware models and loss calculations.
-*   **6.3 Distributed Training (Multi-Node) [⏳]**
-    *   🎯 Goal: Enable large-scale training using device-specific communication backends.
-    *   ⏳ **Communication Backend Integration:** Integrate MPI/Gloo (CPU `Buffer`) or NCCL (GPU `Buffer`).
-    *   ⏳ **Distributed Primitives:** Implement collectives operating on specific `Buffer` types via appropriate backends.
-    *   ⏳ **`DistributedDataParallel` (DDP):** Implement using device placement (`Tensor::to`), device-aware autograd, and communication primitives on device buffers.
-*   **6.4 Leveraging Rust's Strengths [⏳]**
-    *   🎯 Goal: Fully exploit Rust's features enabled by the core architecture.
-    *   ⏳ **Advanced Static Optimizations (Compile-Time):** Explore device-aware macro-based optimizations.
-    *   ⏳ **Enhanced Safety & Verification:** Leverage thread-safety of `Arc<RwLock>`. Verify `unsafe` blocks in `Buffer` management / FFI.
-    *   ⏳ **Fearless Concurrency:** Utilize `rayon` for CPU ops thanks to thread-safe `Tensor`. Explore task-based parallelism.
-*   **6.5 Tooling & Infrastructure [⏳]**
-    *   🎯 Goal: Provide robust development tools reflecting the multi-device nature.
-    *   ⏳ **Robust Benchmarking Suite:** Benchmark ops/models across CPU/GPU, comparing `Buffer` backends.
-    *   ⏳ **Extended Continuous Integration (CI):** Test builds/runs across platforms, devices (CPU/GPU runners), and feature flags (`cfg`).
-*   **6.6 Community & Ecosystem [⏳]**
-    *   🎯 Goal: Foster an active community knowledgeable about the device-aware architecture.
-    *   ⏳ **Governance & Contribution:** Establish clear processes.
-    *   ⏳ **Community Engagement:** Communicate clearly about device support/usage.
-    *   ⏳ **Ecosystem Integration:** Ensure integrations correctly handle device-aware `Tensor`s.
-
-*(This highly detailed roadmap reflects the long-term ambition. Priorities and specific implementation details will evolve based on progress, community feedback, and emerging needs.)*
+---
