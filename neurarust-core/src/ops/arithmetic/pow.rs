@@ -233,13 +233,85 @@ where
     }
 }
 
-// --- pow_op Implementation (Manual Element-wise Forward) ---
+// --- pow_kernel (Private Calculation Core) ---
+
+/// Private kernel for element-wise power calculation with broadcasting.
+fn pow_kernel<T>(
+    output_shape: &[usize],
+    base_data: &[T],
+    base_shape: &[usize],
+    base_strides: &[usize],
+    base_offset: usize,
+    exponent_data: &[T],
+    exponent_shape: &[usize],
+    exponent_strides: &[usize],
+    exponent_offset: usize,
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Float + Copy + Zero,
+{
+    let output_numel = output_shape.iter().product::<usize>();
+    let mut output_data = vec![T::zero(); output_numel];
+    let mut current_coords = vec![0; output_shape.len()];
+    // No need for output_broadcast_strides if we index output_data linearly
+
+    for i in 0..output_numel {
+        // Calculate physical index into base buffer, handling broadcast
+        let mut base_physical_idx = base_offset;
+        for dim in 0..base_shape.len() {
+            let broadcast_dim_offset = output_shape.len() - base_shape.len();
+            let coord_idx = broadcast_dim_offset + dim;
+            // Use usize for indexing and comparison
+            let index = if base_shape[dim] == 1 && output_shape[coord_idx] > 1 { 0 } else { current_coords[coord_idx] };
+            base_physical_idx += index * base_strides[dim];
+        }
+
+        // Calculate physical index into exponent buffer, handling broadcast
+        let mut exp_physical_idx = exponent_offset;
+        for dim in 0..exponent_shape.len() {
+            let broadcast_dim_offset = output_shape.len() - exponent_shape.len();
+            let coord_idx = broadcast_dim_offset + dim;
+            // Use usize for indexing and comparison
+            let index = if exponent_shape[dim] == 1 && output_shape[coord_idx] > 1 { 0 } else { current_coords[coord_idx] };
+            exp_physical_idx += index * exponent_strides[dim];
+        }
+
+        // Bounds check (optional but safer)
+        if base_physical_idx >= base_data.len() || exp_physical_idx >= exponent_data.len() {
+            return Err(NeuraRustError::InternalError(
+                "Pow kernel index out of bounds".to_string()
+            ));
+        }
+
+        let base_val = base_data[base_physical_idx];
+        let exp_val = exponent_data[exp_physical_idx];
+
+        // Core calculation
+        output_data[i] = base_val.powf(exp_val);
+
+        // Increment multi-dimensional coords for the next iteration
+        if i < output_numel - 1 {
+            let mut dim_to_inc = output_shape.len();
+            while dim_to_inc > 0 {
+                dim_to_inc -= 1;
+                current_coords[dim_to_inc] += 1;
+                if current_coords[dim_to_inc] < output_shape[dim_to_inc] {
+                    break;
+                }
+                current_coords[dim_to_inc] = 0;
+            }
+        }
+    }
+    Ok(output_data)
+}
+
+// --- pow_op Implementation (Public API + Autograd Setup) ---
 
 /// Computes element-wise power of `base` raised to `exponent`.
 /// Supports broadcasting.
 pub fn pow_op<T>(base: &Tensor<T>, exponent: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
 where
-    T: Float // Requires Float for powf
+    T: Float // Requires Float for powf and backward ln
         + Debug
         + Copy
         + Send
@@ -251,8 +323,8 @@ where
         + Add<Output = T>
         + AddAssign
         + Mul<Output = T>
-        + Div<Output = T>
-        + Neg<Output = T>
+        + Div<Output = T> // For backward
+        + Neg<Output = T> // For backward
         + Default
         + PartialEq
         + PartialOrd
@@ -263,88 +335,76 @@ where
     let exponent_requires_grad = exponent.requires_grad();
     let requires_grad = base_requires_grad || exponent_requires_grad;
 
-    let base_node_arc = if requires_grad { Some(base.data.clone()) } else { None };
-    let exponent_node_arc = if requires_grad { Some(exponent.data.clone()) } else { None };
-
     let base_guard = base.read_data();
     let exponent_guard = exponent.read_data();
 
-    // --- Device Checks (Simplified: Assume CPU) ---
-     if base_guard.device != StorageDevice::CPU || exponent_guard.device != StorageDevice::CPU {
-         return Err(NeuraRustError::UnsupportedOperation(
-             "Pow forward currently only supports CPU".to_string()
-         ));
-     }
-
-    // --- Broadcasting and Forward Calculation ---
-    let output_shape = broadcast_shapes(&base_guard.shape, &exponent_guard.shape)?;
-    let output_numel = output_shape.iter().product::<usize>();
-    let mut output_data = vec![T::zero(); output_numel];
-
-    let base_buffer = base_guard.data.cpu_data()?.clone();
-    let exponent_buffer = exponent_guard.data.cpu_data()?.clone();
-
-    // Strides for iterating through the broadcasted output shape contiguously
-    let output_strides = TensorData::<T>::calculate_contiguous_strides(&output_shape);
-    let mut current_coords = vec![0; output_shape.len()];
-
-    for i in 0..output_numel {
-        // Calculate multi-dimensional coords from linear index `i`
-        let _coords_ignored = index_to_coord(i, &output_shape, &output_strides); // Use current_coords instead
-
-        // Calculate physical index into base buffer, handling broadcast
-        let mut base_physical_idx = base_guard.offset;
-         for dim in 0..base_guard.shape.len() {
-             let broadcast_dim_offset = output_shape.len() - base_guard.shape.len();
-             let coord_idx = broadcast_dim_offset + dim;
-             let index = if base_guard.shape[dim] == 1 && output_shape[coord_idx] > 1 { 0 } else { current_coords[coord_idx] };
-             base_physical_idx += index * base_guard.strides[dim];
-         }
-
-        // Calculate physical index into exponent buffer, handling broadcast
-        let mut exp_physical_idx = exponent_guard.offset;
-         for dim in 0..exponent_guard.shape.len() {
-             let broadcast_dim_offset = output_shape.len() - exponent_guard.shape.len();
-             let coord_idx = broadcast_dim_offset + dim;
-             let index = if exponent_guard.shape[dim] == 1 && output_shape[coord_idx] > 1 { 0 } else { current_coords[coord_idx] };
-             exp_physical_idx += index * exponent_guard.strides[dim];
-         }
-
-        let base_val = base_buffer[base_physical_idx];
-        let exp_val = exponent_buffer[exp_physical_idx];
-
-        output_data[i] = base_val.powf(exp_val);
-
-        // Increment multi-dimensional coords for the next iteration
-         if i < output_numel - 1 {
-             let mut dim_to_inc = output_shape.len();
-             while dim_to_inc > 0 {
-                 dim_to_inc -= 1;
-                 current_coords[dim_to_inc] += 1;
-                 if current_coords[dim_to_inc] < output_shape[dim_to_inc] { break; }
-                 current_coords[dim_to_inc] = 0;
-             }
-         }
+    // --- Device Checks --- (Simplified: Assume CPU)
+    if base_guard.device != StorageDevice::CPU || exponent_guard.device != StorageDevice::CPU {
+        return Err(NeuraRustError::UnsupportedOperation(
+            "Pow currently only supports CPU".to_string(),
+        ));
     }
 
+    // --- Shape Broadcasting ---
+    let output_shape = broadcast_shapes(&base_guard.shape, &exponent_guard.shape)?;
+
+    // --- Extract data for kernel ---
+    let base_data_arc = base_guard.data.cpu_data()?.clone();
+    let exponent_data_arc = exponent_guard.data.cpu_data()?.clone();
+    let base_data_slice = base_data_arc.as_slice();
+    let exponent_data_slice = exponent_data_arc.as_slice();
+
+    // Clone shapes, strides, offsets BEFORE dropping guards
+    let base_shape = base_guard.shape.clone();
+    let base_strides = base_guard.strides.clone();
+    let base_offset = base_guard.offset;
+    let exponent_shape = exponent_guard.shape.clone();
+    let exponent_strides = exponent_guard.strides.clone();
+    let exponent_offset = exponent_guard.offset;
+
+    // Clone Arcs needed for backward pass *before* dropping guards
+    let base_node_arc = if requires_grad { Some(base.data.clone()) } else { None };
+    let exponent_node_arc = if requires_grad { Some(exponent.data.clone()) } else { None };
+
+    // Drop guards after getting all necessary data/arcs
+    drop(base_guard);
+    drop(exponent_guard);
+
+    // --- Calculation via Kernel ---
+    let output_data = pow_kernel(
+        &output_shape,
+        base_data_slice,
+        &base_shape,
+        &base_strides,
+        base_offset,
+        exponent_data_slice,
+        &exponent_shape,
+        &exponent_strides,
+        exponent_offset,
+    )?;
+
+    // --- Create Output Tensor ---
     let output_tensor = Tensor::new(output_data, output_shape)?;
 
     // --- Autograd Integration ---
     if requires_grad {
         if let (Some(base_arc), Some(exp_arc)) = (base_node_arc, exponent_node_arc) {
+            // Clone output Arc for backward context
+            let output_node_arc = output_tensor.data.clone();
             let grad_fn = PowBackward {
                 base_node: base_arc,
                 exponent_node: exp_arc,
-                output_node: output_tensor.data.clone(), // Pass clone of output tensor data
+                output_node: output_node_arc, // Store output for grad_exponent
                 base_requires_grad,
                 exponent_requires_grad,
             };
             output_tensor.set_grad_fn(Some(Arc::new(grad_fn)))?;
             output_tensor.set_requires_grad(true)?;
         } else {
-             return Err(NeuraRustError::InternalError(
-                 "Input requires_grad but Arc could not be cloned for Pow".to_string(),
-             ));
+            // This case should ideally not happen if requires_grad is true
+            return Err(NeuraRustError::InternalError(
+                "Input requires_grad but Arc could not be cloned for Pow".to_string(),
+            ));
         }
     }
 
