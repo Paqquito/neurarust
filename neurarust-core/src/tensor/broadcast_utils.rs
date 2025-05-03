@@ -218,4 +218,104 @@ where
             }
         }
     }
+}
+
+// --- Expand Kernel (Private) ---
+
+/// Private kernel for expanding/broadcasting tensor data to a target shape.
+///
+/// Iterates through the target shape, calculating the corresponding index in the source
+/// tensor based on broadcasting rules (dimensions of size 1 in the source are repeated).
+///
+/// # Arguments
+/// * `target_shape`: The desired output shape.
+/// * `source_data`: Slice containing the data of the source tensor.
+/// * `source_shape`: Shape of the source tensor.
+/// * `source_strides`: Strides of the source tensor.
+/// * `source_offset`: Offset of the source tensor's data within its buffer.
+///
+/// # Returns
+/// * `Ok(Vec<T>)` containing the expanded data.
+/// * `Err(NeuraRustError)` if shapes are incompatible or an index is out of bounds.
+pub(crate) fn expand_kernel<T>(
+    target_shape: &[usize],
+    source_data: &[T],
+    source_shape: &[usize],
+    source_strides: &[usize],
+    source_offset: usize,
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Copy + Zero + Debug,
+{
+    let target_rank = target_shape.len();
+    let source_rank = source_shape.len();
+
+    // Validation (Should ideally be done before calling the kernel, but double-check)
+    if source_rank > target_rank {
+         return Err(NeuraRustError::InternalError(format!(
+            "Expand kernel error: Source rank ({}) > Target rank ({}).",
+            source_rank, target_rank
+        )));
+    }
+    let rank_diff = target_rank - source_rank;
+    for i in 0..source_rank {
+        if source_shape[i] != 1 && source_shape[i] != target_shape[rank_diff + i] {
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: target_shape.to_vec(), // Simplified expected shape indication
+                actual: source_shape.to_vec(),
+                operation: format!(
+                    "expand_kernel (dimension {} mismatch: source {} vs target {})",
+                     i, source_shape[i], target_shape[rank_diff + i]
+                 )
+            });
+        }
+    }
+
+    // Prepare output buffer
+    let target_numel = target_shape.iter().product::<usize>();
+    let mut output_data = vec![T::zero(); target_numel];
+    let mut current_target_indices = vec![0; target_rank];
+
+    // Iterate through the target shape (linearly)
+    for target_linear_idx in 0..target_numel {
+        // Calculate corresponding source physical index based on broadcasting rules
+        let mut source_physical_offset = source_offset;
+        for source_dim_idx in 0..source_rank {
+            let target_dim_idx = rank_diff + source_dim_idx;
+            let source_index_for_dim = if source_shape[source_dim_idx] == 1 && target_shape[target_dim_idx] > 1 {
+                0 // Dimension was broadcasted, use index 0 from source
+            } else {
+                current_target_indices[target_dim_idx] // Dimension matched, use target index
+            };
+            source_physical_offset += source_index_for_dim * source_strides[source_dim_idx];
+        }
+
+        // Bounds check (important!)
+        if source_physical_offset >= source_data.len() {
+            return Err(NeuraRustError::InternalError(format!(
+                "Expand kernel source index out of bounds. TargetCoords: {:?}, SourceOffset: {}, SourceDataLen: {}",
+                current_target_indices,
+                source_physical_offset,
+                source_data.len()
+            )));
+        }
+
+        // Copy the value (output data is contiguous, use linear index)
+        output_data[target_linear_idx] = source_data[source_physical_offset];
+
+        // Increment target indices for the next iteration
+        if target_numel > 0 && target_linear_idx < target_numel - 1 {
+            let mut dim_to_increment = target_rank;
+            while dim_to_increment > 0 {
+                dim_to_increment -= 1;
+                current_target_indices[dim_to_increment] += 1;
+                if current_target_indices[dim_to_increment] < target_shape[dim_to_increment] {
+                    break;
+                }
+                current_target_indices[dim_to_increment] = 0;
+            }
+        }
+    }
+
+    Ok(output_data)
 } 

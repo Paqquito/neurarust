@@ -10,6 +10,7 @@ use std::fmt::Debug;
 use std::ops::{Add, AddAssign, Div, Neg, Sub, Mul};
 use std::sync::{Arc, RwLockReadGuard};
 use std::iter::Sum;
+use crate::tensor::broadcast_utils::expand_kernel;
 
 // --- MeanBackward Definition ---
 
@@ -121,62 +122,31 @@ where
             }
         };
 
-        // 3. Expand the contiguous grad_for_expand to the target shape (Manual Expand)
+        // 3. Expand the contiguous grad_for_expand to the target shape using kernel.
         if grad_for_expand.shape() == target_shape {
             return Ok(vec![grad_for_expand]);
         }
 
+        // --- Call expand_kernel --- 
         let grad_guard = grad_for_expand.read_data();
-        let grad_buffer = grad_guard.data.cpu_data()?.clone();
-        let grad_shape = grad_guard.shape.clone();
-        let grad_strides = grad_guard.strides.clone();
+        let grad_data_slice = grad_guard.data.cpu_data()?.clone();
+        let grad_data_slice = grad_data_slice.as_slice();
+        let grad_shape = &grad_guard.shape;
+        let grad_strides = &grad_guard.strides;
         let grad_offset = grad_guard.offset;
-        let grad_rank = grad_shape.len();
 
-        if target_rank != grad_rank {
-            return Err(NeuraRustError::InternalError(
-                format!("Mean backward rank mismatch: target {}, grad {}", target_rank, grad_rank)
-            ));
-        }
+        let expanded_data = expand_kernel(
+            &target_shape,
+            grad_data_slice,
+            grad_shape,
+            grad_strides,
+            grad_offset,
+        )?;
 
-        let input_grad_numel = target_shape.iter().product::<usize>();
-        let mut input_grad_data = vec![T::zero(); input_grad_numel];
-        let target_strides = TensorData::<T>::calculate_contiguous_strides(&target_shape);
-        let mut current_target_indices = vec![0; target_rank];
+        // Drop guard after use
+        drop(grad_guard);
 
-        for _ in 0..input_grad_numel {
-            let mut grad_relative_offset = 0;
-            for dim_idx in 0..target_rank {
-                let source_index = if grad_shape[dim_idx] == 1 && target_shape[dim_idx] > 1 {
-                    0
-                } else {
-                    current_target_indices[dim_idx]
-                };
-                grad_relative_offset += source_index * grad_strides[dim_idx];
-            }
-            let grad_logical_offset = grad_offset + grad_relative_offset;
-            let val = grad_buffer[grad_logical_offset];
-
-            let mut target_flat_idx = 0;
-            for dim_idx in 0..target_rank {
-                target_flat_idx += current_target_indices[dim_idx] * target_strides[dim_idx];
-            }
-            input_grad_data[target_flat_idx] = val;
-
-            if input_grad_numel > 0 {
-                let mut dim_to_increment = target_rank;
-                while dim_to_increment > 0 {
-                    dim_to_increment -= 1;
-                    current_target_indices[dim_to_increment] += 1;
-                    if current_target_indices[dim_to_increment] < target_shape[dim_to_increment] {
-                        break;
-                    }
-                    current_target_indices[dim_to_increment] = 0;
-                }
-            }
-        }
-
-        let input_gradient = Tensor::new(input_grad_data, target_shape)?;
+        let input_gradient = Tensor::new(expanded_data, target_shape)?;
         Ok(vec![input_gradient])
     }
 
