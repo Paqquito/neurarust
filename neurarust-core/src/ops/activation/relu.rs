@@ -171,34 +171,9 @@ where
     Ok(result_tensor)
 }
 
-// --- Tests ---
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::Tensor;
-    use approx::assert_relative_eq;
-
-    // Helper to create tensors for tests
-    fn create_tensor_f64(data: Vec<f64>, shape: Vec<usize>) -> Tensor<f64> {
-        Tensor::new(data, shape).unwrap()
-    }
-
-    #[test]
-    fn test_relu_forward() {
-        let input = create_tensor_f64(vec![-2.0, -1.0, 0.0, 1.0, 2.0], vec![5]);
-        let expected = vec![0.0, 0.0, 0.0, 1.0, 2.0];
-        let output = relu_op(&input).unwrap();
-        let output_data = output.read_data().data.cpu_data().unwrap().clone();
-
-        assert_eq!(output.shape(), vec![5]);
-        output_data
-            .iter()
-            .zip(expected.iter())
-            .for_each(|(o, e)| assert_relative_eq!(*o, *e));
-    }
-
-    // TODO: Add autograd tests using check_grad (use f64)
-}
+// Link to the external test file
+#[path = "relu_test.rs"]
+mod tests;
 
 // Add autograd tests
 #[cfg(test)]
