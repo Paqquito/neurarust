@@ -116,13 +116,11 @@ impl BackwardOp for TransposeBackward {
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
-    use crate::utils::testing::{check_tensor_near, create_test_tensor, create_test_tensor_with_grad};
-    use crate::error::NeuraRustError;
+    use crate::utils::testing::{check_tensor_near};
+    use crate::autograd::grad_check::check_grad;
     
     // Remove unused Buffer imports
     // use crate::buffer::{Buffer, CpuBuffer};
-    use crate::autograd::grad_check::check_grad;
-    
 
     // Remove local get_f32_data, use Tensor::get_f32_data
     /*
@@ -131,7 +129,7 @@ mod tests {
 
     #[test]
     fn test_transpose_basic() {
-        let tensor = create_test_tensor((0..6).map(|x| x as f32).collect(), vec![2, 3]);
+        let tensor = Tensor::from_vec_f32((0..6).map(|x| x as f32).collect(), vec![2, 3]).expect("Failed to create tensor");
         let transposed = tensor.transpose(0, 1).expect("Transpose failed");
 
         assert_eq!(transposed.shape(), vec![3, 2]);
@@ -145,7 +143,7 @@ mod tests {
 
     #[test]
     fn test_transpose_invalid_dims() {
-        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]);
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("Failed to create tensor");
         let result = transpose_op(&t, 0, 2);
         assert!(matches!(result, Err(NeuraRustError::IndexOutOfBounds { .. })));
         let result2 = transpose_op(&t, 2, 1);
@@ -155,7 +153,7 @@ mod tests {
     #[test]
     fn test_transpose_higher_dim() {
         // Unskip test
-        let t = create_test_tensor((0..24).map(|x| x as f32).collect(), vec![2, 3, 4]);
+        let t = Tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4]).expect("Failed to create tensor");
         // Transpose dims 1 and 2 -> shape [2, 4, 3]
         let transposed = transpose_op(&t, 1, 2).unwrap();
         assert_eq!(transposed.shape(), vec![2, 4, 3]);

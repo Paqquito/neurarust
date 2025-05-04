@@ -287,7 +287,7 @@ pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
             "mul_op currently only supports F32 tensors.".to_string(),
         ));
     }
-    let output_dtype = DType::F32;
+    let _output_dtype = DType::F32;
 
     // --- Broadcasting ---
     let output_shape = broadcast_shapes(&a_guard.shape, &b_guard.shape)?;

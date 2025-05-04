@@ -15,7 +15,7 @@ mod traits; // Keep traits module declared
 // mod traits;
 // Add other existing modules here if they exist (e.g., based on previous structure or file listing)
 // mod accessors;
-mod create; // Keep private
+pub mod create; // Make the create module public
 mod view_methods;
 
 // --- Declare utility modules ---
@@ -23,7 +23,7 @@ pub mod utils; // Declare public utils
 pub mod broadcast_utils; // Declare the new public broadcast utils module
 
 // Re-export creation functions to make them public
-pub use create::{zeros, ones, full};
+pub use create::{zeros, ones, full, zeros_like, ones_like};
 
 /// Represents a multi-dimensional array (tensor).
 ///

@@ -117,9 +117,6 @@ impl Tensor {
                         format!("GPU contiguous copy not yet implemented for dtype {:?}", dtype)
                     ))
                 }
-                 _ => Err(NeuraRustError::UnsupportedOperation(
-                    format!("Contiguous copy not supported for dtype {:?} on device {:?}", td_ref.dtype, device)
-                 ))
             }
         }
     }

@@ -7,6 +7,9 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Neg};
+use crate::utils::testing::check_tensor_near;
+use crate::error::NeuraRustError;
+use crate::autograd::grad_check::GradCheckError;
 
 fn create_test_tensor<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
 where
@@ -29,66 +32,52 @@ where
     Tensor::new(data, shape).expect("Failed to create test tensor")
 }
 
-fn create_test_tensor_with_grad<T>(data: Vec<T>, shape: Vec<usize>) -> Tensor<T>
-where
-    T: Neg<Output = T>
-        + Add<Output = T>
-        + AddAssign
-        + Copy
-        + Clone
-        + Debug
-        + Default
-        + Zero
-        + One
-        + Sum
-        + PartialEq
-        + PartialOrd
-        + Send
-        + Sync
-        + 'static,
-{
-    let t = create_test_tensor(data, shape);
-    t.set_requires_grad(true)
-        .expect("Failed to set requires_grad");
-    t
+// Imports for testing
+// REMOVED: use crate::utils::testing::create_test_tensor_with_grad;
+
+// Helper (non-generic) pour obtenir les données f32
+fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
+    let guard = tensor.read_data();
+    if guard.dtype != crate::types::DType::F32 || guard.device != crate::device::StorageDevice::CPU {
+        return Err(NeuraRustError::UnsupportedOperation("Test helper requires F32 CPU tensor".to_string()));
+    }
+    match &*guard.buffer {
+        crate::buffer::Buffer::Cpu(crate::buffer::CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()),
+        _ => Err(NeuraRustError::UnsupportedOperation("Buffer type not CpuF32".to_string())),
+    }
 }
 
 #[test]
-fn test_neg_ok() {
-    let a = create_test_tensor(vec![1.0, -2.0, 3.0], vec![3]);
-    let result = neg_op(&a).unwrap();
-    let expected_data = vec![-1.0, 2.0, -3.0];
-    assert_eq!(result.shape(), vec![3]);
-    let res_data = result.read_data().data.cpu_data().unwrap().clone();
-    assert_relative_eq!(res_data.as_slice(), expected_data.as_slice());
-
-    // Test using the trait implementation
-    let result_trait = (-&a).unwrap();
-    assert_eq!(result_trait.shape(), vec![3]);
-    let res_data_trait = result_trait.read_data().data.cpu_data().unwrap().clone();
-    assert_relative_eq!(res_data_trait.as_slice(), expected_data.as_slice());
+fn test_neg_ok() -> Result<(), NeuraRustError> {
+    let a = Tensor::from_vec_f32(vec![1.0, -2.0, 0.0], vec![3])?; // f32
+    let result = neg_op(&a)?;
+    let expected_data = vec![-1.0, 2.0, 0.0];
+    assert_eq!(result.shape(), &[3]);
+    let res_data = get_f32_data(&result)?;
+    assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
+    Ok(())
 }
 
 // --- Autograd Tests ---
 
 #[test]
-fn test_neg_backward() {
-    let a = create_test_tensor_with_grad(vec![1.0, -2.0, 3.0], vec![3]);
+fn test_neg_backward() -> Result<(), GradCheckError> {
+    // Utiliser Tensor::from_vec_f32 et set_requires_grad
+    let a = Tensor::from_vec_f32(vec![1.0, -2.0, 0.0, 5.5], vec![4])?;
+    a.set_requires_grad(true)?;
 
-    let func = |inputs: &[Tensor<f64>]| neg_op(&inputs[0]);
+    // La closure attend &[Tensor]
+    let func = |inputs: &[Tensor]| neg_op(&inputs[0]);
 
-    let output_shape = vec![3];
-    let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-    let epsilon = 1e-5;
-    let tolerance = 1e-7;
+    let output_shape = vec![4];
+    // output_grad doit être f32
+    let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], output_shape)?;
+    
+    let epsilon = 1e-4;
+    let tolerance = 1e-4;
 
-    let grad_check_result = check_grad(func, &[a], &output_grad, epsilon, tolerance);
-
-    // Optional detailed checks:
-    // grad_a = -grad_output = -[1, 1, 1] = [-1, -1, -1]
-    // let a_grad = a.grad().unwrap();
-    // let expected_grad = vec![-1.0, -1.0, -1.0];
-    // assert_relative_eq!(a_grad.data().as_slice(), expected_grad.as_slice(), epsilon = tolerance);
-
-    assert!(grad_check_result.is_ok(), "Negation backward grad check failed: {:?}", grad_check_result.err());
+    // check_grad attend &[Tensor] et output_grad: &Tensor
+    // Note: neg_op ne prend qu'une entrée, donc le slice est &[a]
+    check_grad(func, &[a], &output_grad, epsilon, tolerance)
+    // Le test réussit si check_grad retourne Ok(())
 } 

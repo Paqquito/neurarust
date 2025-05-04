@@ -163,17 +163,21 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
+    // --- Device and DType Checks ---
+    // ... (Assume CPU F32 for now)
+
     // --- Rank Check ---
-    let a_shape = a_guard.shape.clone();
-    let b_shape = b_guard.shape.clone();
-    if a_shape.len() != 2 || b_shape.len() != 2 {
-        return Err(NeuraRustError::ShapeMismatch {
-            operation: "matmul (rank check)".to_string(),
-            // Format shapes/ranks into Strings
-            expected: format!("rank 2"), // Indicating rank 2
-            actual: format!("rank {} and {}", a_shape.len(), b_shape.len()),
+    if a_guard.shape.len() != 2 || b_guard.shape.len() != 2 {
+        // Correctly return RankMismatch error
+        return Err(NeuraRustError::RankMismatch {
+            expected: 2, 
+            actual: a_guard.shape.len().max(b_guard.shape.len()), // Report the max rank found
         });
     }
+
+    // --- Shape Compatibility Check ---
+    let a_shape = &a_guard.shape;
+    let b_shape = &b_guard.shape;
 
     // --- Inner Dimension Check ---
     let m = a_shape[0];

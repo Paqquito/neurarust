@@ -8,6 +8,9 @@ use crate::tensor_data::TensorData;
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use crate::types::DType;
+use crate::ops::arithmetic::mul_op;
+use crate::ops::view::expand_op;
+// use crate::autograd::grad_check::check_grad; // Keep commented until check_grad is ready
 
 // --- MeanBackward Definition ---
 
@@ -21,12 +24,43 @@ struct MeanBackward {
 // --- BackwardOp Implementation for MeanBackward ---
 
 impl BackwardOp for MeanBackward {
-    fn backward(&self, _grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // TODO: Needs expand_op (which requires its own backward) and mul_op
-        // TODO: Also needs the scaling factor
-        let _scaling_factor = 1.0f32 / (self.num_elements_reduced as f32);
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        // Get original input shape
+        let input_guard = self.input_node.read().map_err(|_| {
+            // Correct LockError format
+            NeuraRustError::LockError{
+                lock_type: "read".to_string(),
+                reason: "Failed to lock input node in MeanBackward".to_string()
+            }
+        })?;
+        let input_shape = input_guard.shape.clone();
+        // Ensure we drop the read guard before potential mutable operations later
+        drop(input_guard);
 
-        todo!("Implement Mean backward using expand_op and mul_op");
+        // Calculate scaling factor
+        let n = self.num_elements_reduced;
+        if n == 0 {
+            // If N is zero, the forward output was likely empty or NaN/inf.
+            // The gradient is ill-defined or should be zero. Let's return zero gradient
+            // with the correct input shape.
+            // TODO: Consider if returning an error or specific handling is better.
+             // Assume F32 for now - Correct zeros call
+            return Ok(vec![crate::tensor::zeros(&input_shape)?]);
+        }
+        let scale: f32 = 1.0 / (n as f32);
+
+        // Create scalar tensor for scale factor (assuming F32, CPU)
+        let scale_tensor = Tensor::new(vec![scale], vec![])?; // Scalar tensor
+
+        // Multiply grad_output by scale: scaled_grad = grad_output * (1 / N)
+        // mul_op handles broadcasting the scalar scale_tensor
+        let scaled_grad = mul_op(grad_output, &scale_tensor)?;
+
+        // Expand scaled_grad back to the original input shape
+        // expand_op handles the view creation
+        let grad_input = expand_op(&scaled_grad, input_shape)?;
+
+        Ok(vec![grad_input])
     }
 
     fn inputs(&self) -> Vec<NodeId> {

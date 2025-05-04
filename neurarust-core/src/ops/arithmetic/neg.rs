@@ -177,12 +177,13 @@ where
 // --- Tests ---
 #[cfg(test)]
 mod tests {
-    use super::*; // Import items from parent module
-    use crate::tensor::Tensor; // Ensure Tensor is in scope
-    use crate::autograd::grad_check::check_grad; // Import gradient checker
-     // For float comparisons
-    use crate::types::DType; // Ensure DType is imported
-    use crate::utils::testing::{check_tensor_near, create_test_tensor_with_grad}; // Import test helpers
+    use super::*;
+    use crate::tensor::Tensor;
+    
+    use crate::error::NeuraRustError;
+    // Importer seulement check_tensor_near, l'autre est supprimé
+    use crate::utils::testing::{check_tensor_near};
+    use crate::autograd::grad_check::check_grad; 
 
     #[test]
     fn test_neg_ok() {

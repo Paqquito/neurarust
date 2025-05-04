@@ -32,9 +32,6 @@ impl Buffer {
     pub fn try_get_cpu_f32(&self) -> Result<&Arc<Vec<f32>>, NeuraRustError> {
         match self {
             Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc),
-            Buffer::Cpu(_) => Err(NeuraRustError::UnsupportedOperation(
-                "Buffer is CPU but not F32 type".to_string(),
-            )),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,

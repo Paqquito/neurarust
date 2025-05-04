@@ -9,3 +9,11 @@
 
 // Comment out or remove module declarations for which files don't exist
 // TODO: Re-introduce these modules when their implementation starts
+
+// Declare element-wise math operations
+pub mod ln;
+// pub mod exp; // Add later if needed
+
+// Re-export the operation functions
+pub use ln::ln_op;
+// pub use exp::exp_op; // Add later if needed

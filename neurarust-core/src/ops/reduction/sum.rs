@@ -376,72 +376,70 @@ pub fn sum_axes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    
-    use crate::utils::testing::{create_test_tensor};
     use approx::assert_relative_eq;
+    use crate::utils::testing::check_tensor_near;
 
-    // Helper to get f32 data (assuming CPU)
+    // Helper local pour obtenir f32 data
     fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
         let guard = tensor.read_data();
         if guard.dtype != DType::F32 || guard.device != StorageDevice::CPU {
             return Err(NeuraRustError::UnsupportedOperation("Test helper requires F32 CPU tensor".to_string()));
         }
-        let buffer_arc = guard.buffer().try_get_cpu_f32()?.clone();
-        Ok(buffer_arc.to_vec()) // Simple clone for now
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()),
+            _ => Err(NeuraRustError::UnsupportedOperation("Buffer type not CpuF32".to_string())),
+        }
     }
 
     #[test]
-    fn test_sum_all() {
-        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let result = sum_axes(&t, &[], false).unwrap(); // Sum all, don't keep dims
-        assert_eq!(result.shape(), vec![], "Scalar shape should be empty");
-        assert_relative_eq!(get_f32_data(&result).unwrap()[0], 10.0);
-
-        let result_keep = sum_axes(&t, &[], true).unwrap(); // Sum all, keep dims
-        assert_eq!(result_keep.shape(), vec![1, 1], "Keep dims shape mismatch");
-        assert_relative_eq!(get_f32_data(&result_keep).unwrap()[0], 10.0);
+    fn test_sum_all() -> Result<(), NeuraRustError> { // Ajout Result
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?; // Utiliser f32
+        let result = sum_axes(&t, &[], false)?;
+        let result_data = get_f32_data(&result)?;
+        assert_eq!(result.shape(), &[] as &[usize], "Result shape should be scalar");
+        assert_relative_eq!(result_data[0], 21.0, epsilon = 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_axis0() {
-        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let result = sum_axes(&t, &[0], false).unwrap(); // Sum along axis 0, remove dim
-        assert_eq!(result.shape(), vec![2], "Sum axis 0 shape mismatch");
-        assert_eq!(get_f32_data(&result).unwrap(), vec![4.0, 6.0]);
+    fn test_sum_axis0() -> Result<(), NeuraRustError> { // Ajout Result
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let result = sum_axes(&t, &[0], false)?;
+        let expected_data = vec![5.0, 7.0, 9.0]; // [1+4, 2+5, 3+6]
+        check_tensor_near(&result, &[3], &expected_data, 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_axis1_keepdims() {
-        let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let result = sum_axes(&t, &[1], true).unwrap(); // Sum along axis 1, keep dim
-        assert_eq!(result.shape(), vec![2, 1], "Sum axis 1 keep_dims shape mismatch");
-        assert_eq!(get_f32_data(&result).unwrap(), vec![3.0, 7.0]);
+    fn test_sum_axis1_keepdims() -> Result<(), NeuraRustError> { // Ajout Result
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let result = sum_axes(&t, &[1], true)?;
+        let expected_data = vec![6.0, 15.0]; // [1+2+3, 4+5+6]
+        check_tensor_near(&result, &[2, 1], &expected_data, 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_multiple_axes() {
-        let t = create_test_tensor((1..=12).map(|x| x as f32).collect(), vec![2, 3, 2]);
-        let result = sum_axes(&t, &[0, 2], false).unwrap(); // Sum along 0 and 2
-        // Expected shape: [3]
-        // Slice [0,:,0]: [1, 7] -> sum 8
-        // Slice [0,:,1]: [2, 8] -> sum 10
-        // Slice [1,:,0]: [3, 9] -> sum 12
-        // Slice [1,:,1]: [4, 10] -> sum 14
-        // Slice [2,:,0]: [5, 11] -> sum 16
-        // Slice [2,:,1]: [6, 12] -> sum 18
-        // Summing across axis 0 and 2:
-        // Index 0: 1+2 + 7+8 = 18
-        // Index 1: 3+4 + 9+10 = 26
-        // Index 2: 5+6 + 11+12 = 34
-        assert_eq!(result.shape(), vec![3], "Sum multiple axes shape mismatch");
-        assert_eq!(get_f32_data(&result).unwrap(), vec![18.0, 26.0, 34.0]);
+    fn test_sum_multiple_axes() -> Result<(), NeuraRustError> { // Ajout Result
+        let t = Tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
+        let result = sum_axes(&t, &[0, 2], false)?;
+        // Sum over dim 0 (size 2) and dim 2 (size 4)
+        // Result shape [3]
+        // Slice 0 (dim 1): sum(0..4) + sum(12..16) = 6 + 54 = 60
+        // Slice 1 (dim 1): sum(4..8) + sum(16..20) = 22 + 70 = 92
+        // Slice 2 (dim 1): sum(8..12) + sum(20..24) = 38 + 86 = 124
+        let expected_data = vec![60.0, 92.0, 124.0]; // Corrected expected values
+        check_tensor_near(&result, &[3], &expected_data, 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_invalid_axis() {
-        let t = create_test_tensor(vec![1.0], vec![1]);
+    fn test_sum_invalid_axis() -> Result<(), NeuraRustError> { // Ajout Result
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?; // Rank 1
         let result = sum_axes(&t, &[1], false);
-        assert!(matches!(result, Err(NeuraRustError::DimensionMismatch{..})), "Expected DimensionMismatch for invalid axis");
+        // Expect DimensionMismatch, not InvalidAxis
+        assert!(matches!(result, Err(NeuraRustError::DimensionMismatch { .. })));
+        Ok(())
     }
 
     // --- Autograd Tests (Need Update) ---

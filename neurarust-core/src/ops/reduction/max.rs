@@ -1,108 +1,262 @@
 use crate::autograd::BackwardOp;
-use crate::buffer::{Buffer, CpuBuffer};
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use crate::types::DType;
-// use crate::types::DType; // Commented out, not used yet
-// Comment out unresolved imports for now
-// use crate::ops::comparison::equal_op; // Need equal for backward
-// use crate::ops::arithmetic::mul_op; // Need mul for backward
-// use crate::ops::view::expand_op; // Need expand for backward
+
+// Add imports needed for backward
+use crate::ops::comparison::equal_op; 
+use crate::ops::arithmetic::mul_op; 
+use crate::ops::view::{expand_op, reshape_op}; 
 
 use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
+use num_traits::Float; // Use Float for min_value()
 
 // --- Backward Operation Structure ---
 #[derive(Debug)]
+#[allow(dead_code)] // Marked dead due to test structure #[path]
 struct MaxBackward {
-    // Store Arcs for Send+Sync safety
     input_node: Arc<RwLock<TensorData>>,
-    output_node: Arc<RwLock<TensorData>>,
+    output_node: Arc<RwLock<TensorData>>, // Store output tensor to compare with input
+    // Store reduction axes and keep_dims for potential broadcasting/expansion logic
+    axes: Option<Vec<usize>>,
+    keep_dims: bool,
 }
 
 // --- Backward Operation Implementation ---
 impl BackwardOp for MaxBackward {
-    fn backward(&self, _grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // Backward of max: grad_input = grad_output * (input == output)
-
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        // Backward of max: grad_input = grad_output * (input == output_expanded)
+        
         // 1. Recreate tensors from stored Arcs
-        let input_tensor_obj = Tensor { data: self.input_node.clone() };
-        let _output_tensor_obj = Tensor { data: self.output_node.clone() };
+        let input_tensor = Tensor { data: self.input_node.clone() };
+        let output_tensor = Tensor { data: self.output_node.clone() };
+        let input_shape = input_tensor.shape();
 
-        // 2. Broadcast/Expand output tensor and grad_output to input shape
-        // TODO: Needs adapted expand_op
-        let _input_shape = input_tensor_obj.shape(); // Get shape from recreated tensor
-        todo!("Use expand_op for output_tensor and grad_output");
-        // let expanded_output = expand_op(&output_tensor_obj, input_shape.clone())?;
-        // let expanded_grad_output = expand_op(grad_output, input_shape)?;
+        // 2. Prepare output_tensor and grad_output for expansion (handle keep_dims=false)
+        //    If keep_dims=false, we need to reshape output/grad_output to have rank of input
+        //    by inserting back the reduced axes with size 1.
+        let (output_to_expand, grad_output_to_expand) = 
+            if !self.keep_dims && self.axes.is_some() {
+                let axes_vec = self.axes.as_ref().unwrap(); // We know it's Some
+                let mut target_shape_with_ones = input_shape.clone();
+                // Set reduced axes to size 1
+                for &axis in axes_vec {
+                    if axis < target_shape_with_ones.len() {
+                        target_shape_with_ones[axis] = 1;
+                    } else {
+                        // This case should ideally be caught earlier, but handle defensively
+                        return Err(NeuraRustError::InternalError(format!(
+                            "Invalid axis {} found during MaxBackward reshape for input shape {:?}", 
+                            axis, input_shape
+                        )));
+                    }
+                }
+                // Reshape both output and grad_output
+                let reshaped_output = reshape_op(&output_tensor, target_shape_with_ones.clone())?;
+                let reshaped_grad_output = reshape_op(grad_output, target_shape_with_ones)?;
+                (reshaped_output, reshaped_grad_output)
+            } else {
+                // If keep_dims=true or no axes reduced (scalar), shapes are already compatible for expand
+                (output_tensor.clone(), grad_output.clone())
+            };
+        
+        // 3. Expand output and grad_output to input shape
+        //    expand_op handles the case where shapes might already match.
+        let expanded_output = expand_op(&output_to_expand, input_shape.clone())?;
+        let expanded_grad_output = expand_op(&grad_output_to_expand, input_shape.clone())?;
 
-        // 3. Create the mask: (input == expanded_output)
-        // TODO: Needs adapted equal_op (or comparison logic)
-        todo!("Use equal_op to create mask");
-        // let mask = equal_op(&input_tensor_obj, &expanded_output)?;
-        // TODO: Handle dtype conversion for mask if necessary (mask often bool/u8, needs cast to f32 for mul)
+        // 4. Create the mask: (input == expanded_output)
+        //    equal_op handles broadcasting if needed (though shapes should match here)
+        //    and returns 1.0 where equal, 0.0 otherwise.
+        let mask = equal_op(&input_tensor, &expanded_output)?;
+        
+        // 5. Calculate grad_input = expanded_grad_output * mask
+        let grad_input = mul_op(&expanded_grad_output, &mask)?;
 
-        // 4. Calculate grad_input = expanded_grad_output * mask
-        // TODO: Needs adapted mul_op
-        todo!("Use mul_op for final gradient calculation");
-        // let grad_input = mul_op(&expanded_grad_output, &mask)?;
-
-        // Ok(vec![grad_input])
+        Ok(vec![grad_input])
     }
 
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
-        // Return the NodeId of the original input tensor
         vec![Arc::as_ptr(&self.input_node)]
     }
 }
 
+/// Calculates the output shape after reduction and returns the final shape 
+/// and a boolean mask indicating which axes were reduced.
+#[allow(dead_code)] // Marked dead due to test structure #[path]
+fn calculate_reduction_shape_and_mask(
+    input_shape: &[usize],
+    axes: Option<&[usize]>,
+    keep_dims: bool,
+) -> Result<(Vec<usize>, Vec<bool>), NeuraRustError> {
+    let rank = input_shape.len();
+    let mut reduced_axes_mask = vec![false; rank];
+    let _axes_to_reduce = match axes {
+        Some(ax) => {
+            let mut processed_axes = Vec::with_capacity(ax.len());
+            for &axis in ax {
+                if axis >= rank {
+                    return Err(NeuraRustError::InvalidAxis { axis, rank });
+                }
+                if reduced_axes_mask[axis] {
+                    // Avoid reducing the same axis twice
+                    continue;
+                }
+                reduced_axes_mask[axis] = true;
+                processed_axes.push(axis);
+            }
+            processed_axes
+        }
+        None => { // Reduce all axes
+            reduced_axes_mask.fill(true);
+            (0..rank).collect()
+        }
+    };
+
+    let output_shape: Vec<usize> = input_shape
+        .iter()
+        .enumerate()
+        .filter_map(|(i, &dim)| {
+            if reduced_axes_mask[i] {
+                if keep_dims { Some(1) } else { None }
+            } else {
+                Some(dim)
+            }
+        })
+        .collect();
+
+    Ok((output_shape, reduced_axes_mask))
+}
+
+
+/// Kernel for max reduction on CPU for f32.
+#[allow(dead_code)] // Marked dead due to test structure #[path]
+fn max_cpu_f32_kernel(
+    input_data: &[f32],
+    input_shape: &[usize],
+    input_strides: &[usize],
+    input_offset: usize,
+    output_shape: &[usize],
+    reduced_axes_mask: &[bool], // Mask indicating which axes are reduced
+) -> Result<Vec<f32>, NeuraRustError> {
+    let output_numel = output_shape.iter().product();
+    let mut output_data = vec![f32::min_value(); output_numel];
+    let input_rank = input_shape.len();
+    let output_rank = output_shape.len(); // Can be different if keep_dims=false
+
+    let mut input_indices = vec![0; input_rank];
+
+    // Iterate through all elements of the input tensor
+    let input_numel = input_shape.iter().product();
+    for i in 0..input_numel {
+        // Calculate current input coordinates
+        let mut current_linear = i;
+        for dim in (0..input_rank).rev() {
+            let shape_val = input_shape[dim];
+            if shape_val > 0 { input_indices[dim] = current_linear % shape_val; current_linear /= shape_val; } else { input_indices[dim] = 0; }
+        }
+
+        // Calculate the linear index in the output tensor
+        let mut output_linear_index = 0;
+        let mut current_output_stride = 1;
+        let mut output_dim_idx = output_rank; // Iterate dims from right-to-left
+        for input_dim_idx in (0..input_rank).rev() {
+            if !reduced_axes_mask[input_dim_idx] { // If this axis is NOT reduced
+                if output_dim_idx == 0 { 
+                     // Should not happen if logic is correct
+                     return Err(NeuraRustError::InternalError("Output dimension index underflow".to_string()));
+                }
+                output_dim_idx -= 1; // Move to the next output dimension
+                output_linear_index += input_indices[input_dim_idx] * current_output_stride;
+                current_output_stride *= output_shape[output_dim_idx];
+            } // else: skip reduced axes for output index calculation
+        }
+
+        // Calculate physical offset in input buffer
+        let input_physical_offset = input_offset + input_indices.iter().zip(input_strides.iter()).map(|(&idx, &stride)| idx * stride).sum::<usize>();
+        
+        if input_physical_offset >= input_data.len() {
+            return Err(NeuraRustError::InternalError("Input buffer access out of bounds in max_kernel".to_string()));
+        }
+        if output_linear_index >= output_numel {
+             return Err(NeuraRustError::InternalError("Output buffer access out of bounds in max_kernel".to_string()));
+        }
+
+        // Update the max value for the corresponding output element
+        let current_max = &mut output_data[output_linear_index];
+        let input_val = input_data[input_physical_offset];
+        if input_val > *current_max {
+            *current_max = input_val;
+        }
+    }
+
+    Ok(output_data)
+}
+
+
 // --- Forward Operation ---
-pub(crate) fn max_op(tensor: &Tensor, _axes: Option<&[usize]>, _keep_dims: bool) -> Result<Tensor, NeuraRustError> {
+#[allow(dead_code)] // Marked dead due to test structure #[path]
+pub(crate) fn max_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
     let tensor_data_guard = tensor.read_data();
     let input_requires_grad = tensor_data_guard.requires_grad;
-    let _input_node_arc = if input_requires_grad { Some(tensor.data.clone()) } else { None };
+    let input_node_arc = if input_requires_grad { Some(tensor.data.clone()) } else { None };
+    let device = tensor_data_guard.device;
+    let dtype = tensor_data_guard.dtype;
 
-    if tensor_data_guard.device != StorageDevice::CPU || tensor_data_guard.dtype != DType::F32 {
+    if device != StorageDevice::CPU || dtype != DType::F32 {
         return Err(NeuraRustError::UnsupportedOperation("max_op currently only supports F32 CPU tensors.".to_string()));
     }
 
-    let (_max_result_buffer, _output_shape): (CpuBuffer, Vec<usize>) = match (&*tensor_data_guard.buffer, tensor_data_guard.device) {
-        (Buffer::Cpu(CpuBuffer::F32(_buf_arc)), StorageDevice::CPU) => {
-             // Remove buf_arc usage here as it's not needed for todo!
-            todo!("Implement CPU F32 max logic");
-            // let data = buf_arc.as_slice(); // Need to get slice from Arc<Vec<f32>>
-            // // Calculate output shape based on axes and keep_dims
-            // let (output_shape, reduction_indices) = calculate_reduction_shape_and_indices(&tensor_data_guard.shape, axes, keep_dims);
-            // // Call max kernel
-            // let result_vec = max_cpu_f32_kernel(data, &tensor_data_guard.shape, &tensor_data_guard.strides, tensor_data_guard.offset, &reduction_indices)?;
-            // (CpuBuffer::F32(Arc::new(result_vec)), output_shape)
-        },
-        // Handle other cases or error
-        _ => return Err(NeuraRustError::UnsupportedOperation("Max op only supports CPU F32 Buffer".to_string())),
-    };
+    // Calculate output shape and reduction mask
+    let (output_shape, reduced_axes_mask) = calculate_reduction_shape_and_mask(&tensor_data_guard.shape, axes, keep_dims)?;
 
-    // Drop guard after checks and before creating output tensor
+    // Extract necessary data before dropping guard
+    let input_buffer_arc = tensor_data_guard.buffer().try_get_cpu_f32()?.clone();
+    let input_shape_clone = tensor_data_guard.shape.clone();
+    let input_strides_clone = tensor_data_guard.strides.clone();
+    let input_offset = tensor_data_guard.offset;
+    let axes_clone = axes.map(|a| a.to_vec()); // Clone axes if Some
+
     drop(tensor_data_guard);
 
-    todo!("Create output tensor from result_buffer and output_shape");
-    /*
-    let output_td = TensorData::new(result_buffer, output_shape, device)?;
+    // --- Calculation --- 
+    let result_vec = max_cpu_f32_kernel(
+        input_buffer_arc.as_slice(), 
+        &input_shape_clone, 
+        &input_strides_clone, 
+        input_offset, 
+        &output_shape, 
+        &reduced_axes_mask
+    )?;
+    let result_buffer_arc = Arc::new(result_vec);
+
+    // --- Create Output Tensor --- 
+    let output_td = TensorData::new(
+        result_buffer_arc.as_ref().clone(), 
+        output_shape
+    )?;
     let output_tensor = Tensor { data: Arc::new(RwLock::new(output_td)) };
 
+    // --- Autograd Setup --- 
     if input_requires_grad {
         if let Some(input_arc) = input_node_arc {
+            println!("*** Autograd setup for max_op triggered! ***"); 
             let grad_fn = MaxBackward {
                 input_node: input_arc,
-                output_node: output_tensor.data.clone(),
-                axes: axes.map(|a| a.to_vec()),
+                output_node: output_tensor.data.clone(), // Store the output node Arc
+                axes: axes_clone, // Use the cloned axes
                 keep_dims,
             };
-            let mut output_write_guard = output_tensor.write_data();
+            // Acquire write lock and set requires_grad & grad_fn
+            let mut output_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::InternalError("Failed to lock output tensor for autograd setup".to_string()))?;
             output_write_guard.grad_fn = Some(Arc::new(grad_fn));
             output_write_guard.requires_grad = true;
+            println!("MaxBackward grad_fn set for max result."); // Debug print
         } else {
+            // This case should not happen if input_requires_grad is true
              return Err(NeuraRustError::InternalError(
                 "MaxOp requires grad but input Arc<TensorData> was not available".to_string(),
             ));
@@ -110,31 +264,9 @@ pub(crate) fn max_op(tensor: &Tensor, _axes: Option<&[usize]>, _keep_dims: bool)
     }
 
     Ok(output_tensor)
-    */
 }
 
-// --- Helper for calculation ---
-/*
-fn calculate_max_f32(...) -> Result<(Vec<f32>, Vec<usize>), NeuraRustError> {
-    todo!("Implement the actual max calculation logic");
-}
-*/
-
-// --- Tests ---
+// Add the path attribute to link the external test file
 #[cfg(test)]
-mod tests {
-    
-    use crate::{Tensor, error::NeuraRustError};
-    
-
-    // Helper to get f32 data (assuming CPU)
-    fn get_f32_data(_tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> { /* ... */ Ok(vec![])}
-
-    #[test] fn test_max_all() { println!("Skipping test_max_all..."); }
-    #[test] fn test_max_axis0() { println!("Skipping test_max_axis0..."); }
-    #[test] fn test_max_axis1_keepdims() { println!("Skipping test_max_axis1_keepdims..."); }
-    #[test] fn test_max_multiple_axes() { println!("Skipping test_max_multiple_axes..."); }
-    #[test] fn test_max_invalid_axis() { println!("Skipping test_max_invalid_axis..."); }
-    #[test] fn test_max_all_backward() { println!("Skipping test_max_all_backward..."); }
-    #[test] fn test_max_axis_backward() { println!("Skipping test_max_axis_backward..."); }
-} 
+#[path = "max_test.rs"]
+mod tests; 

@@ -149,14 +149,14 @@ pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
         ));
     }
     // Keep track of the output dtype even if only F32 for now
-    let output_dtype = DType::F32;
+    let _output_dtype = DType::F32;
 
     // --- Shape Broadcasting --- 
     let output_shape = broadcast_shapes(&a_guard.shape, &b_guard.shape)?;
 
     // --- Data Access & Metadata Extraction --- 
     // Extract ALL necessary info while guards are held
-    let device = a_guard.device; // Devices are checked to be the same
+    let _device = a_guard.device; // Devices are checked to be the same
     let a_shape = a_guard.shape.clone();
     let b_shape = b_guard.shape.clone();
     let a_strides = a_guard.strides.clone();
@@ -265,114 +265,7 @@ pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     Ok(output_tensor)
 }
 
-// --- Tests ---
+// Re-enable the test module link
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::tensor::Tensor;
-    
-    use crate::device::StorageDevice;
-    use crate::types::DType;
-    use crate::error::NeuraRustError;
-    use crate::buffer::{Buffer, CpuBuffer};
-    
-    
-    
-
-    // Helper to get f32 data (assuming CPU) - Keep for local tests
-    // Now uses Buffer/CpuBuffer correctly
-    fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
-        let guard = tensor.read_data();
-        if guard.dtype != DType::F32 || guard.device != StorageDevice::CPU {
-            return Err(NeuraRustError::UnsupportedOperation("Test helper requires F32 CPU tensor".to_string()));
-        }
-        match &*guard.buffer {
-            Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()), // Clone data
-            // Add default case to handle potential other Buffer variants if added later
-            _ => Err(NeuraRustError::UnsupportedOperation("Buffer type not CpuF32".to_string())),
-        }
-    }
-
-    #[test]
-    fn test_add_tensors_ok() {
-        // Re-enable test
-        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let t2 = Tensor::from_vec_f32(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
-        let result = add_op(&t1, &t2).unwrap(); 
-        let result_data = get_f32_data(&result).unwrap();
-        assert_eq!(result_data, vec![6.0, 8.0, 10.0, 12.0]);
-        assert_eq!(result.shape(), vec![2, 2]);
-        assert_eq!(result.dtype(), DType::F32);
-        assert_eq!(result.device(), StorageDevice::CPU);
-    }
-
-    #[test]
-    fn test_add_tensors_shape_mismatch() {
-        let t1 = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
-        let t2 = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
-        let result = add_op(&t1, &t2);
-        assert!(matches!(result, Err(NeuraRustError::BroadcastError { .. })));
-    }
-
-    #[test]
-    fn test_add_broadcasting() {
-        // Re-enable test
-        let matrix = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let row_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2]).unwrap();
-        let result = add_op(&matrix, &row_vector).unwrap(); 
-        let expected_data = vec![11.0, 22.0, 13.0, 24.0];
-        let result_data = get_f32_data(&result).unwrap();
-        assert_eq!(result_data, expected_data);
-        assert_eq!(result.shape(), vec![2, 2]); // Shape should be broadcasted
-    }
-
-    // --- Autograd Tests ---
-    #[test]
-    fn test_add_backward_simple() {
-        // Re-enable and adapt test
-        let a_data = vec![1.0f32, 2.0, 3.0];
-        let a_shape = vec![3];
-        let b_data = vec![4.0f32, 5.0, 6.0];
-        let b_shape = vec![3];
-
-        let func = |inputs: &[Tensor]| add_op(&inputs[0], &inputs[1]);
-
-        // Create input tensors for check_grad
-        let a = Tensor::from_vec_f32(a_data.clone(), a_shape.clone()).unwrap();
-        a.set_requires_grad(true).unwrap();
-        let b = Tensor::from_vec_f32(b_data.clone(), b_shape.clone()).unwrap();
-        b.set_requires_grad(true).unwrap();
-
-        let output_shape = func(&[a.clone(), b.clone()]).unwrap().shape();
-        let output_grad = crate::tensor::ones(&output_shape).unwrap(); 
-        let epsilon = 1e-4;
-        let tolerance = 1e-2; // Increased tolerance
-
-        crate::autograd::grad_check::check_grad(func, &[a, b], &output_grad, epsilon, tolerance)
-            .expect("Simple add backward grad check failed");
-    }
-
-    #[test]
-    fn test_add_backward_broadcast() {
-        // Re-enable and adapt test
-        let a_data = vec![1.0f32, 2.0, 3.0, 4.0];
-        let a_shape = vec![2, 2];
-        let b_data = vec![10.0f32, 20.0];
-        let b_shape = vec![1, 2]; // Broadcastable shape
-
-        let func = |inputs: &[Tensor]| add_op(&inputs[0], &inputs[1]);
-
-        let a = Tensor::from_vec_f32(a_data.clone(), a_shape.clone()).unwrap();
-        a.set_requires_grad(true).unwrap();
-        let b = Tensor::from_vec_f32(b_data.clone(), b_shape.clone()).unwrap();
-        b.set_requires_grad(true).unwrap();
-
-        let output_shape = func(&[a.clone(), b.clone()]).unwrap().shape();
-        let output_grad = crate::tensor::ones(&output_shape).unwrap();
-        let epsilon = 1e-4;
-        let tolerance = 1e-2; // Increased tolerance
-
-        crate::autograd::grad_check::check_grad(func, &[a, b], &output_grad, epsilon, tolerance)
-            .expect("Broadcast add backward grad check failed");
-    }
-}
+#[path = "add_test.rs"]
+mod tests;

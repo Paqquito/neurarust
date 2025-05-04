@@ -8,6 +8,8 @@ use std::default::Default;
 use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul};
+use crate::utils::testing::check_tensor_near;
+use crate::autograd::grad_check::{GradCheckError};
 
 // Helper to create tensors for tests
 fn create_test_tensor<T>(
@@ -64,94 +66,85 @@ where
     t
 }
 
+// Helper (non-generic) pour obtenir les données f32
+fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
+    let guard = tensor.read_data();
+    if guard.dtype != crate::types::DType::F32 || guard.device != crate::device::StorageDevice::CPU {
+        return Err(NeuraRustError::UnsupportedOperation("Test helper requires F32 CPU tensor".to_string()));
+    }
+    match &*guard.buffer {
+        crate::buffer::Buffer::Cpu(crate::buffer::CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()),
+        _ => Err(NeuraRustError::UnsupportedOperation("Buffer type not CpuF32".to_string())),
+    }
+}
+
 #[test]
-fn test_mul_tensors_ok() {
-    let a = create_test_tensor(vec![1.0, 2.0], vec![2]);
-    let b = create_test_tensor(vec![3.0, 4.0], vec![2]);
-    let result = mul_op(&a, &b).unwrap();
+fn test_mul_tensors_ok() -> Result<(), NeuraRustError> {
+    let a = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?;
+    let b = Tensor::from_vec_f32(vec![3.0, 4.0], vec![2])?;
+    let result = mul_op(&a, &b)?;
     let expected_data = vec![3.0, 8.0];
-    assert_eq!(result.shape(), vec![2]);
-    let res_data = result.read_data().data.cpu_data().unwrap().clone();
-    assert_relative_eq!(res_data.as_slice(), expected_data.as_slice());
+    assert_eq!(result.shape(), &[2]);
+    let res_data = get_f32_data(&result)?;
+    assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
+    Ok(())
 }
 
 #[test]
-fn test_mul_tensors_shape_mismatch() {
-    let a = create_test_tensor(vec![1.0, 2.0], vec![2]);
-    let b = create_test_tensor(vec![1.0, 2.0, 3.0], vec![3]);
+fn test_mul_tensors_shape_mismatch() -> Result<(), NeuraRustError> {
+    let a = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?;
+    let b = Tensor::from_vec_f32(vec![3.0, 4.0, 5.0], vec![3])?;
     let result = mul_op(&a, &b);
-    assert!(matches!(
-        result,
-        Err(NeuraRustError::BroadcastError { .. })
-    ));
+    assert!(matches!(result, Err(NeuraRustError::ShapeMismatch(_))));
+    Ok(())
 }
 
 #[test]
-fn test_mul_broadcasting() {
-    let matrix = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-    let row_vector = create_test_tensor(vec![10.0, 20.0], vec![1, 2]);
-    let result = mul_op(&matrix, &row_vector).unwrap();
+fn test_mul_broadcasting() -> Result<(), NeuraRustError> {
+    let matrix = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
+    let row_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2])?;
+    let result = mul_op(&matrix, &row_vector)?;
     let expected_data = vec![10.0, 40.0, 30.0, 80.0]; // [[1*10, 2*20], [3*10, 4*20]]
-    assert_eq!(result.shape(), vec![2, 2]);
-    let res_data = result.read_data().data.cpu_data().unwrap().clone();
-    assert_relative_eq!(res_data.as_slice(), expected_data.as_slice());
+    assert_eq!(result.shape(), &[2, 2]);
+    let res_data = get_f32_data(&result)?;
+    assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
+    Ok(())
 }
 
 // --- Autograd Tests ---
 
 #[test]
-fn test_mul_backward_simple() {
-    let a = create_test_tensor_with_grad(vec![1.0, 2.0], vec![2]);
-    let b = create_test_tensor_with_grad(vec![3.0, 4.0], vec![2]);
+fn test_mul_backward_simple() -> Result<(), GradCheckError> {
+    let a = Tensor::from_vec_f32(vec![10.0, 20.0], vec![2])?;
+    a.set_requires_grad(true)?;
+    let b = Tensor::from_vec_f32(vec![2.0, 5.0], vec![2])?;
+    b.set_requires_grad(true)?;
 
-    let func = |inputs: &[Tensor<f64>]| mul_op(&inputs[0], &inputs[1]);
+    let func = |inputs: &[Tensor]| mul_op(&inputs[0], &inputs[1]);
 
     let output_shape = vec![2];
-    let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-    let epsilon = 1e-5;
-    let tolerance = 1e-7;
+    let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0], output_shape)?;
+    
+    let epsilon = 1e-4;
+    let tolerance = 1e-4;
 
-    let grad_check_result = check_grad(func, &[a, b], &output_grad, epsilon, tolerance);
-
-    // Optional detailed checks:
-    // grad_a = grad_output * b = [1, 1] * [3, 4] = [3, 4]
-    // grad_b = grad_output * a = [1, 1] * [1, 2] = [1, 2]
-    // let a_grad = a.grad().unwrap();
-    // let b_grad = b.grad().unwrap();
-    // let expected_a_grad = vec![3.0, 4.0];
-    // let expected_b_grad = vec![1.0, 2.0];
-    // assert_relative_eq!(a_grad.data().as_slice(), expected_a_grad.as_slice(), epsilon = tolerance);
-    // assert_relative_eq!(b_grad.data().as_slice(), expected_b_grad.as_slice(), epsilon = tolerance);
-
-     assert!(grad_check_result.is_ok(), "Simple multiplication backward grad check failed: {:?}", grad_check_result.err());
+    check_grad(func, &[a, b], &output_grad, epsilon, tolerance)
 }
 
 #[test]
-fn test_mul_backward_broadcast() {
-    let matrix = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-    let row_vector = create_test_tensor_with_grad(vec![10.0, 20.0], vec![1, 2]);
+fn test_mul_backward_broadcast() -> Result<(), GradCheckError> {
+    let matrix = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
+    matrix.set_requires_grad(true)?;
+    let row_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2])?;
+    row_vector.set_requires_grad(true)?;
 
-    let func = |inputs: &[Tensor<f64>]| mul_op(&inputs[0], &inputs[1]);
+    let func = |inputs: &[Tensor]| mul_op(&inputs[0], &inputs[1]);
 
     let output_shape = vec![2, 2];
-    let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-    let epsilon = 1e-5;
-    let tolerance = 1e-7;
+    let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], output_shape)?;
 
-    let grad_check_result = check_grad(func, &[matrix.clone(), row_vector.clone()], &output_grad, epsilon, tolerance);
+    let epsilon = 1e-4;
+    let tolerance = 1e-4;
 
-    // Optional detailed checks:
-    // grad_a = grad_output * b (broadcasted) = [[1, 1], [1, 1]] * [[10, 20], [10, 20]] = [[10, 20], [10, 20]]
-    // grad_b_unreduced = grad_output * a = [[1, 1], [1, 1]] * [[1, 2], [3, 4]] = [[1, 2], [3, 4]]
-    // grad_b = reduce(grad_b_unreduced) to [1, 2] by summing dim 0 = [1+3, 2+4] = [4, 6]
-    // let a_grad = matrix.grad().unwrap();
-    // let b_grad = row_vector.grad().unwrap();
-    // let expected_a_grad = vec![10.0, 20.0, 10.0, 20.0];
-    // let expected_b_grad = vec![4.0, 6.0];
-    // assert_eq!(a_grad.shape(), vec![2, 2]);
-    // assert_eq!(b_grad.shape(), vec![1, 2]);
-    // assert_relative_eq!(a_grad.data().as_slice(), expected_a_grad.as_slice(), epsilon = tolerance);
-    // assert_relative_eq!(b_grad.data().as_slice(), expected_b_grad.as_slice(), epsilon = tolerance);
-
-    assert!(grad_check_result.is_ok(), "Broadcast multiplication backward grad check failed: {:?}", grad_check_result.err());
+    check_grad(func, &[matrix, row_vector], &output_grad, epsilon, tolerance)
 } 
