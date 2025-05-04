@@ -116,7 +116,7 @@ impl BackwardOp for TransposeBackward {
 mod tests {
     use super::*;
     use crate::tensor::Tensor;
-    use crate::utils::testing::{check_tensor_near};
+    use crate::utils::testing::check_tensor_near;
     use crate::autograd::grad_check::check_grad;
     
     // Remove unused Buffer imports

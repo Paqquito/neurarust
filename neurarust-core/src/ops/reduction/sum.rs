@@ -376,24 +376,29 @@ pub fn sum_axes(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use approx::assert_relative_eq;
+    use crate::{
+        error::NeuraRustError,
+        tensor::Tensor,
+        buffer::{Buffer, CpuBuffer},
+    };
     use crate::utils::testing::check_tensor_near;
+    use approx::assert_relative_eq;
 
-    // Helper local pour obtenir f32 data
+    // Helper function to extract Vec<f32> from Tensor for checking
     fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
-        let guard = tensor.read_data();
-        if guard.dtype != DType::F32 || guard.device != StorageDevice::CPU {
-            return Err(NeuraRustError::UnsupportedOperation("Test helper requires F32 CPU tensor".to_string()));
-        }
-        match &*guard.buffer {
+        let locked_data = tensor.data.read().map_err(|e| NeuraRustError::LockError {
+            lock_type: "read".to_string(),
+            reason: format!("Failed to read tensor data in helper: {}", e),
+        })?;
+        match &*locked_data.buffer {
             Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()),
-            _ => Err(NeuraRustError::UnsupportedOperation("Buffer type not CpuF32".to_string())),
+            _ => Err(NeuraRustError::UnsupportedOperation("Helper requires CpuF32 buffer".to_string())),
         }
     }
 
     #[test]
-    fn test_sum_all() -> Result<(), NeuraRustError> { // Ajout Result
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?; // Utiliser f32
+    fn test_sum_all() -> Result<(), NeuraRustError> {
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         let result = sum_axes(&t, &[], false)?;
         let result_data = get_f32_data(&result)?;
         assert_eq!(result.shape(), &[] as &[usize], "Result shape should be scalar");
@@ -402,77 +407,62 @@ mod tests {
     }
 
     #[test]
-    fn test_sum_axis0() -> Result<(), NeuraRustError> { // Ajout Result
+    fn test_sum_axis0() -> Result<(), NeuraRustError> {
         let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         let result = sum_axes(&t, &[0], false)?;
-        let expected_data = vec![5.0, 7.0, 9.0]; // [1+4, 2+5, 3+6]
+        let expected_data = vec![5.0, 7.0, 9.0];
         check_tensor_near(&result, &[3], &expected_data, 1e-6);
         Ok(())
     }
 
     #[test]
-    fn test_sum_axis1_keepdims() -> Result<(), NeuraRustError> { // Ajout Result
+    fn test_sum_axis1_keepdims() -> Result<(), NeuraRustError> {
         let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         let result = sum_axes(&t, &[1], true)?;
-        let expected_data = vec![6.0, 15.0]; // [1+2+3, 4+5+6]
+        let expected_data = vec![6.0, 15.0];
         check_tensor_near(&result, &[2, 1], &expected_data, 1e-6);
         Ok(())
     }
 
     #[test]
-    fn test_sum_multiple_axes() -> Result<(), NeuraRustError> { // Ajout Result
+    fn test_sum_multiple_axes() -> Result<(), NeuraRustError> {
         let t = Tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
         let result = sum_axes(&t, &[0, 2], false)?;
-        // Sum over dim 0 (size 2) and dim 2 (size 4)
-        // Result shape [3]
-        // Slice 0 (dim 1): sum(0..4) + sum(12..16) = 6 + 54 = 60
-        // Slice 1 (dim 1): sum(4..8) + sum(16..20) = 22 + 70 = 92
-        // Slice 2 (dim 1): sum(8..12) + sum(20..24) = 38 + 86 = 124
-        let expected_data = vec![60.0, 92.0, 124.0]; // Corrected expected values
+        let expected_data = vec![60.0, 92.0, 124.0];
         check_tensor_near(&result, &[3], &expected_data, 1e-6);
         Ok(())
     }
 
     #[test]
-    fn test_sum_invalid_axis() -> Result<(), NeuraRustError> { // Ajout Result
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?; // Rank 1
+    fn test_sum_invalid_axis() -> Result<(), NeuraRustError> {
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?;
         let result = sum_axes(&t, &[1], false);
-        // Expect DimensionMismatch, not InvalidAxis
         assert!(matches!(result, Err(NeuraRustError::DimensionMismatch { .. })));
         Ok(())
     }
 
-    // --- Autograd Tests (Need Update) ---
-    // Note: grad_check requires f64, these tests need adapting or grad_check needs f32 support.
-    /*
+    // --- Test Non Contigu --- 
     #[test]
-    fn test_sum_all_backward() {
-        let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let func = |inputs: &[Tensor<f64>]| sum_axes(&inputs[0], None, false);
+    fn test_sum_all_non_contiguous() -> Result<(), NeuraRustError> {
+        // Créer un tenseur 2x3
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        // Le transposer pour le rendre non contigu
+        let t_transposed = crate::ops::view::transpose_op(&t, 0, 1)?; 
+        assert!(!t_transposed.is_contiguous(), "Transposed tensor should not be contiguous");
+        assert_eq!(t_transposed.shape(), &[3, 2]);
+        assert_eq!(t_transposed.strides(), &[1, 3], "Strides mismatch after transpose"); 
 
-        let output_shape = vec![]; // Scalar output
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap(); // Grad is scalar 1.0
-        let epsilon = 1e-5;
-        let tolerance = 1e-7;
+        // Calculer la somme globale sur le tenseur non contigu via sum_op
+        let sum_result = sum_op(&t_transposed, None, false)?;
+        
+        // Vérifier le résultat
+        let sum_data = get_f32_data(&sum_result)?;
+        assert_eq!(sum_result.shape(), &[] as &[usize], "Sum result shape should be scalar");
+        assert_eq!(sum_data.len(), 1, "Sum result should have 1 element");
+        assert_relative_eq!(sum_data[0], 21.0, epsilon = 1e-6);
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
-        assert!(grad_check_result.is_ok(), "Sum all backward grad check failed: {:?}", grad_check_result.err());
+        Ok(())
     }
-
-    #[test]
-    fn test_sum_axis_backward() {
-        let input = create_test_tensor_with_grad(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]);
-        let func = |inputs: &[Tensor<f64>]| sum_axes(&inputs[0], &[1], false); // Sum axis 1
-
-        let output_shape = vec![2];
-        let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
-        let epsilon = 1e-5;
-        let tolerance = 1e-7;
-
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
-        assert!(grad_check_result.is_ok(), "Sum axis backward grad check failed: {:?}", grad_check_result.err());
-    }
-    */
 }
 
 /// Computes the sum of all elements in the tensor or along specified axes.

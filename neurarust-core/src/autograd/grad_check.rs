@@ -2,6 +2,7 @@ use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use std::fmt::Debug;
 use thiserror::Error;
+use std::sync::{Arc, RwLock};
 // Remove unused approx traits for now
 // use approx::{AbsDiffEq, RelativeEq, UlpsEq};
 // Remove unused num_traits
@@ -11,8 +12,11 @@ use thiserror::Error;
 
 // Import specific ops needed for calculate_loss
 use crate::ops::reduction::sum::sum_op; // Use sum_op for loss calculation
+use crate::ops::arithmetic::mul_op; // Import corrigé pour mul_op
 use crate::types::DType;
 use crate::device::StorageDevice;
+use crate::tensor_data::TensorData;
+use crate::buffer::{Buffer, CpuBuffer};
 
 /// Error type specifically for gradient checking failures.
 #[derive(Error, Debug, Clone, PartialEq)]
@@ -166,83 +170,102 @@ where
         let analytical_grad_tensor = match analytical_grads_opt[i].as_ref() {
             Some(grad) => grad,
             None => {
-                // If input requires grad but has no grad tensor, something is wrong
                  return Err(GradCheckError::MissingAnalyticalGrad{ input_index: i });
             }
         };
-
-        // Extract analytical grad data (expecting F32, convert to f64)
+        // Extraire les données du gradient analytique (DOIT être contigu pour get_f32_data)
         let analytical_grad_data: Vec<f64> = analytical_grad_tensor
-            .contiguous()? // Make contiguous first
-            .get_f32_data()? // Returns Result<Vec<f32>, NeuraRustError>
+            .contiguous()? // S'assurer que le GRADIENT est contigu pour l'extraction
+            .get_f32_data()? 
             .iter()
             .map(|&x| x as f64)
             .collect();
 
-        // --- 5. Iterate through Elements and Calculate Numerical Gradient ---
+        // --- 5. Iterate through Elements (Logical) and Calculate Numerical Gradient ---
         let numel = original_input.numel();
-        // Get original data once (as f64)
-        let original_data_vec_f64: Vec<f64> = original_input
-            .contiguous()? // Make contiguous first
-            .get_f32_data()? // Expecting F32
-            .iter()
-            .map(|&x| x as f64)
-            .collect();
+        let rank = original_input.shape().len();
+        let original_shape = original_input.shape(); // Obtenir shape une fois
+        let original_strides = original_input.strides(); // Obtenir strides une fois
+        let original_offset = original_input.read_data().offset; // Obtenir offset une fois
+        let original_device = original_input.device(); // Should be CPU based on initial checks
+        
+        // Obtenir le buffer original (Arc<Vec<f32>>) une fois
+        let original_buffer_arc = original_input.read_data().buffer().try_get_cpu_f32()?.clone();
 
-        for elem_idx in 0..numel {
-            // --- Calculate Loss for f(x + eps) ---
+        for elem_idx in 0..numel { // elem_idx représente l'index logique linéaire
+            
+            // --- 5.1 Calculer l'offset physique --- 
+            let mut current_logical_indices = vec![0; rank];
+            let mut current_linear = elem_idx;
+            for dim in (0..rank).rev() {
+                 let shape_val = original_shape[dim];
+                 if shape_val > 0 { current_logical_indices[dim] = current_linear % shape_val; current_linear /= shape_val; } else { current_logical_indices[dim] = 0; }
+            }
+            let physical_offset = original_offset + current_logical_indices.iter().zip(original_strides.iter()).map(|(&idx, &stride)| idx * stride).sum::<usize>();
+
+            // --- 5.2 Calculate Loss for f(x + eps) --- 
             let loss_plus = {
                 let mut inputs_plus = inputs.iter().map(|t| t.clone()).collect::<Vec<_>>();
-                let mut data_plus_f64 = original_data_vec_f64.clone();
-                data_plus_f64[elem_idx] += epsilon;
-                let data_plus_f32: Vec<f32> = data_plus_f64.iter().map(|&x| x as f32).collect();
-                // Create the perturbed tensor
-                let perturbed_tensor = Tensor::from_vec_f32(data_plus_f32, original_input.shape())?;
-                // Explicitly set requires_grad if the original input needed it
-                if original_input.requires_grad() {
-                     perturbed_tensor.set_requires_grad(true)?;
-                     // Ensure it's treated as a leaf (it should be by default from from_vec_f32)
-                     // We might add an assertion here later if needed: assert!(perturbed_tensor.read_data().grad_fn.is_none());
-                }
-                inputs_plus[i] = perturbed_tensor;
                 
+                // --- 5.2.1 Créer le tenseur perturbé (+) vue --- 
+                let buffer_plus_arc = {
+                    let mut buffer_vec = original_buffer_arc.as_ref().clone(); 
+                    if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds (+) perturbation".to_string()))); }
+                    let current_val_f64 = buffer_vec[physical_offset] as f64;
+                    buffer_vec[physical_offset] = (current_val_f64 + epsilon) as f32; 
+                    Arc::new(buffer_vec) 
+                };
+                let td_plus = TensorData::new_view(
+                    Arc::new(Buffer::Cpu(CpuBuffer::F32(buffer_plus_arc))),
+                    original_device, // Utiliser le device original
+                    original_offset, 
+                    original_shape.clone(), 
+                    original_strides.clone(),
+                );
+                let perturbed_tensor_plus = Tensor { data: Arc::new(RwLock::new(td_plus)) };
+                // ------------------------------------------------
+
+                inputs_plus[i] = perturbed_tensor_plus;
                 let output_plus = func(&inputs_plus).map_err(GradCheckError::ForwardPassError)?;
-                // WARNING: Using simplified loss calculation (sum of tensor elements)!
-                // TODO: Replace with proper loss calculation based on output_grad
-                // Calculate loss using the provided output_grad
-                 calculate_loss(&output_plus, output_grad)? // Use the helper function
+
+                calculate_loss(&output_plus, output_grad)?
             };
 
-            // --- Calculate Loss for f(x - eps) ---
+            // --- 5.3 Calculate Loss for f(x - eps) --- 
             let loss_minus = {
                 let mut inputs_minus = inputs.iter().map(|t| t.clone()).collect::<Vec<_>>();
-                let mut data_minus_f64 = original_data_vec_f64.clone();
-                data_minus_f64[elem_idx] -= epsilon;
-                let data_minus_f32: Vec<f32> = data_minus_f64.iter().map(|&x| x as f32).collect();
-                // Create the perturbed tensor
-                let perturbed_tensor = Tensor::from_vec_f32(data_minus_f32, original_input.shape())?;
-                 // Explicitly set requires_grad if the original input needed it
-                 if original_input.requires_grad() {
-                      perturbed_tensor.set_requires_grad(true)?;
-                      // Ensure it's treated as a leaf
-                      // assert!(perturbed_tensor.read_data().grad_fn.is_none());
-                 }
-                 inputs_minus[i] = perturbed_tensor;
+                
+                 // --- 5.3.1 Créer le tenseur perturbé (-) vue --- 
+                 let buffer_minus_arc = {
+                    let mut buffer_vec = original_buffer_arc.as_ref().clone(); 
+                    if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds (-) perturbation".to_string()))); }
+                    let current_val_f64 = buffer_vec[physical_offset] as f64;
+                    buffer_vec[physical_offset] = (current_val_f64 - epsilon) as f32; 
+                    Arc::new(buffer_vec) 
+                };
+                let td_minus = TensorData::new_view(
+                    Arc::new(Buffer::Cpu(CpuBuffer::F32(buffer_minus_arc))),
+                    original_device,
+                    original_offset, 
+                    original_shape.clone(), 
+                    original_strides.clone(),
+                );
+                 let perturbed_tensor_minus = Tensor { data: Arc::new(RwLock::new(td_minus)) };
+                 // -------------------------------------------------
 
+                inputs_minus[i] = perturbed_tensor_minus;
                 let output_minus = func(&inputs_minus).map_err(GradCheckError::ForwardPassError)?;
-                // WARNING: Using simplified loss calculation (sum of tensor elements)!
-                // TODO: Replace with proper loss calculation based on output_grad
-                // Calculate loss using the provided output_grad
-                 calculate_loss(&output_minus, output_grad)? // Use the helper function
+
+                calculate_loss(&output_minus, output_grad)?
             };
             
-            // --- Calculate Numerical Gradient ---
+            // --- 5.4 Calculate Numerical Gradient ---
             let numerical_grad = (loss_plus - loss_minus) / (two * epsilon);
 
-            // --- Get Analytical Gradient ---
-            let analytical_grad = analytical_grad_data[elem_idx]; // Already fetched as f64
+            // --- 5.5 Get Analytical Gradient --- 
+             let analytical_grad = analytical_grad_data[elem_idx]; // Utiliser l'index logique
 
-            // --- Check for NaN/Infinite Gradients ---
+            // --- 5.6 Check for NaN/Infinite Gradients ---
             if numerical_grad.is_nan() || numerical_grad.is_infinite() {
                 return Err(GradCheckError::NumericalGradNaNOrInfinite {
                     input_index: i,
@@ -259,10 +282,10 @@ where
                  });
             }
 
-            // --- Compare Gradients ---
+            // --- 5.7 Compare Gradients ---
             let difference = (analytical_grad - numerical_grad).abs();
-            if difference > tolerance && (difference / (analytical_grad.abs() + epsilon)) > tolerance { // Added relative check
-                return Err(GradCheckError::GradientMismatch {
+            if difference > tolerance && (difference / (analytical_grad.abs() + epsilon)) > tolerance { 
+                 return Err(GradCheckError::GradientMismatch {
                     input_index: i,
                     element_index: elem_idx,
                     analytical_grad,
@@ -290,15 +313,13 @@ fn calculate_loss(tensor: &Tensor, output_grad: &Tensor) -> Result<f64, GradChec
          }));
     }
 
-    // --- TEMPORARY SIMPLIFICATION: Sum elements of the output tensor directly --- 
-    // This ignores output_grad but removes dependency on mul_op/sum_op for debugging
-    println!("WARNING: Using simplified loss calculation in check_grad (sum of tensor elements)!");
-    let loss_tensor_simplified = sum_op(tensor, None, false)
-                                    .map_err(GradCheckError::TensorError)?;
-    // -----------------------------------------------------------------------------
+    // Calculer la perte comme sum(tensor * output_grad) - UTILISER LES TENSEURS ORIGINAUX
+    let weighted_output = mul_op(tensor, output_grad)?;
+    
+    let loss_tensor = sum_op(&weighted_output, None, false)?;
 
     // Extract the scalar value (expecting F32 CPU)
-    let loss_data = loss_tensor_simplified.get_f32_data()?;
+    let loss_data = loss_tensor.get_f32_data()?;
     if loss_data.len() != 1 {
          return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
              "Loss calculation did not result in a scalar tensor".to_string(),

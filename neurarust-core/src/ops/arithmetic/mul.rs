@@ -366,6 +366,7 @@ mod tests {
     use crate::error::NeuraRustError;
     use crate::buffer::{Buffer, CpuBuffer};
     use crate::autograd::grad_check::check_grad; // Import check_grad
+    use crate::utils::testing::check_tensor_near; // Importer pour la comparaison
 
     // Test helper function (using read_data)
     fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
@@ -419,6 +420,36 @@ mod tests {
         let result_data2 = get_f32_data(&result2).unwrap();
         assert_eq!(result_data2, expected_data2);
         assert_eq!(result2.shape(), &[2, 2]);
+    }
+
+    // --- Nouveau Test Non Contigu ---
+    #[test]
+    fn test_mul_non_contiguous() -> Result<(), NeuraRustError> {
+        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        // Rendre t1 non contigu
+        let t1_transposed = t1.transpose(0, 1)?; // Shape [3, 2], Strides [1, 3]
+        assert!(!t1_transposed.is_contiguous());
+
+        // Tenseur contigu pour multiplier
+        let t2 = Tensor::from_vec_f32(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![3, 2])?;
+        assert!(t2.is_contiguous());
+
+        // Attendu : (éléments de t1 transposé) * (éléments de t2)
+        // t1_transposed : [[1, 4], [2, 5], [3, 6]]
+        // t2 :            [[10, 20], [30, 40], [50, 60]]
+        // résultat :      [[10, 80], [60, 200], [150, 360]]
+        let expected_data = vec![10.0, 80.0, 60.0, 200.0, 150.0, 360.0];
+        let expected_shape = &[3, 2];
+
+        // Calculer t1_transposed * t2
+        let result = mul_op(&t1_transposed, &t2)?;
+        
+        // Vérifier que le résultat est contigu (comportement actuel de mul_op)
+        assert!(result.is_contiguous(), "Result of mul_op should be contiguous");
+        // Vérifier les données et la forme
+        check_tensor_near(&result, expected_shape, &expected_data, 1e-6);
+        
+        Ok(())
     }
 
     // --- Autograd Tests ---

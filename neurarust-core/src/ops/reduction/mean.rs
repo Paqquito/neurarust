@@ -232,11 +232,22 @@ pub fn mean_axes(
     Ok(result_tensor)
 }
 
-// Wrapper function (Kept for compatibility for now)
-pub(crate) fn mean_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
+/// Computes the mean of elements in the tensor over given axes.
+/// This is a convenience wrapper around `mean_axes` that handles `Option<&[usize]>`.
+pub(crate) fn mean_op(
+    tensor: &Tensor,
+    axes: Option<&[usize]>,
+    keep_dims: bool,
+) -> Result<Tensor, NeuraRustError> {
     let all_axes: Vec<usize> = (0..tensor.shape().len()).collect();
-    let axes_to_mean = axes.unwrap_or(&all_axes);
-    mean_axes(tensor, axes_to_mean, keep_dims)
+    // Si axes est None et le tenseur n'est pas scalaire, utiliser tous les axes.
+    // Si le tenseur est scalaire, axes devrait être vide.
+    let axes_to_reduce = if tensor.shape().is_empty() {
+        &[]
+    } else {
+        axes.unwrap_or(&all_axes)
+    };
+    mean_axes(tensor, axes_to_reduce, keep_dims)
 }
 
 // --- Tests ---

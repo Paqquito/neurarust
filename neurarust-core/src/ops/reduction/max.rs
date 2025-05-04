@@ -16,7 +16,6 @@ use num_traits::Float; // Use Float for min_value()
 
 // --- Backward Operation Structure ---
 #[derive(Debug)]
-#[allow(dead_code)] // Marked dead due to test structure #[path]
 struct MaxBackward {
     input_node: Arc<RwLock<TensorData>>,
     output_node: Arc<RwLock<TensorData>>, // Store output tensor to compare with input
@@ -86,7 +85,6 @@ impl BackwardOp for MaxBackward {
 
 /// Calculates the output shape after reduction and returns the final shape 
 /// and a boolean mask indicating which axes were reduced.
-#[allow(dead_code)] // Marked dead due to test structure #[path]
 fn calculate_reduction_shape_and_mask(
     input_shape: &[usize],
     axes: Option<&[usize]>,
@@ -131,9 +129,7 @@ fn calculate_reduction_shape_and_mask(
     Ok((output_shape, reduced_axes_mask))
 }
 
-
 /// Kernel for max reduction on CPU for f32.
-#[allow(dead_code)] // Marked dead due to test structure #[path]
 fn max_cpu_f32_kernel(
     input_data: &[f32],
     input_shape: &[usize],
@@ -196,9 +192,7 @@ fn max_cpu_f32_kernel(
     Ok(output_data)
 }
 
-
 // --- Forward Operation ---
-#[allow(dead_code)] // Marked dead due to test structure #[path]
 pub(crate) fn max_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
     let tensor_data_guard = tensor.read_data();
     let input_requires_grad = tensor_data_guard.requires_grad;
@@ -266,7 +260,7 @@ pub(crate) fn max_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -
     Ok(output_tensor)
 }
 
-// Add the path attribute to link the external test file
+// Revenir à l'attribut #[path] pour lier le fichier de test externe
 #[cfg(test)]
 #[path = "max_test.rs"]
 mod tests; 

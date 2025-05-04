@@ -90,6 +90,29 @@ mod tests {
         let result = sum_op(&t, Some(&[1]), false);
         assert!(matches!(result, Err(NeuraRustError::InvalidAxis { .. }) | Err(NeuraRustError::IndexOutOfBounds { .. })));
     }
+
+    #[test]
+    fn test_sum_all_non_contiguous() -> Result<(), NeuraRustError> {
+        // Créer un tenseur 2x3
+        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        // Le transposer pour le rendre non contigu (strides: [1, 2])
+        let t_transposed = t.transpose(0, 1)?;
+        assert!(!t_transposed.is_contiguous(), "Transposed tensor should not be contiguous");
+        assert_eq!(t_transposed.shape(), &[3, 2]);
+        assert_eq!(t_transposed.strides(), &[1, 2]); // Strides attendus pour transpose sur 2x3
+
+        // Calculer la somme globale sur le tenseur non contigu
+        // Utiliser sum_op directement pour tester le noyau
+        let sum_result = crate::ops::reduction::sum::sum_op(&t_transposed, None, false)?;
+        
+        // Vérifier le résultat
+        let sum_data = get_f32_data_helper(&sum_result)?;
+        assert_eq!(sum_result.shape(), &[] as &[usize], "Sum result shape should be scalar");
+        assert_eq!(sum_data.len(), 1, "Sum result should have 1 element");
+        approx::assert_relative_eq!(sum_data[0], 21.0, epsilon = 1e-6);
+
+        Ok(())
+    }
 }
 
 

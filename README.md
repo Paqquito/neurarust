@@ -1,46 +1,86 @@
-# NeuraRust 🦀🧠
+# ✨ NeuraRust 🦀🧠
 
-**Goal**: Create a performant, safe, and ergonomic deep learning framework in Rust, inspired by PyTorch but leveraging Rust's unique advantages.
+[![CI](https://github.com/nebulyts/neurarust/actions/workflows/ci.yml/badge.svg)](https://github.com/nebulyts/neurarust/actions/workflows/ci.yml)
+[![License: MIT OR Apache-2.0](https://img.shields.io/badge/License-MIT%2FApache--2.0-blue)](https://opensource.org/licenses/MIT)
+[![Docs](https://docs.rs/neurarust-core/badge.svg)](https://docs.rs/neurarust-core) <!-- TODO: Update link when published -->
 
-[![Rust](https://github.com/Paqquito/NeuraRust/actions/workflows/rust.yml/badge.svg)](https://github.com/Paqquito/NeuraRust/actions/workflows/rust.yml)
+**NeuraRust** aims to become a leading **Deep Learning framework in Rust**, combining the flexibility and ergonomics of PyTorch with the **raw performance**, **memory safety**, and **portability** offered by Rust.
 
 ---
 
-## ✨ Core Features (Based on Goals.md)
+## 🚀 Current Status (Milestone 1: Core Ops & Autograd)
 
-NeuraRust aims to provide a PyTorch-like experience while harnessing the power of Rust:
+Milestone 1, focusing on core CPU tensor operations (F32) and a functional autograd system, is largely **complete**.
 
-*   **Tensors (`neurarust-core::Tensor`)**: A performant multi-dimensional `Tensor` structure with explicit memory management and Rust-guaranteed safety. Includes broadcasting capabilities (initially for Add).
-*   **Automatic Differentiation (`neurarust-core::Autograd`)**: Dynamic autograd engine to automatically compute gradients via `.backward()`. Currently supports basic operations including Add with broadcasting.
-*   **Neural Network Modules (`neurarust-nn`)** *(Future)*: Building blocks (Linear, Conv layers, etc.) and activation/loss functions.
-*   **Optimizers (`neurarust-optim`)** *(Partially Implemented)*: Standard optimization algorithms (SGD implemented, Adam...). 
-*   **Data Handling (`neurarust-data`)** *(Future)*: Tools for loading and preprocessing data (`Dataset`, `DataLoader`).
-*   **Accelerator Support** *(Future)*: GPU integration (CUDA, etc.) for fast computations.
-*   **Interoperability & Deployment** *(Future)*: ONNX export, Python bindings (PyO3), WASM and native binary compilation.
+**Key Features Implemented:**
 
-## 🎯 Key Rust Advantages
+*   **Tensor Core (`neurarust-core`):**
+    *   CPU Tensor implementation using `Arc<RwLock<TensorData>>` for thread-safety.
+    *   Supports F32 data type (`DType::F32`).
+    *   Explicit strides for efficient memory layout control.
+    *   Creation ops: `new`, `zeros`, `ones`, `full`, `rand`, `randn`, `eye`.
+*   **View Operations (Non-copying):**
+    *   `slice`, `transpose`, `permute`, `reshape`/`view`.
+    *   `contiguous()`, `is_contiguous()`.
+*   **Automatic Differentiation (Autograd):**
+    *   Dynamic computation graph tracking (`grad_fn`, `BackwardOp`).
+    *   `.backward()` method for gradient calculation.
+    *   Backward passes implemented for most core operations.
+    *   Gradient checking utility (`check_grad`) is functional but has known precision limitations (F32/F64) for view ops (`permute`, `transpose`) and `matmul`. Related tests are currently ignored.
+*   **Core Operations (CPU/F32, with Autograd):**
+    *   **Element-wise Arithmetic:** `add`, `sub`, `mul`, `div`, `neg`, `pow`.
+    *   **Reductions:** `sum`, `mean`, `max` (along axes or all).
+    *   **Linear Algebra:** `matmul` (2D).
+    *   **Activations:** `relu`.
 
-*   **Performance:** Native speed close to C/C++, fine-grained memory control.
-*   **Safety:** Guaranteed absence of data races and many memory errors thanks to the compiler.
-*   **Concurrency:** "Fearless" parallelism for multi-core acceleration (e.g., data loading, autograd).
-*   **Deployment:** Compilation to WASM, lightweight and standalone native binaries.
+**Next Steps:** Focus on Milestone 1 completion (MLP Layer, Loss, Training Loop) and documentation improvements.
 
-## 🚧 Current Status (According to Roadmap)
+---
 
-The project is currently in **early development (Phase 0 & 1)**:
+## 🎯 Core Pillars & Vision
 
-*   ✅ **Phase 0: Foundations & Basic CPU Tensor [Completed]**
-    *   Project structure (Cargo workspace, CI).
-    *   Initial `Tensor` implementation (data, shape, Rc<RefCell>).
-    *   Fundamental CPU operations (element-wise arithmetic).
-    *   Broadcasting utilities and integration into Add (forward/backward).
-    *   Unit tests for `Tensor`, basic ops, and broadcasting.
-*   🚧 **Phase 1: Autograd & NN Building Blocks [In Progress]**
-    *   Basic Autograd engine foundations (`BackwardOp` trait, dynamic graph).
-    *   Backward pass implemented for Add with broadcasting.
-    *   *Next steps: Implement broadcasting for other ops (Sub, Mul, Div), implement more core Tensor ops (MatMul, reductions...), start basic `nn` modules (Linear, losses).* 
+*(Keep existing Pillars & Vision sections)*
+*   🚀 **Exceptional Performance**
+*   🤝 **Intuitive Ergonomics**
+*   🔄 **Seamless Interoperability**
+*   🔒 **Safety & Easy Deployment**
 
-See [`Goals.md`](Goals.md) for the complete roadmap.
+---
+
+## 🛠️ Core Features (PyTorch Inspired, Rust Superpowered)
+
+*(Keep existing Core Features sections, potentially update status markers if needed)*
+1.  Multi-Dimensional Tensors (`neurarust-core::Tensor`) 📐
+2.  Automatic Differentiation (`neurarust-core::Autograd`) 📈
+3.  Neural Network Modules (`neurarust-nn`) 🧩 *(Future)*
+4.  Optimizers (`neurarust-optim`) ⚙️ *(Future)*
+5.  Data Loading (`neurarust-data`) 💾 *(Future)*
+6.  Accelerator Support (GPU & Beyond) 🔥 *(Future)*
+7.  Interoperability & Deployment (`neurarust-deploy`) 🌍 *(Future)*
+
+---
+
+## 💎 Our Differentiators: The Unique Rust Advantage
+
+*(Keep existing Differentiators section)*
+*   First-Class WASM Support 🕸️
+*   Enhanced Safety Guarantees ✅
+*   Advanced Static Optimizations 🚀
+*   Simplified & Safe Parallelism ⛓️
+
+---
+
+## 🗺️ Roadmap Summary
+
+(See [Goals.md](./Goals.md) for the highly detailed roadmap)
+
+*   ✅ **Milestone 1:** Core Ops & Basic Autograd (CPU/F32) - *Largely Complete*
+*   ⏳ **Milestone 2:** Optimizers & Advanced Features
+*   ⏳ **Milestone 3:** Ecosystem & Polish
+
+---
+
+*(Keep existing Contributing, License sections)*
 
 ## 🚀 Getting Started
 

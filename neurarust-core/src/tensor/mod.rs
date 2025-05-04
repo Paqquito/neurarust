@@ -170,4 +170,42 @@ impl Tensor {
              guard.grad = None;
         }
     }
+
+    /// Calculates the mean of tensor elements over given axes.
+    ///
+    /// See `crate::ops::reduction::mean::mean_op` for details.
+    /// Currently only supports F32 CPU tensors.
+    ///
+    /// # Arguments
+    ///
+    /// * `axes` - An optional slice of dimensions to reduce. If `None` or empty,
+    ///   reduces all dimensions.
+    /// * `keep_dims` - If true, the reduced dimensions are retained with size 1.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the new `Tensor` with the mean values, or a `NeuraRustError`.
+    pub fn mean(&self, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
+        crate::ops::reduction::mean::mean_op(self, axes, keep_dims)
+    }
+
+    /// Calculates the maximum of tensor elements over given axes.
+    ///
+    /// See `crate::ops::reduction::max::max_op` for details.
+    /// Currently only supports F32 CPU tensors.
+    ///
+    /// # Arguments
+    ///
+    /// * `axes` - An optional slice of dimensions to reduce. If `None` or empty,
+    ///   reduces all dimensions.
+    /// * `keep_dims` - If true, the reduced dimensions are retained with size 1.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing the new `Tensor` with the maximum values, or a `NeuraRustError`.
+    pub fn max(&self, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
+        crate::ops::reduction::max::max_op(self, axes, keep_dims)
+    }
+
+    // TODO: Add sum, min methods here similarly?
 }

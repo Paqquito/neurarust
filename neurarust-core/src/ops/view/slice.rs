@@ -147,7 +147,8 @@ fn validate_and_adjust_ranges(
     let mut adjusted_ranges = Vec::with_capacity(shape.len());
     for (i, &(start, end)) in ranges.iter().enumerate() {
         let dim_size = shape[i];
-        if start >= end || start >= dim_size || end > dim_size {
+        // Allow start == end for empty slices, adjust bounds check
+        if start > end || start > dim_size || end > dim_size {
             return Err(NeuraRustError::SliceError {
                 message: format!(
                     "Invalid slice range [{}, {}) for dimension {} with size {}",
@@ -284,14 +285,15 @@ mod tests {
 
     #[test]
     fn test_slice_empty_dim() {
-        // Re-enable test
         let t = Tensor::from_vec_f32((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
         // Slice to create a zero-sized dimension
         let s_result = slice_op(&t, vec![(0, 1), (1, 1), (0, 3)]);
-        // Creating an empty slice [1, 1) is an error according to validate_and_adjust_ranges
-        assert!(matches!(s_result, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for empty slice range [1, 1)");
-        // assert_eq!(s.shape(), vec![1, 0, 3]); // These lines are unreachable if error is expected
-        // assert_eq!(s.numel(), 0);
+        // Creating an empty slice [1, 1) is now allowed.
+        assert!(s_result.is_ok(), "Slice with empty dim [1, 1) should be Ok");
+        if let Ok(s) = s_result { // Check shape and numel only if Ok
+           assert_eq!(s.shape(), vec![1, 0, 3], "Shape mismatch for slice with empty dim"); 
+           assert_eq!(s.numel(), 0, "Numel should be 0 for slice with empty dim");
+        }
     }
 
     #[test]
