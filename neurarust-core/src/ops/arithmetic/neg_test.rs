@@ -73,11 +73,12 @@ fn test_neg_backward() -> Result<(), GradCheckError> {
     // output_grad doit être f32
     let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], output_shape)?;
     
-    let epsilon = 1e-4;
-    let tolerance = 1e-4;
+    let epsilon = 1e-5;
+    let abs_tol = 1e-7;
+    let rel_tol = 1e-5;
 
     // check_grad attend &[Tensor] et output_grad: &Tensor
     // Note: neg_op ne prend qu'une entrée, donc le slice est &[a]
-    check_grad(func, &[a], &output_grad, epsilon, tolerance)
+    check_grad(func, &[a], &output_grad, epsilon, abs_tol, rel_tol)
     // Le test réussit si check_grad retourne Ok(())
 } 

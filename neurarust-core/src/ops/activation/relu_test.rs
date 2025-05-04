@@ -54,10 +54,10 @@ mod autograd_tests {
         let output_shape = vec![5];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        // Increase tolerance to account for numerical gradient difference at x=0 (0.5 vs 0.0)
-        let tolerance = 0.51;
+        let tolerance = 1e-7; // abs_tol
+        let rel_tolerance = 1e-5; // rel_tol
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
+        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance, rel_tolerance);
         assert!(grad_check_result.is_ok(), "ReLU basic backward grad check failed: {:?}", grad_check_result.err());
     }
 
@@ -69,9 +69,10 @@ mod autograd_tests {
         let output_shape = vec![3];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        let tolerance = 1e-7; // Standard tolerance is fine here
+        let tolerance = 1e-7; // abs_tol
+        let rel_tolerance = 1e-5; // rel_tol
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
+        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance, rel_tolerance);
          assert!(grad_check_result.is_ok(), "ReLU all positive backward grad check failed: {:?}", grad_check_result.err());
     }
 
@@ -84,9 +85,10 @@ mod autograd_tests {
         let output_shape = vec![3];
         let output_grad = Tensor::<f64>::ones(output_shape).unwrap();
         let epsilon = 1e-5;
-        let tolerance = 0.51; // Increased tolerance for x=0
+        let tolerance = 1e-7; // abs_tol
+        let rel_tolerance = 1e-5; // rel_tol
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
+        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance, rel_tolerance);
          assert!(grad_check_result.is_ok(), "ReLU all negative/zero backward grad check failed: {:?}", grad_check_result.err());
     }
 

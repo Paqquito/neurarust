@@ -323,9 +323,10 @@ mod tests {
         let numel_out = output_shape.iter().product();
         let output_grad = Tensor::ones(&output_shape).unwrap(); // Use tensor::ones
         let epsilon = 1e-5;
-        let tolerance = 1e-4;
+        let abs_tol = 1e-7;
+        let rel_tol = 1e-5;
 
-        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, tolerance);
+        let grad_check_result = check_grad(func, &[input], &output_grad, epsilon, abs_tol, rel_tol);
         assert!(grad_check_result.is_ok(), "Slice backward grad check failed: {:?}", grad_check_result.err());
         */
     }

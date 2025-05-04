@@ -18,7 +18,7 @@ mod tests {
         );
         assert!(input_data.is_contiguous());
         let output_grad_val = Tensor::<f64>::ones(vec![3, 2]).unwrap();
-        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7);
+        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7, 1e-5);
         assert!(result.is_ok(), "Gradient check failed for reshape: {:?}", result.err());
     }
 
@@ -35,7 +35,7 @@ mod tests {
         );
         assert!(input_data.is_contiguous());
         let output_grad_val = Tensor::<f64>::ones(vec![12]).unwrap();
-        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7);
+        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7, 1e-5);
         assert!(result.is_ok(), "Gradient check failed for flatten reshape: {:?}", result.err());
     }
 
@@ -51,7 +51,7 @@ mod tests {
         );
         assert!(input_data.is_contiguous());
         let output_grad_val = Tensor::<f64>::ones(vec![2, 2, 1, 3]).unwrap();
-        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7);
+        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7, 1e-5);
         assert!(result.is_ok(), "Gradient check failed for reshape adding dim: {:?}", result.err());
     }
 } 

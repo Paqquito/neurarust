@@ -323,7 +323,10 @@ mod tests {
         exp.set_requires_grad(true).unwrap();
         let output = pow_op(&base, &exp).unwrap();
         let output_grad_dummy = crate::tensor::ones_like(&output).expect("Failed to create dummy grad for broadcast_exponent test");
-        check_grad(pow_func, &[base.clone(), exp.clone()], &output_grad_dummy, 1e-3, 1e-3).unwrap();
+        let epsilon = 1e-3;
+        let abs_tol = 1e-6;
+        let rel_tol = 1e-4;
+        check_grad(pow_func, &[base.clone(), exp.clone()], &output_grad_dummy, epsilon, abs_tol, rel_tol).unwrap();
     }
 
     #[test]
@@ -369,7 +372,10 @@ mod tests {
         exp.set_requires_grad(false).unwrap();
         let output = pow_op(&base, &exp).unwrap();
         let output_grad_dummy = crate::tensor::ones_like(&output).expect("Failed to create dummy grad for only_base_grad test");
-        check_grad(pow_func, &[base.clone(), exp.clone()], &output_grad_dummy, 1e-3, 1e-3).unwrap();
+        let epsilon = 1e-3;
+        let abs_tol = 1e-6;
+        let rel_tol = 1e-4;
+        check_grad(pow_func, &[base.clone(), exp.clone()], &output_grad_dummy, epsilon, abs_tol, rel_tol).unwrap();
     }
 
     #[test]
@@ -383,6 +389,9 @@ mod tests {
         exp.set_requires_grad(true).unwrap();
         let output = pow_op(&base, &exp).unwrap();
         let output_grad_dummy = crate::tensor::ones_like(&output).expect("Failed to create dummy grad for only_exponent_grad test");
-        check_grad(pow_func, &[base.clone(), exp.clone()], &output_grad_dummy, 1e-3, 1e-3).unwrap(); 
+        let epsilon = 1e-3;
+        let abs_tol = 1e-6;
+        let rel_tol = 1e-4;
+        check_grad(pow_func, &[base.clone(), exp.clone()], &output_grad_dummy, epsilon, abs_tol, rel_tol).unwrap(); 
     }
 } 

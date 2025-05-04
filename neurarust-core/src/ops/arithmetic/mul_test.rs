@@ -9,7 +9,7 @@ use std::fmt::Debug;
 use std::iter::Sum;
 use std::ops::{Add, AddAssign, Mul};
 use crate::utils::testing::check_tensor_near;
-use crate::autograd::grad_check::{GradCheckError};
+use crate::autograd::grad_check::GradCheckError;
 
 // Helper to create tensors for tests
 fn create_test_tensor<T>(
@@ -125,10 +125,11 @@ fn test_mul_backward_simple() -> Result<(), GradCheckError> {
     let output_shape = vec![2];
     let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0], output_shape)?;
     
-    let epsilon = 1e-4;
-    let tolerance = 1e-4;
+    let epsilon = 1e-5;
+    let abs_tol = 1e-7;
+    let rel_tol = 1e-5;
 
-    check_grad(func, &[a, b], &output_grad, epsilon, tolerance)
+    check_grad(func, &[a, b], &output_grad, epsilon, abs_tol, rel_tol)
 }
 
 #[test]
@@ -143,8 +144,9 @@ fn test_mul_backward_broadcast() -> Result<(), GradCheckError> {
     let output_shape = vec![2, 2];
     let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], output_shape)?;
 
-    let epsilon = 1e-4;
-    let tolerance = 1e-4;
+    let epsilon = 1e-5;
+    let abs_tol = 1e-7;
+    let rel_tol = 1e-5;
 
-    check_grad(func, &[matrix, row_vector], &output_grad, epsilon, tolerance)
+    check_grad(func, &[matrix, row_vector], &output_grad, epsilon, abs_tol, rel_tol)
 } 

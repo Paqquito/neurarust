@@ -188,30 +188,16 @@ mod tests {
     #[test]
     fn test_expand_backward() {
          println!("Skipping test_expand_backward until reduction ops and check_grad are adapted.");
-        // use crate::autograd::grad_check::check_grad;
-        // use crate::utils::testing::create_test_tensor_with_grad;
-        //
-        // fn expand_func(t: &Tensor) -> Result<Tensor, NeuraRustError> {
-        //     expand_op(t, vec![2, 3])
-        // }
-        //
-        // // Input shape [3]
-        // let t = create_test_tensor_with_grad(vec![3], true);
-        // check_grad(expand_func, &t, 1e-3, 1e-3);
+        // TODO: Implement and enable grad check
+        // let grad_check_result = check_grad(expand_func, &[t], &grad_output, 1e-3, 1e-7, 1e-5);
+        // assert!(grad_check_result.is_ok(), "Expand grad check failed: {:?}", grad_check_result.err());
     }
 
     #[test]
     fn test_expand_backward_add_dims() {
         println!("Skipping test_expand_backward_add_dims until reduction ops and check_grad are adapted.");
-        // use crate::autograd::grad_check::check_grad;
-        // use crate::utils::testing::create_test_tensor_with_grad;
-        //
-        // fn expand_func(t: &Tensor) -> Result<Tensor, NeuraRustError> {
-        //     expand_op(t, vec![3, 1, 2])
-        // }
-        //
-        // // Input shape [2]
-        // let t = create_test_tensor_with_grad(vec![2], true);
-        // check_grad(expand_func, &t, 1e-3, 1e-3);
+        // TODO: Implement and enable grad check
+        // let grad_check_result = check_grad(expand_func, &[t], &grad_output, 1e-3, 1e-7, 1e-5);
+        // assert!(grad_check_result.is_ok(), "Expand grad check failed: {:?}", grad_check_result.err());
     }
 } 

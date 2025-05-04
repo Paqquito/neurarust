@@ -87,13 +87,36 @@ impl From<NeuraRustError> for GradCheckError {
 }
 
 /// Checks analytical gradients against numerical gradients using finite differences.
+///
+/// Compares the analytical gradient computed by the backward pass against a numerical
+/// approximation computed using finite differences: `num_grad ≈ [L(x+eps) - L(x-eps)] / (2*eps)`,
+/// where `L = sum(output * output_grad)` is a scalar loss.
+///
+/// The comparison uses both absolute and relative tolerances:
+/// `|analytical_grad - numerical_grad| <= abs_tol + rel_tol * |numerical_grad|`
+///
+/// # Arguments
+///
+/// * `func`: The function (often a closure) whose gradient is being checked. It takes a slice
+///   of input `Tensor`s and returns a `Result<Tensor, NeuraRustError>`.
+/// * `inputs`: A slice of input `Tensor`s provided to `func`. Tensors requiring grad must be leaf nodes.
+/// * `output_grad`: The gradient flowing into the output of `func` (often a tensor of ones).
+/// * `epsilon`: The small perturbation used for finite differences (e.g., `1e-5`). Should be `f64`.
+/// * `abs_tol`: The absolute tolerance for the gradient comparison (e.g., `1e-7`). Should be `f64`.
+/// * `rel_tol`: The relative tolerance for the gradient comparison (e.g., `1e-5`). Should be `f64`.
+///
+/// # Errors
+///
+/// Returns `GradCheckError` if the check fails or an error occurs during computation.
 // Remove T generic
 pub fn check_grad<F>(
     func: F,
     inputs: &[Tensor], // Use Tensor
     output_grad: &Tensor, // Use Tensor
     epsilon: f64,
-    tolerance: f64,
+    // tolerance: f64, // Remplacé par abs_tol et rel_tol
+    abs_tol: f64,
+    rel_tol: f64,
 ) -> Result<(), GradCheckError>
 where
     // Update F signature
@@ -211,8 +234,15 @@ where
                 let buffer_plus_arc = {
                     let mut buffer_vec = original_buffer_arc.as_ref().clone(); 
                     if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds (+) perturbation".to_string()))); }
-                    let current_val_f64 = buffer_vec[physical_offset] as f64;
-                    buffer_vec[physical_offset] = (current_val_f64 + epsilon) as f32; 
+                    
+                    // --- Modification pour calcul en f64 --- 
+                    let current_val_f32 = buffer_vec[physical_offset];
+                    let current_val_f64 = current_val_f32 as f64;
+                    let perturbed_val_f64 = current_val_f64 + epsilon; // Calcul en f64
+                    let perturbed_val_f32 = perturbed_val_f64 as f32; // Reconversion en f32
+                    // ---------------------------------------
+
+                    buffer_vec[physical_offset] = perturbed_val_f32; // Ecriture f32
                     Arc::new(buffer_vec) 
                 };
                 let td_plus = TensorData::new_view(
@@ -223,12 +253,10 @@ where
                     original_strides.clone(),
                 );
                 let perturbed_tensor_plus = Tensor { data: Arc::new(RwLock::new(td_plus)) };
-                // ------------------------------------------------
 
                 inputs_plus[i] = perturbed_tensor_plus;
                 let output_plus = func(&inputs_plus).map_err(GradCheckError::ForwardPassError)?;
-
-                calculate_loss(&output_plus, output_grad)?
+                calculate_loss(&output_plus, output_grad)? // Renvoie f64
             };
 
             // --- 5.3 Calculate Loss for f(x - eps) --- 
@@ -239,11 +267,18 @@ where
                  let buffer_minus_arc = {
                     let mut buffer_vec = original_buffer_arc.as_ref().clone(); 
                     if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds (-) perturbation".to_string()))); }
-                    let current_val_f64 = buffer_vec[physical_offset] as f64;
-                    buffer_vec[physical_offset] = (current_val_f64 - epsilon) as f32; 
+
+                    // --- Modification pour calcul en f64 --- 
+                    let current_val_f32 = buffer_vec[physical_offset];
+                    let current_val_f64 = current_val_f32 as f64;
+                    let perturbed_val_f64 = current_val_f64 - epsilon; // Calcul en f64
+                    let perturbed_val_f32 = perturbed_val_f64 as f32; // Reconversion en f32
+                    // ---------------------------------------
+                    
+                    buffer_vec[physical_offset] = perturbed_val_f32; // Ecriture f32
                     Arc::new(buffer_vec) 
                 };
-                let td_minus = TensorData::new_view(
+                 let td_minus = TensorData::new_view(
                     Arc::new(Buffer::Cpu(CpuBuffer::F32(buffer_minus_arc))),
                     original_device,
                     original_offset, 
@@ -251,12 +286,10 @@ where
                     original_strides.clone(),
                 );
                  let perturbed_tensor_minus = Tensor { data: Arc::new(RwLock::new(td_minus)) };
-                 // -------------------------------------------------
 
-                inputs_minus[i] = perturbed_tensor_minus;
-                let output_minus = func(&inputs_minus).map_err(GradCheckError::ForwardPassError)?;
-
-                calculate_loss(&output_minus, output_grad)?
+                 inputs_minus[i] = perturbed_tensor_minus;
+                 let output_minus = func(&inputs_minus).map_err(GradCheckError::ForwardPassError)?;
+                 calculate_loss(&output_minus, output_grad)? // Renvoie f64
             };
             
             // --- 5.4 Calculate Numerical Gradient ---
@@ -266,7 +299,7 @@ where
              let analytical_grad = analytical_grad_data[elem_idx]; // Utiliser l'index logique
 
             // --- 5.6 Check for NaN/Infinite Gradients ---
-            if numerical_grad.is_nan() || numerical_grad.is_infinite() {
+            if !numerical_grad.is_finite() {
                 return Err(GradCheckError::NumericalGradNaNOrInfinite {
                     input_index: i,
                     element_index: elem_idx,
@@ -274,7 +307,7 @@ where
                     loss_minus,
                 });
             }
-            if analytical_grad.is_nan() || analytical_grad.is_infinite() {
+            if !analytical_grad.is_finite() {
                  return Err(GradCheckError::AnalyticalGradNaNOrInfinite {
                     input_index: i,
                     element_index: elem_idx,
@@ -284,8 +317,10 @@ where
 
             // --- 5.7 Compare Gradients ---
             let difference = (analytical_grad - numerical_grad).abs();
-            if difference > tolerance && (difference / (analytical_grad.abs() + epsilon)) > tolerance { 
-                 return Err(GradCheckError::GradientMismatch {
+            let allowed_tolerance = abs_tol + rel_tol * numerical_grad.abs();
+
+            if difference > allowed_tolerance {
+                return Err(GradCheckError::GradientMismatch {
                     input_index: i,
                     element_index: elem_idx,
                     analytical_grad,

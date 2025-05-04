@@ -55,10 +55,11 @@ mod tests {
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
         let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0], vec![2])?;
-        let epsilon = 1e-3; // Need larger epsilon/tolerance for pow f32?
-        let tolerance = 1e-3;
+        let epsilon = 1e-5;
+        let abs_tol = 1e-7;
+        let rel_tol = 1e-5;
 
-        check_grad(func, &[base, exponent], &output_grad, epsilon, tolerance)
+        check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 
     #[test]
@@ -71,11 +72,12 @@ mod tests {
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
         let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0], vec![2])?;
-        let epsilon = 1e-3;
-        let tolerance = 1e-3;
+        let epsilon = 1e-5;
+        let abs_tol = 1e-7;
+        let rel_tol = 1e-5;
 
         // Pass both tensors, but check_grad will only compute numerical grad for 'base'
-        check_grad(func, &[base, exponent], &output_grad, epsilon, tolerance)
+        check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 
     #[test]
@@ -89,11 +91,12 @@ mod tests {
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
         let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0], vec![2])?;
-        let epsilon = 1e-3;
-        let tolerance = 1e-3;
+        let epsilon = 1e-5;
+        let abs_tol = 1e-7;
+        let rel_tol = 1e-5;
 
         // This will likely fail or panic if exponent grad is not implemented
-        check_grad(func, &[base, exponent], &output_grad, epsilon, tolerance)
+        check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 
     #[test]
@@ -106,10 +109,11 @@ mod tests {
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
         let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
-        let epsilon = 1e-3;
-        let tolerance = 1e-3;
+        let epsilon = 1e-5;
+        let abs_tol = 1e-7;
+        let rel_tol = 1e-5;
 
-        check_grad(func, &[base, exponent], &output_grad, epsilon, tolerance)
+        check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
     
     #[test]
@@ -123,9 +127,10 @@ mod tests {
          let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
  
          let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
-         let epsilon = 1e-3;
-         let tolerance = 1e-3;
+         let epsilon = 1e-5;
+         let abs_tol = 1e-7;
+         let rel_tol = 1e-5;
  
-         check_grad(func, &[base, exponent], &output_grad, epsilon, tolerance)
+         check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 } 
