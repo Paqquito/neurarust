@@ -1,5 +1,14 @@
 // src/tensor/traits.rs
 
+//! This module implements standard Rust traits for the main [`Tensor`](../struct.Tensor.html) structure.
+//!
+//! It provides implementations for:
+//! - [`Clone`]: Shallow cloning using `Arc` for shared ownership.
+//! - [`Debug`]: Debug formatting, displaying tensor metadata and a preview of CPU data.
+//! - [`PartialEq`] and [`Eq`]: Logical equality check based on shape, strides, dtype, device, offset, and data content (ignoring gradients).
+//! - [`Hash`]: Hashing based on the memory address of the underlying data for identity comparison.
+//! - `TensorImpl`: A trait (and its implementation for `Tensor`) providing basic accessor methods.
+
 use crate::device::StorageDevice;
 use crate::tensor::Tensor;
 use crate::types::DType; // Import DType
@@ -10,26 +19,41 @@ use std::hash::{Hash, Hasher};
 use std::sync::Arc;
 use std::cmp::PartialEq;
 
-// Define the TensorImpl trait (assuming it was removed by mistake)
-#[allow(dead_code)]
+/// A trait defining the core properties and accessors for a tensor implementation.
+///
+/// This trait is intended to abstract the basic characteristics of a tensor,
+/// such as its shape, data type, and storage details. While `Tensor` itself
+/// implements this, it could potentially be used for other tensor-like structures
+/// in the future.
+#[allow(dead_code)] // Keep trait definition for potential future use or reference
 pub trait TensorImpl {
+    /// Returns the shape of the tensor as a `Vec<usize>`.
     fn shape(&self) -> Vec<usize>;
+    /// Returns the strides of the tensor as a `Vec<usize>`.
     fn strides(&self) -> Vec<usize>;
+    /// Returns the storage device where the tensor data resides.
     fn device(&self) -> StorageDevice;
+    /// Returns the data type (`DType`) of the tensor elements.
     fn dtype(&self) -> DType;
+    /// Returns the rank (number of dimensions) of the tensor.
     fn rank(&self) -> usize;
+    /// Returns the total number of elements in the tensor.
     fn numel(&self) -> usize;
+    /// Checks if the tensor is contiguous in memory.
     fn is_contiguous(&self) -> bool;
     // Add other methods that were part of the trait if necessary
 }
 
 // --- Trait Implementations ---
 
-// Remove <T> and bounds
+// Note: No <T> generic parameter needed anymore for Tensor
 impl Clone for Tensor {
-    /// Clones the Tensor. This is a shallow clone that increases the reference count
-    /// of the underlying shared data. Modifications through one clone will be visible
-    /// through others.
+    /// Creates a shallow clone of the `Tensor`.
+    ///
+    /// This operation is inexpensive as it only increments the reference count
+    /// of the underlying shared [`TensorData`](../tensor_data/struct.TensorData.html).
+    /// Both the original and the cloned `Tensor` will point to the same data.
+    /// Modifications made through one clone will be visible through the other.
     fn clone(&self) -> Self {
         Tensor {
             data: Arc::clone(&self.data), // Clone the Arc
@@ -37,10 +61,21 @@ impl Clone for Tensor {
     }
 }
 
-// Remove <T> and bounds
+// Note: No <T> generic parameter needed anymore for Tensor
 impl Debug for Tensor {
-    /// Formats the Tensor for debugging. Shows shape, device, strides, offset,
-    /// dtype, and a preview of the data if it's on the CPU.
+    /// Formats the `Tensor` for debugging purposes.
+    ///
+    /// The output includes:
+    /// - Shape
+    /// - Storage device
+    /// - Data type (`DType`)
+    /// - Strides
+    /// - Offset
+    /// - A preview of the data elements (limited count) if the tensor is on the CPU.
+    /// - Whether the tensor requires gradient computation (`requires_grad`).
+    ///
+    /// For GPU tensors, it currently indicates `<GPU Buffer>` instead of showing data.
+    /// The data preview for CPU tensors currently ignores strides and offset for simplicity.
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         // Use read lock on self.data
         let td_guard = self.data.read().map_err(|_| fmt::Error)?; // Handle poisoned lock
@@ -99,13 +134,28 @@ impl Debug for Tensor {
     }
 }
 
-// Remove <T> and bounds
+// Note: No <T> generic parameter needed anymore for Tensor
 impl PartialEq for Tensor {
-    /// Checks for logical equality between two Tensors.
+    /// Checks for logical equality between two `Tensor` instances.
     ///
-    /// Two tensors are considered equal if they have the same device, dtype, shape,
-    /// strides, offset, and underlying data content according to their view parameters.
-    /// Gradient information is NOT considered.
+    /// Two tensors are considered equal if they meet all the following criteria:
+    /// 1. They reside on the same [`StorageDevice`].
+    /// 2. They have the same [`DType`].
+    /// 3. They have the same shape.
+    /// 4. They have the same strides.
+    /// 5. They have the same offset.
+    /// 6. Their underlying data elements are equal, considering their respective views
+    ///    (shape, strides, offset).
+    ///
+    /// **Important:**
+    /// - This comparison **ignores** gradient information (`grad` and `grad_fn`).
+    /// - Currently, element-wise comparison is only implemented for `f32` tensors residing on the CPU.
+    ///   Comparisons involving other data types or GPU tensors will likely return `false` unless
+    ///   they are pointer-equal (the exact same `Arc<RwLock<TensorData>>`).
+    /// - Floating-point comparisons use direct `!=`. For tolerance-based comparisons, use dedicated functions.
+    ///
+    /// This performs a deep comparison of the data if the metadata matches and the tensors
+    /// don't share the exact same underlying `TensorData` instance.
     fn eq(&self, other: &Self) -> bool {
         if Arc::ptr_eq(&self.data, &other.data) {
             return true; // Same underlying TensorData instance
@@ -182,13 +232,23 @@ impl PartialEq for Tensor {
     }
 }
 
-// Remove <T> and bounds
-impl Eq for Tensor {} // Eq follows from PartialEq
+// Note: No <T> generic parameter needed anymore for Tensor
+/// Marker trait implementation indicating that `Tensor` has a total equality relation
+/// when `PartialEq` returns true.
+impl Eq for Tensor {}
 
-// Remove <T> and bounds
+// Note: No <T> generic parameter needed anymore for Tensor
 impl Hash for Tensor {
-    /// Hashes the Tensor based on the pointer address of the `RwLock<TensorData>`.
-    /// This allows using Tensors as keys in HashMaps/HashSets where object identity matters.
+    /// Hashes the `Tensor` based on the memory address of its underlying shared data structure.
+    ///
+    /// This implementation ensures that two `Tensor` clones (pointing to the same
+    /// `Arc<RwLock<TensorData>>`) will produce the same hash value.
+    ///
+    /// **Note:** This hash function reflects *object identity*, not *value equality*.
+    /// Two logically equal but distinct tensors (e.g., created separately with the same data)
+    /// will likely have different hash values.
+    /// Use this for scenarios where you need to track specific tensor instances in hash-based
+    /// collections (like `HashMap` or `HashSet`).
     fn hash<H: Hasher>(&self, state: &mut H) {
         // Hash the address of the Arc's contained RwLock<TensorData>
         Arc::as_ptr(&self.data).hash(state);
@@ -198,33 +258,49 @@ impl Hash for Tensor {
 // Note: Implementations for Add, Sub, Mul, Neg etc. using the op functions
 // should also go in this file or a dedicated ops_impl.rs file.
 
-// Generic implementation for any type that Derefs to TensorData?
-// Or specific impl for Tensor?
+// --- TensorImpl Implementation ---
+
+/// Implementation of the `TensorImpl` trait for the main `Tensor` struct.
+/// Provides access to the core properties stored within the underlying `TensorData`.
 impl TensorImpl for Tensor {
+    /// Returns a clone of the tensor's shape.
+    /// Acquires a read lock on the internal data.
     fn shape(&self) -> Vec<usize> {
         self.data.read().unwrap().shape.clone()
     }
 
+    /// Returns a clone of the tensor's strides.
+    /// Acquires a read lock on the internal data.
     fn strides(&self) -> Vec<usize> {
         self.data.read().unwrap().strides.clone()
     }
 
+    /// Returns the tensor's storage device.
+    /// Acquires a read lock on the internal data.
     fn device(&self) -> StorageDevice {
         self.data.read().unwrap().device
     }
 
+    /// Returns the tensor's data type (`DType`).
+    /// Acquires a read lock on the internal data.
     fn dtype(&self) -> DType {
         self.data.read().unwrap().dtype
     }
 
+    /// Returns the rank (number of dimensions) of the tensor.
+    /// Acquires a read lock on the internal data.
     fn rank(&self) -> usize {
         self.data.read().unwrap().shape.len()
     }
 
+    /// Returns the total number of elements in the tensor.
+    /// Acquires a read lock on the internal data.
     fn numel(&self) -> usize {
         self.data.read().unwrap().shape.iter().product()
     }
 
+    /// Checks if the tensor's data layout is contiguous in memory.
+    /// Acquires a read lock on the internal data.
     fn is_contiguous(&self) -> bool {
         let self_guard = self.data.read().unwrap();
         let self_shape = &self_guard.shape;

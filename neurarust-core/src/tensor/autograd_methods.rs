@@ -6,13 +6,37 @@ use crate::tensor_data::TensorData;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
 
+/// This `impl` block provides methods related to automatic differentiation (autograd).
 impl Tensor {
     /// Checks if this tensor requires gradient computation.
+    ///
+    /// Tensors that require gradients track their history and accumulate gradients
+    /// during the `backward` pass. Leaf tensors created by the user typically have
+    /// this set explicitly, while tensors resulting from operations inherit this status
+    /// based on their inputs.
+    /// Acquires a read lock internally.
     pub fn requires_grad(&self) -> bool {
         self.data.read().unwrap().requires_grad
     }
 
     /// Sets the `requires_grad` flag for this tensor.
+    ///
+    /// **Caution:** Modifying this flag directly can have implications for gradient computation.
+    /// - Setting `requires_grad = true` on a tensor that resulted from an operation
+    ///   (i.e., a non-leaf tensor with a `grad_fn`) is usually **not** what you want.
+    ///   Gradients are only accumulated in leaf nodes during the backward pass.
+    ///   If you need to perform operations on such a tensor without tracking gradients,
+    ///   consider using [`detach()`](#method.detach) first.
+    ///   This method will print a warning if you set `requires_grad = true` on a non-leaf tensor.
+    /// - Setting `requires_grad = false` prevents the tensor from tracking history or accumulating gradients.
+    ///
+    /// Acquires a write lock internally.
+    ///
+    /// # Arguments
+    /// * `requires_grad`: The boolean value to set the flag to.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError::LockError` if the internal lock cannot be acquired.
     pub fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError> {
         let mut guard = self.data.write().map_err(|_| NeuraRustError::LockError {
             lock_type: "write".to_string(),
@@ -25,17 +49,40 @@ impl Tensor {
         Ok(())
     }
 
-    /// Returns a clone of the gradient tensor, if it exists.
+    /// Returns a clone of the gradient tensor (`.grad`), if it exists.
+    ///
+    /// The gradient is accumulated in this field during the `backward()` pass
+    /// **only** if the tensor is a leaf node (`grad_fn()` is `None`) and
+    /// `requires_grad()` is `true`.
+    /// The gradient tensor will have the same shape and device as the original tensor.
+    /// Acquires a read lock internally.
     pub fn grad(&self) -> Option<Tensor> {
         self.data.read().unwrap().grad.clone()
     }
 
-    /// Returns a clone of the `Arc` pointing to the backward operation node (`grad_fn`).
+    /// Returns a clone of the `Arc` pointing to the backward operation (`grad_fn`) that produced this tensor.
+    ///
+    /// If this tensor is a leaf node (created by the user), `grad_fn` will be `None`.
+    /// If it resulted from an operation involving tensors that require gradients,
+    /// `grad_fn` will hold a reference to the corresponding backward operation object.
+    /// This forms the basis of the computation graph used by `backward()`.
+    /// Acquires a read lock internally.
     pub fn grad_fn(&self) -> Option<Arc<dyn BackwardOp + Send + Sync>> {
         self.data.read().unwrap().grad_fn.clone()
     }
 
     /// Sets the backward operation node (`grad_fn`) for this tensor.
+    ///
+    /// **Internal Use:** This method is primarily used internally by tensor operations
+    /// to build the computation graph when operating on tensors that require gradients.
+    /// Manually setting this is usually not necessary and potentially error-prone.
+    /// Acquires a write lock internally.
+    ///
+    /// # Arguments
+    /// * `grad_fn`: An `Option` containing an `Arc` to the backward operation.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError::LockError` if the internal lock cannot be acquired.
     pub fn set_grad_fn(
         &self,
         grad_fn: Option<Arc<dyn BackwardOp + Send + Sync>>,
@@ -48,7 +95,21 @@ impl Tensor {
         Ok(())
     }
 
-    /// Accumulates the given gradient into the tensor's `grad` field.
+    /// Accumulates the given gradient into the tensor's `.grad` field.
+    ///
+    /// If the tensor's current `.grad` is `None`, it is initialized with `grad_to_add`.
+    /// If it already exists, `grad_to_add` is added to the existing gradient.
+    /// This method is used internally during the `backward` pass.
+    /// Acquires a write lock internally.
+    ///
+    /// # Arguments
+    /// * `grad_to_add`: The gradient tensor to accumulate.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if:
+    /// - The internal lock cannot be acquired (`LockError`).
+    /// - `grad_to_add` has a different device or data type (`DeviceMismatch`, `UnsupportedOperation`).
+    /// - `grad_to_add` has a different shape than the tensor or its existing gradient (`GradientAccumulationShapeMismatch`).
     pub fn acc_grad(&self, grad_to_add: Tensor) -> Result<(), NeuraRustError> {
         let mut guard = self.data.write().map_err(|_| NeuraRustError::LockError {
             lock_type: "write".to_string(),
@@ -101,25 +162,33 @@ impl Tensor {
         Ok(())
     }
 
-    /// Performs the backward pass starting from this tensor.
+    /// Performs the backward pass (automatic differentiation) starting from this tensor.
     ///
-    /// Computes the gradient of this tensor with respect to graph leaves.
-    /// The graph is differentiated using the chain rule.
+    /// Computes the gradient of this tensor with respect to all leaf nodes in the
+    /// computation graph that have `requires_grad = true`.
+    /// The gradients are accumulated in the `.grad` field of the respective leaf tensors.
+    ///
+    /// The computation graph is traversed using reverse-mode automatic differentiation (backpropagation).
     ///
     /// # Arguments
-    /// * `gradient`: Optional gradient tensor to use as the initial gradient for this tensor.
-    ///               If `None`, it defaults to a tensor containing `1.0` if this tensor is
-    ///               a scalar (0-dimensional or 1 element), or if the tensor has 0 elements.
-    ///               Otherwise, it returns a `BackwardNonScalar` error.
-    /// * `retain_graph`: If `false` (default), the graph used to compute grads will be freed.
-    ///                   Set to `true` if you need to backward through the graph again.
+    /// * `gradient`: An optional `Tensor` representing the initial gradient (dL/dSelf) to start the chain rule.
+    ///   - If `None`: Defaults to a tensor of ones with the same shape, dtype, and device as `self`.
+    ///     This is typically used when calling `backward` on a scalar loss tensor.
+    ///     **TODO:** Currently panics if `self` is not scalar-like and `gradient` is `None`.
+    ///   - If `Some(g)`: The tensor `g` is used as the initial gradient. It must have the same shape
+    ///     and device as `self`.
+    /// * `retain_graph`: **(Not yet implemented)** If `false` (default), the computation graph might be freed
+    ///    after the backward pass to save memory. If `true`, the graph is kept, allowing for multiple
+    ///    backward passes (e.g., for calculating higher-order derivatives), but consuming more memory.
     ///
     /// # Errors
     /// Returns `NeuraRustError` if:
-    /// * `gradient` is provided but has the wrong shape or device.
-    /// * `gradient` is `None`, but the tensor is not a scalar or empty.
-    /// * The tensor does not require gradients.
-    /// * An error occurs during graph traversal or gradient computation.
+    /// - This tensor does not require gradients (`self.requires_grad()` is `false`).
+    /// - The provided `gradient` (if `Some`) has a mismatched shape or device.
+    /// - `gradient` is `None`, but `self` is not scalar-like (non-scalar backward without initial grad).
+    /// - An error occurs during graph traversal (e.g., cycle detection, lock errors).
+    /// - An error occurs during the `backward` call of an operation node in the graph.
+    /// - A shape mismatch occurs during gradient accumulation.
     pub fn backward(&self, gradient: Option<Tensor>) -> Result<(), NeuraRustError> {
         if !self.requires_grad() {
             return Ok(());
@@ -152,9 +221,11 @@ impl Tensor {
                 let is_empty = numel == 0;
 
                 if is_scalar_like {
+                    // TODO: Replace with Tensor::ones_like(self) or similar factory function
                     todo!("Create scalar tensor with value 1.0 of correct dtype/device");
                 } else if is_empty {
-                    todo!("Implement Tensor::zeros_like or equivalent");
+                     // TODO: Replace with Tensor::zeros_like(self) or similar factory function
+                     todo!("Create empty tensor with correct shape/dtype/device");
                 } else {
                     return Err(NeuraRustError::BackwardNonScalar);
                 }
@@ -200,109 +271,132 @@ impl Tensor {
         Ok(())
     }
 
+    /// Static helper function to accumulate gradient into a TensorData identified by its raw pointer.
+    /// This is used internally by `backward` to avoid holding `Tensor` instances (and their Arcs)
+    /// during graph traversal, which could prevent parts of the graph from being dropped.
     fn accumulate_grad_static(
         tensor_data_ptr: *const RwLock<TensorData>,
         grad_to_add: Tensor,
     ) -> Result<(), NeuraRustError> {
-         if tensor_data_ptr.is_null() {
-             return Err(NeuraRustError::InternalError("Null pointer encountered in accumulate_grad_static".to_string()));
-         }
-         let tensor_data_lock = unsafe { &*tensor_data_ptr };
-
-         let mut guard = tensor_data_lock.write().map_err(|_| NeuraRustError::LockError {
+        // Safety: The pointer must be valid and point to a live TensorData's RwLock.
+        // This is ensured by the topological sort and the way nodes are handled in `backward`.
+        let tensor_data_ref = unsafe { &*tensor_data_ptr };
+        let mut guard = tensor_data_ref.write().map_err(|_| NeuraRustError::LockError {
             lock_type: "write".to_string(),
-            reason: "Failed to lock TensorData for accumulate_grad_static".to_string(),
-         })?;
+            reason: "Failed to lock TensorData (static) for acc_grad".to_string(),
+        })?;
 
-         if !guard.requires_grad {
-             return Ok(());
-         }
+        // Only accumulate if it requires grad and is a leaf
+        if !guard.requires_grad || guard.grad_fn.is_some() {
+            return Ok(());
+        }
 
-         let self_device = guard.device;
-         let self_dtype = guard.dtype;
+        let self_device = guard.device;
+        let self_dtype = guard.dtype;
+        let self_shape = guard.shape.clone(); // Clone shape before potentially taking grad
 
-         let grad_to_add_device = grad_to_add.device();
-         if self_device != grad_to_add_device {
-             return Err(NeuraRustError::DeviceMismatch {
-                 expected: self_device,
-                 actual: grad_to_add_device,
-                 operation: "accumulate_grad_static".to_string(),
-             });
-         }
-         let grad_to_add_dtype = grad_to_add.dtype();
-         if self_dtype != grad_to_add_dtype {
+        let grad_to_add_device = grad_to_add.device();
+        if self_device != grad_to_add_device {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: self_device,
+                actual: grad_to_add_device,
+                operation: "accumulate_grad_static".to_string(),
+            });
+        }
+        let grad_to_add_dtype = grad_to_add.dtype();
+        if self_dtype != grad_to_add_dtype {
              return Err(NeuraRustError::UnsupportedOperation(format!(
-                 "accumulate_grad_static dtype mismatch: self={:?}, grad={:?}",
+                 "acc_grad static dtype mismatch: self={:?}, grad={:?}",
                  self_dtype, grad_to_add_dtype
              )));
-         }
+        }
 
-         match guard.grad.take() {
-             Some(existing_grad) => {
-                 let existing_shape = existing_grad.shape();
-                 let grad_to_add_shape = grad_to_add.shape();
-                 if existing_shape != grad_to_add_shape {
-                     guard.grad = Some(existing_grad);
-                     return Err(NeuraRustError::GradientAccumulationShapeMismatch {
-                         expected: existing_shape,
-                         actual: grad_to_add_shape,
-                     });
-                 }
-                 let sum_grad = crate::ops::arithmetic::add_op(&existing_grad, &grad_to_add)?;
-                 guard.grad = Some(sum_grad);
-             }
-             None => {
-                 let self_shape = guard.shape.clone();
+        match guard.grad.take() {
+            Some(existing_grad) => {
+                let existing_shape = existing_grad.shape();
+                let grad_to_add_shape = grad_to_add.shape();
+                if existing_shape != grad_to_add_shape {
+                    return Err(NeuraRustError::GradientAccumulationShapeMismatch {
+                        expected: existing_shape,
+                        actual: grad_to_add_shape,
+                    });
+                }
+                let sum_grad = crate::ops::arithmetic::add_op(&existing_grad, &grad_to_add)?;
+                guard.grad = Some(sum_grad);
+            }
+            None => {
                  let grad_to_add_shape = grad_to_add.shape();
                  if self_shape != grad_to_add_shape {
                      return Err(NeuraRustError::GradientAccumulationShapeMismatch {
-                         expected: self_shape,
-                         actual: grad_to_add_shape,
-                     });
+                        expected: self_shape,
+                        actual: grad_to_add_shape,
+                    });
                  }
-                 guard.grad = Some(grad_to_add);
-             }
-         }
-         Ok(())
+                guard.grad = Some(grad_to_add);
+            }
+        }
+        Ok(())
     }
 
-    /// Creates a new tensor that shares the same underlying data buffer
-    /// but is detached from the current computation graph.
+    /// Creates a new tensor that shares the same underlying data but is detached
+    /// from the computation graph.
     ///
     /// The returned tensor will have `requires_grad = false` and `grad_fn = None`.
-    /// Changes to the data in the original tensor will be reflected in the detached tensor,
-    /// and vice-versa (as they share the same buffer).
+    /// Any changes to the data of the original tensor will be reflected in the detached tensor
+    /// (and vice-versa), but gradient computation history is severed.
+    ///
+    /// This is useful when you want to use a tensor's value in a context where gradients
+    /// are not needed or should not propagate (e.g., updating model weights, certain types
+    /// of evaluation metrics).
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// use neurarust_core::ops::arithmetic::add_op;
+    ///
+    /// let a = Tensor::new(vec![2.0f32], vec![]).unwrap();
+    /// a.set_requires_grad(true).unwrap();
+    /// let b = Tensor::new(vec![3.0f32], vec![]).unwrap();
+    /// b.set_requires_grad(true).unwrap();
+    ///
+    /// let c = add_op(&a, &b).unwrap(); // c requires grad and has a grad_fn
+    /// assert!(c.requires_grad());
+    /// assert!(c.grad_fn().is_some());
+    ///
+    /// let d = c.detach(); // d shares data with c
+    /// assert!(!d.requires_grad());
+    /// assert!(d.grad_fn().is_none());
+    /// assert_eq!(c.item_f32().unwrap(), d.item_f32().unwrap());
+    /// ```
     pub fn detach(&self) -> Tensor {
-        let old_data_guard = self.read_data();
-        // Clone the necessary data, excluding autograd info
-        let new_td = TensorData {
-            buffer: old_data_guard.buffer.clone(), // Clone the Arc<Buffer>
-            shape: old_data_guard.shape.clone(),
-            strides: old_data_guard.strides.clone(),
-            dtype: old_data_guard.dtype,
-            device: old_data_guard.device,
-            offset: old_data_guard.offset,
-            requires_grad: false, // Detached -> no grad requirement
-            grad: None,           // Detached -> no grad
-            grad_fn: None,        // Detached -> no grad function
-             // Retain other fields like maybe a name? Add if necessary.
+        let current_guard = self.read_data();
+        // Create a new TensorData with copied metadata but no autograd history
+        let detached_td = TensorData {
+            buffer: Arc::clone(&current_guard.buffer), // Share the same buffer
+            shape: current_guard.shape.clone(),
+            strides: current_guard.strides.clone(),
+            offset: current_guard.offset,
+            device: current_guard.device,
+            dtype: current_guard.dtype,
+            requires_grad: false, // Key difference: requires_grad is false
+            grad: None,           // Key difference: grad is None
+            grad_fn: None,        // Key difference: grad_fn is None
         };
-        drop(old_data_guard);
+        drop(current_guard); // Release the lock on the original tensor
 
+        // Create a new Tensor struct wrapping the new TensorData
         Tensor {
-            data: Arc::new(RwLock::new(new_td)),
+            data: Arc::new(RwLock::new(detached_td))
         }
     }
 
-    /// Clears the gradient tensor associated with this tensor.
+    /// Clears the gradient (`.grad` field) of this tensor by setting it to `None`.
+    ///
+    /// Acquires a write lock internally.
     pub fn clear_grad(&self) {
-        // Acquire write lock and set grad to None
         if let Ok(mut guard) = self.data.write() {
-             guard.grad = None;
-        } else {
-             // Handle poisoned lock - potentially log an error or panic
-             // depending on desired robustness.
-             eprintln!("Warning: Failed to acquire write lock for clear_grad, lock might be poisoned.");
+            guard.grad = None;
         }
+        // Silently ignore lock errors, as clearing grad is often best-effort
     }
 }

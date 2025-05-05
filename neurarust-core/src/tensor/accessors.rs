@@ -7,49 +7,117 @@ use crate::{
     types::DType,
 };
 
+/// This `impl` block provides methods for accessing the properties and data of a `Tensor`.
 impl Tensor {
     /// Returns a clone of the tensor's shape (dimensions).
+    ///
+    /// Acquires a read lock internally.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    /// assert_eq!(t.shape(), vec![2, 2]);
+    /// ```
     pub fn shape(&self) -> Vec<usize> {
         self.read_data().shape.clone()
     }
 
     /// Returns a clone of the tensor's strides.
+    ///
+    /// Strides define the number of elements to jump in the underlying storage
+    /// to move one step along each dimension.
+    /// Acquires a read lock internally.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    /// assert_eq!(t.strides(), vec![2, 1]); // Contiguous strides for [2, 2]
+    /// ```
     pub fn strides(&self) -> Vec<usize> {
         self.read_data().strides.clone()
     }
 
-    /// Returns the storage device where the tensor data resides.
+    /// Returns the storage device (`CPU` or `GPU`) where the tensor data resides.
+    ///
+    /// Acquires a read lock internally.
     pub fn device(&self) -> StorageDevice {
         self.read_data().device
     }
 
-    /// Returns the data type (`DType`) of the tensor elements.
+    /// Returns the data type (`DType::F32` or `DType::F64`) of the tensor elements.
+    ///
+    /// Acquires a read lock internally.
     pub fn dtype(&self) -> DType {
         self.read_data().dtype
     }
 
     /// Returns the rank (number of dimensions) of the tensor.
+    ///
+    /// Equal to `tensor.shape().len()`.
+    /// Acquires a read lock internally.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    /// assert_eq!(t.rank(), 2);
+    /// let s = Tensor::new(vec![5.0f32], vec![1]).unwrap();
+    /// assert_eq!(s.rank(), 1);
+    /// ```
     pub fn rank(&self) -> usize {
         self.read_data().shape.len()
     }
 
     /// Returns the total number of elements in the tensor.
+    ///
+    /// Equal to the product of the sizes of all dimensions.
+    /// Acquires a read lock internally.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+    /// assert_eq!(t.numel(), 6);
+    /// let empty = Tensor::new(vec![], vec![2, 0, 3]).unwrap();
+    /// assert_eq!(empty.numel(), 0);
+    /// ```
     pub fn numel(&self) -> usize {
         // Reuse shape() ? No, direct access is fine.
         self.read_data().shape.iter().product()
     }
 
      /// Checks if the tensor is contiguous in memory.
-     /// A tensor is contiguous if its elements are laid out in memory sequentially
-     /// according to the standard row-major order (C order).
+     ///
+     /// A tensor is considered contiguous if its elements are laid out in memory
+     /// sequentially in row-major order (C order), without gaps, considering its
+     /// shape and strides. Operations on contiguous tensors are often more efficient.
+     /// Views created by operations like `transpose` or slicing might result in non-contiguous tensors.
+     ///
+     /// Acquires a read lock internally.
      pub fn is_contiguous(&self) -> bool {
          self.read_data().is_contiguous() // Delegate to TensorData
      }
 
-
-    /// Extracts the single scalar value as f32 from a tensor containing exactly one element.
+    /// Extracts the single scalar value as `f32` from a tensor containing exactly one element.
     ///
-    /// Returns an error if the tensor is not scalar, not F32, or if offset is invalid.
+    /// # Errors
+    /// Returns `NeuraRustError` if:
+    /// - The tensor does not contain exactly one element (`numel() != 1`).
+    /// - The tensor's data type is not `DType::F32`.
+    /// - The tensor is stored on the GPU (currently unsupported for this operation).
+    /// - The internal offset points outside the bounds of the underlying buffer.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let scalar = Tensor::new(vec![42.0f32], vec![]).unwrap();
+    /// assert_eq!(scalar.item_f32().unwrap(), 42.0);
+    ///
+    /// let vec_t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+    /// assert!(vec_t.item_f32().is_err()); // Not a scalar
+    /// ```
     pub fn item_f32(&self) -> Result<f32, NeuraRustError> {
         let guard = self.read_data();
         if guard.numel() != 1 {
@@ -82,10 +150,29 @@ impl Tensor {
         }
     }
 
-    /// Extracts the single scalar value as f64 from a tensor containing exactly one element.
+    /// Extracts the single scalar value as `f64` from a tensor containing exactly one element.
     ///
-    /// Performs F32 -> F64 conversion if necessary.
-    /// Returns an error if the tensor is not scalar or if offset is invalid.
+    /// If the tensor's data type is `DType::F32`, the value is converted to `f64`.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if:
+    /// - The tensor does not contain exactly one element (`numel() != 1`).
+    /// - The tensor is stored on the GPU (currently unsupported for this operation).
+    /// - The internal offset points outside the bounds of the underlying buffer.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let scalar_f64 = Tensor::new_f64(vec![99.9], vec![]).unwrap();
+    /// assert_eq!(scalar_f64.item_f64().unwrap(), 99.9);
+    ///
+    /// let scalar_f32 = Tensor::new(vec![3.14f32], vec![]).unwrap();
+    /// // Compare against the f32 literal cast to f64 for robust comparison
+    /// assert!((scalar_f32.item_f64().unwrap() - (3.14f32 as f64)).abs() < 1e-9);
+    ///
+    /// let vec_t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+    /// assert!(vec_t.item_f64().is_err()); // Not a scalar
+    /// ```
     pub fn item_f64(&self) -> Result<f64, NeuraRustError> {
         let guard = self.read_data();
         if guard.numel() != 1 {
@@ -118,27 +205,55 @@ impl Tensor {
     // NOTE: get_f32_data / get_f64_data are currently still in mod.rs
     // We can decide later if they belong here.
 
-    /// Acquires a read lock on the tensor's data.
+    /// Acquires a read lock on the tensor's internal [`TensorData`](../tensor_data/struct.TensorData.html).
     ///
-    /// This allows reading the `TensorData` fields immutably.
-    /// The lock is automatically released when the guard goes out of scope.
-    /// Panics if the RwLock is poisoned.
+    /// This returns a read guard, allowing immutable access to the fields of `TensorData`
+    /// (like shape, strides, buffer, requires_grad, etc.).
+    /// The lock is automatically released when the returned guard goes out of scope.
+    /// Useful for accessing multiple properties without repeated locking.
+    ///
+    /// # Panics
+    /// Panics if the internal `RwLock` is poisoned (i.e., a previous write access panicked).
     pub fn read_data(&self) -> std::sync::RwLockReadGuard<'_, crate::tensor_data::TensorData> {
         self.data.read().expect("RwLock poisoned")
     }
 
-    /// Acquires a write lock on the tensor's data.
+    /// Acquires a write lock on the tensor's internal [`TensorData`](../tensor_data/struct.TensorData.html).
     ///
-    /// This allows modifying the `TensorData` fields mutably.
-    /// The lock is automatically released when the guard goes out of scope.
-    /// Panics if the RwLock is poisoned.
+    /// This returns a write guard, allowing mutable access to the fields of `TensorData`.
+    /// **Caution:** Modifying internal fields directly can lead to an inconsistent state
+    /// if not done carefully (e.g., changing shape without updating strides or buffer).
+    /// Prefer using dedicated tensor operations when possible.
+    /// The lock is automatically released when the returned guard goes out of scope.
+    ///
+    /// # Panics
+    /// Panics if the internal `RwLock` is poisoned.
     pub fn write_data(&self) -> std::sync::RwLockWriteGuard<'_, crate::tensor_data::TensorData> {
         self.data.write().expect("RwLock poisoned")
     }
 
-    /// Attempts to get the tensor data as a `Vec<f32>`.
-    /// Returns an error if the tensor is not on the CPU or not F32.
-    /// This method now correctly handles non-contiguous tensors by creating a new Vec.
+    /// Copies the tensor's logical data into a new `Vec<f32>`.
+    ///
+    /// This method correctly handles tensors that are views (non-contiguous)
+    /// by iterating through the logical elements according to shape, strides, and offset,
+    /// and copying them into a newly allocated, contiguous `Vec<f32>`.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if:
+    /// - The tensor is not stored on the `CPU`.
+    /// - The tensor's data type is not `DType::F32`.
+    /// - An internal error occurs during index calculation (e.g., offset out of bounds).
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+    /// assert_eq!(t.get_f32_data().unwrap(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    ///
+    /// // Example with a view (e.g., transpose - needs transpose impl)
+    /// // let transposed = t.transpose(0, 1).unwrap(); // Assume shape [3, 2], non-contiguous
+    /// // assert_eq!(transposed.get_f32_data().unwrap(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]); // Logical order
+    /// ```
     pub fn get_f32_data(&self) -> Result<Vec<f32>, NeuraRustError> {
         let guard = self.read_data();
         if guard.device != StorageDevice::CPU {
@@ -188,8 +303,30 @@ impl Tensor {
         Ok(result_vec)
     }
 
-    /// Attempts to get the tensor data as a `Vec<f64>`.
-    /// Returns an error if the tensor is not on the CPU or not F64.
+    /// Copies the tensor's logical data into a new `Vec<f64>`.
+    ///
+    /// This method correctly handles tensors that are views (non-contiguous)
+    /// by iterating through the logical elements according to shape, strides, and offset,
+    /// and copying them into a newly allocated, contiguous `Vec<f64>`.
+    /// If the tensor's `DType` is `F32`, the values are converted to `f64` during the copy.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if:
+    /// - The tensor is not stored on the `CPU`.
+    /// - The tensor's data type is neither `DType::F32` nor `DType::F64`.
+    /// - An internal error occurs during index calculation.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t_f64 = Tensor::new_f64(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+    /// assert_eq!(t_f64.get_f64_data().unwrap(), vec![1.0, 2.0, 3.0]);
+    ///
+    /// let t_f32 = Tensor::new(vec![1.5f32, 2.5f32], vec![2]).unwrap();
+    /// let data_f64 = t_f32.get_f64_data().unwrap();
+    /// assert!((data_f64[0] - 1.5).abs() < 1e-9);
+    /// assert!((data_f64[1] - 2.5).abs() < 1e-9);
+    /// ```
     pub fn get_f64_data(&self) -> Result<Vec<f64>, NeuraRustError> {
         let guard = self.read_data();
         if guard.device != StorageDevice::CPU {
@@ -199,43 +336,59 @@ impl Tensor {
                 operation: "get_f64_data".to_string(),
             });
         }
-        if guard.dtype != DType::F64 {
-            return Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: guard.dtype,
-                operation: "get_f64_data".to_string(),
-            });
-        }
-        
-        let buffer_arc = guard.buffer().try_get_cpu_f64()?;
-        let underlying_data: &Vec<f64> = buffer_arc;
 
         let numel = guard.numel();
         let mut result_vec = Vec::with_capacity(numel);
-
         if numel == 0 {
             return Ok(result_vec);
         }
 
-        for i in 0..numel {
-            let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
-            let physical_offset = guard.get_offset(&coords);
-
-            if physical_offset >= underlying_data.len() {
-                 return Err(NeuraRustError::InternalError(format!(
-                    "Calculated physical offset {} is out of bounds for F64 buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
-                    physical_offset,
-                    underlying_data.len(),
-                    i,
-                    coords,
-                    guard.shape,
-                    guard.strides,
-                    guard.offset
-                )));
+        match guard.dtype {
+            DType::F64 => {
+                let buffer_arc = guard.buffer().try_get_cpu_f64()?;
+                let underlying_data: &Vec<f64> = buffer_arc;
+                for i in 0..numel {
+                    let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+                    let physical_offset = guard.get_offset(&coords);
+                    if physical_offset >= underlying_data.len() {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "Calculated physical offset {} is out of bounds for F64 buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                            physical_offset, underlying_data.len(), i, coords, guard.shape, guard.strides, guard.offset
+                        )));
+                    }
+                    result_vec.push(underlying_data[physical_offset]);
+                }
             }
-            result_vec.push(underlying_data[physical_offset]);
+            DType::F32 => {
+                let buffer_arc = guard.buffer().try_get_cpu_f32()?;
+                let underlying_data: &Vec<f32> = buffer_arc;
+                 for i in 0..numel {
+                    let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+                    let physical_offset = guard.get_offset(&coords);
+                    if physical_offset >= underlying_data.len() {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "Calculated physical offset {} is out of bounds for F32 buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                            physical_offset, underlying_data.len(), i, coords, guard.shape, guard.strides, guard.offset
+                        )));
+                    }
+                    // Convert F32 to F64
+                    result_vec.push(underlying_data[physical_offset] as f64);
+                 }
+            }
+             // Future: Add other types if conversion is meaningful
+             // DType::I64 => { ... }
+             // The below pattern is unreachable because DType only has F32 and F64 variants currently.
+             /*
+             other_dtype => {
+                 return Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::F64, // Or F32 if we only allow that conversion
+                    actual: other_dtype,
+                    operation: "get_f64_data requires F64 or F32".to_string(),
+                });
+            }
+            */
         }
-        
+
         Ok(result_vec)
     }
 }

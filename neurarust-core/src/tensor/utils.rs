@@ -2,12 +2,28 @@ use crate::error::NeuraRustError;
 use std::cmp::max;
 
 /// Calculates the strides for a given shape.
-/// Strides represent the number of elements to skip in the flattened data array
-/// to move one step along each dimension.
 ///
-/// Example:
-/// shape = [2, 3] -> strides = [3, 1]
-/// shape = [2, 2, 2] -> strides = [4, 2, 1]
+/// Strides represent the number of elements to skip in the flattened data array
+/// to move one step along each dimension. For a contiguous tensor (like one
+/// created directly from a flat vector), the strides are calculated based on
+/// the dimensions from right to left.
+///
+/// # Arguments
+/// * `shape`: A slice representing the dimensions of the tensor.
+///
+/// # Returns
+/// A `Vec<usize>` containing the strides corresponding to each dimension.
+/// Returns an empty vector if the shape is empty (scalar case).
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::utils::calculate_strides;
+///
+/// assert_eq!(calculate_strides(&[2, 3]), vec![3, 1]); // Stride for dim 0 is 3, for dim 1 is 1
+/// assert_eq!(calculate_strides(&[2, 2, 2]), vec![4, 2, 1]);
+/// assert_eq!(calculate_strides(&[5]), vec![1]); // 1D tensor
+/// assert_eq!(calculate_strides(&[]), vec![]); // Scalar tensor
+/// ```
 pub fn calculate_strides(shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
         return vec![];
@@ -22,13 +38,52 @@ pub fn calculate_strides(shape: &[usize]) -> Vec<usize> {
 
 /// Determines the output shape resulting from broadcasting two input shapes.
 ///
-/// Follows NumPy/PyTorch broadcasting rules:
-/// 1. If the shapes have different numbers of dimensions, prepend 1s to the shorter shape.
-/// 2. Compare dimensions element-wise from right to left.
-/// 3. Dimensions are compatible if they are equal, or one of them is 1.
-/// 4. The resulting dimension size is the maximum of the two compared dimensions (if one is 1, it's the other dimension).
+/// Broadcasting allows operations between tensors of different shapes if their shapes
+/// are compatible according to certain rules. This function implements the standard
+/// broadcasting logic used in libraries like NumPy and PyTorch.
 ///
-/// Returns `Ok(broadcasted_shape)` if the shapes are compatible, `Err(NeuraRustError::BroadcastError)` otherwise.
+/// # Rules for Broadcasting:
+/// 1. If the tensors have different numbers of dimensions, the shape of the one with fewer
+///    dimensions is padded with ones on its leading (left) side.
+/// 2. The function then compares the shapes element-wise, starting from the trailing dimensions.
+/// 3. Two dimensions are compatible if:
+///    a. They are equal.
+///    b. One of them is 1.
+///    c. One of them is 0 (results in a 0-sized dimension, compatible with any size including 1 or 0).
+/// 4. If dimensions are compatible, the resulting dimension size is the maximum of the two.
+///    If one dimension is 0, the resulting dimension is 0.
+///
+/// # Arguments
+/// * `shape_a`: The shape of the first tensor.
+/// * `shape_b`: The shape of the second tensor.
+///
+/// # Returns
+/// * `Ok(Vec<usize>)`: The broadcasted shape if the input shapes are compatible.
+/// * `Err(NeuraRustError::BroadcastError)`: If the shapes are incompatible according to the rules.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::utils::broadcast_shapes;
+///
+/// // Standard broadcasting
+/// assert_eq!(broadcast_shapes(&[5, 3], &[3]), Ok(vec![5, 3]));
+/// assert_eq!(broadcast_shapes(&[5, 1], &[3]), Ok(vec![5, 3]));
+/// assert_eq!(broadcast_shapes(&[1, 3], &[5, 1]), Ok(vec![5, 3]));
+///
+/// // Broadcasting with a scalar (empty shape)
+/// assert_eq!(broadcast_shapes(&[2, 3], &[]), Ok(vec![2, 3]));
+/// assert_eq!(broadcast_shapes(&[], &[2, 3]), Ok(vec![2, 3]));
+///
+/// // Broadcasting involving zero dimensions
+/// assert_eq!(broadcast_shapes(&[5, 0], &[3]), Ok(vec![5, 0])); // [5, 0] vs [1, 3] -> dim 0 mismatch is ok, result dim 0
+/// assert_eq!(broadcast_shapes(&[5, 3], &[0]), Ok(vec![5, 0])); // Error? No, [5,3] vs [1,0] -> 3 vs 0 -> 0. 5 vs 1 -> 5. Result [5,0]
+/// assert_eq!(broadcast_shapes(&[0], &[3]), Ok(vec![0])); // [0] vs [3] -> 0
+/// assert_eq!(broadcast_shapes(&[0, 1], &[0, 5]), Ok(vec![0, 5])); // [0,1] vs [0,5] -> 1 vs 5 -> 5. 0 vs 0 -> 0.
+///
+/// // Incompatible shapes
+/// assert!(broadcast_shapes(&[5, 3], &[4, 1]).is_err());
+/// assert!(broadcast_shapes(&[2, 3], &[2, 4]).is_err());
+/// ```
 pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usize>, NeuraRustError> {
     let rank_a = shape_a.len();
     let rank_b = shape_b.len();
@@ -65,7 +120,55 @@ pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usiz
 }
 
 /// Converts a linear index into multi-dimensional coordinates based on shape.
-/// Panics if the index is out of bounds for the given shape.
+///
+/// Given a flat index into the tensor's underlying 1D data buffer, this function
+/// calculates the corresponding coordinates in the multi-dimensional tensor space.
+/// It assumes a standard row-major layout (C-style).
+///
+/// # Arguments
+/// * `index`: The linear index (0-based) into the flattened data array.
+/// * `shape`: A slice representing the dimensions of the tensor.
+///
+/// # Returns
+/// A `Vec<usize>` containing the multi-dimensional coordinates corresponding to the linear index.
+/// Returns an empty vector if the shape is empty (scalar case).
+///
+/// # Panics
+/// Panics if the `index` is out of bounds for the total number of elements
+/// defined by the `shape`. An index of 0 is considered valid even for shapes
+/// containing a zero dimension (representing an empty tensor), in which case
+/// the coordinates returned will contain zeros for the zero-sized dimensions.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::utils::index_to_coord;
+///
+/// let shape = &[2, 3, 4]; // 2*3*4 = 24 elements
+/// assert_eq!(index_to_coord(0, shape), vec![0, 0, 0]);
+/// assert_eq!(index_to_coord(4, shape), vec![0, 1, 0]); // Start of the second row in the first plane
+/// assert_eq!(index_to_coord(11, shape), vec![0, 2, 3]);// Last element of the first plane
+/// assert_eq!(index_to_coord(12, shape), vec![1, 0, 0]);// First element of the second plane
+/// assert_eq!(index_to_coord(23, shape), vec![1, 2, 3]);// Last element
+///
+/// // Scalar case
+/// assert_eq!(index_to_coord(0, &[]), vec![]);
+///
+/// // Empty tensor case
+/// let empty_shape = &[2, 0, 3];
+/// assert_eq!(index_to_coord(0, empty_shape), vec![0, 0, 0]); // Index 0 is valid
+/// ```
+/// ```should_panic
+/// use neurarust_core::tensor::utils::index_to_coord;
+///
+/// let shape = &[2, 3];
+/// index_to_coord(6, shape); // Index out of bounds (0-5 are valid)
+/// ```
+/// ```should_panic
+/// use neurarust_core::tensor::utils::index_to_coord;
+///
+/// let empty_shape = &[2, 0, 3];
+/// index_to_coord(1, empty_shape); // Index > 0 is invalid for empty tensor
+/// ```
 pub fn index_to_coord(index: usize, shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
         // Handle scalar tensor case

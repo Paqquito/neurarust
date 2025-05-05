@@ -5,64 +5,178 @@ use crate::error::NeuraRustError;
 use crate::types::DType;
  // Import necessary types
 
-/// Creates a new tensor filled with zeros with the specified shape.
-/// Currently creates an f32 tensor on the CPU.
+/// Creates a new CPU tensor filled with zeros with the specified shape.
+///
+/// The tensor will have `DType::F32`.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+///
+/// # Returns
+/// A `Result` containing the new tensor or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::zeros;
+///
+/// let t = zeros(&[2, 3]).unwrap();
+/// assert_eq!(t.shape(), &[2, 3]);
+/// assert_eq!(t.get_f32_data().unwrap(), vec![0.0, 0.0, 0.0, 0.0, 0.0, 0.0]);
+/// ```
 pub fn zeros(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let data_vec: Vec<f32> = vec![0.0; numel]; // Create f32 data
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new F64 tensor filled with zeros with the specified shape on the CPU.
+/// Creates a new CPU tensor filled with zeros with the specified shape and `DType::F64`.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+///
+/// # Returns
+/// A `Result` containing the new F64 tensor or a `NeuraRustError`.
 pub fn zeros_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let data_vec: Vec<f64> = vec![0.0; numel]; // Create f64 data
     Tensor::new_f64(data_vec, shape.to_vec())
 }
 
-/// Creates a new tensor filled with ones with the specified shape.
-/// Currently creates an f32 tensor on the CPU.
+/// Creates a new CPU tensor filled with ones with the specified shape.
+///
+/// The tensor will have `DType::F32`.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+///
+/// # Returns
+/// A `Result` containing the new tensor or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::ones;
+///
+/// let t = ones(&[1, 4]).unwrap();
+/// assert_eq!(t.shape(), &[1, 4]);
+/// assert_eq!(t.get_f32_data().unwrap(), vec![1.0, 1.0, 1.0, 1.0]);
+/// ```
 pub fn ones(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let data_vec: Vec<f32> = vec![1.0; numel]; // Create f32 data
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new F64 tensor filled with ones with the specified shape on the CPU.
+/// Creates a new CPU tensor filled with ones with the specified shape and `DType::F64`.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+///
+/// # Returns
+/// A `Result` containing the new F64 tensor or a `NeuraRustError`.
 pub fn ones_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let data_vec: Vec<f64> = vec![1.0; numel]; // Create f64 data
     Tensor::new_f64(data_vec, shape.to_vec())
 }
 
-/// Creates a new tensor filled with a specific value with the specified shape.
-/// Currently creates an f32 tensor on the CPU.
+/// Creates a new CPU tensor filled with a specific value with the specified shape.
+///
+/// The tensor will have `DType::F32`.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+/// * `value`: The `f32` value to fill the tensor with.
+///
+/// # Returns
+/// A `Result` containing the new tensor or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::full;
+///
+/// let t = full(&[2, 2], 3.14f32).unwrap();
+/// assert_eq!(t.shape(), &[2, 2]);
+/// assert_eq!(t.get_f32_data().unwrap(), vec![3.14, 3.14, 3.14, 3.14]);
+/// ```
 pub fn full(shape: &[usize], value: f32) -> Result<Tensor, NeuraRustError> { // value is now f32
     let numel = shape.iter().product();
     let data_vec: Vec<f32> = vec![value; numel]; // Create f32 data
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new F64 tensor filled with a specific value with the specified shape on the CPU.
+/// Creates a new CPU tensor filled with a specific value with the specified shape and `DType::F64`.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+/// * `value`: The `f64` value to fill the tensor with.
+///
+/// # Returns
+/// A `Result` containing the new F64 tensor or a `NeuraRustError`.
 pub fn full_f64(shape: &[usize], value: f64) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let data_vec: Vec<f64> = vec![value; numel]; // Create f64 data
     Tensor::new_f64(data_vec, shape.to_vec())
 }
 
-/// Creates a new CPU F32 Tensor from a Vec<f32> and shape.
-/// (Moved from tensor/mod.rs for consistency)
+/// Creates a new CPU tensor with `DType::F32` from a `Vec<f32>` and shape.
+///
+/// This function takes ownership of the data vector.
+///
+/// # Arguments
+/// * `data_vec`: The `Vec<f32>` containing the tensor data in row-major order.
+/// * `shape`: The desired shape of the tensor as a `Vec<usize>`.
+///
+/// # Errors
+/// Returns `NeuraRustError::TensorCreationError` if the number of elements in `data_vec`
+/// does not match the total number of elements specified by `shape`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::from_vec_f32;
+///
+/// let data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+/// let shape = vec![2, 3];
+/// let t = from_vec_f32(data, shape).unwrap();
+/// assert_eq!(t.shape(), &[2, 3]);
+/// ```
 pub fn from_vec_f32(data_vec: Vec<f32>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     Tensor::new(data_vec, shape)
 }
 
-/// Creates a new CPU F64 Tensor from a Vec<f64> and shape.
+/// Creates a new CPU tensor with `DType::F64` from a `Vec<f64>` and shape.
+///
+/// This function takes ownership of the data vector.
+///
+/// # Arguments
+/// * `data_vec`: The `Vec<f64>` containing the tensor data in row-major order.
+/// * `shape`: The desired shape of the tensor as a `Vec<usize>`.
+///
+/// # Errors
+/// Returns `NeuraRustError::TensorCreationError` if the number of elements in `data_vec`
+/// does not match the total number of elements specified by `shape`.
 pub fn from_vec_f64(data_vec: Vec<f64>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     Tensor::new_f64(data_vec, shape)
 }
 
-/// Creates a new tensor filled with zeros, having the same shape and device as the input tensor.
-/// Creates a tensor of the same DType as the input.
+/// Creates a new CPU tensor filled with zeros, having the same shape, device, and `DType` as the input tensor.
+///
+/// # Arguments
+/// * `tensor`: A reference to the tensor whose properties (shape, dtype, device) should be matched.
+///
+/// # Returns
+/// A `Result` containing the new tensor of zeros or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::{from_vec_f64, zeros_like};
+/// use neurarust_core::DType;
+///
+/// let t1 = from_vec_f64(vec![1.0, 2.0], vec![2]).unwrap();
+/// let z1 = zeros_like(&t1).unwrap();
+/// assert_eq!(z1.shape(), t1.shape());
+/// assert_eq!(z1.dtype(), DType::F64);
+/// assert_eq!(z1.get_f64_data().unwrap(), vec![0.0, 0.0]);
+/// ```
 pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
     // TODO: Later, use tensor.device() to create on the same device.
     let shape = tensor.shape();
@@ -81,8 +195,13 @@ pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
     }
 }
 
-/// Creates a new tensor filled with ones, having the same shape and device as the input tensor.
-/// Creates a tensor of the same DType as the input.
+/// Creates a new CPU tensor filled with ones, having the same shape, device, and `DType` as the input tensor.
+///
+/// # Arguments
+/// * `tensor`: A reference to the tensor whose properties (shape, dtype, device) should be matched.
+///
+/// # Returns
+/// A `Result` containing the new tensor of ones or a `NeuraRustError`.
 pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
     // TODO: Later, use tensor.device() to create on the same device.
     let shape = tensor.shape();
@@ -105,6 +224,27 @@ pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
 // They might need adaptation later, especially regarding DType and Device.
 // For now, let's assume they primarily work with f32 or can be adapted easily later.
 
+/// Creates a 1-D CPU tensor containing a range of values with `DType::F32`.
+///
+/// Generates values from `start` up to (but not including) `end` with a step size of `step`.
+/// Similar to Python's `numpy.arange`.
+///
+/// # Arguments
+/// * `start`: The starting value of the sequence.
+/// * `end`: The end value of the sequence (exclusive).
+/// * `step`: The step size between values.
+///
+/// # Errors
+/// Returns `NeuraRustError::UnsupportedOperation` if the step size is zero or has the wrong sign
+/// (e.g., positive step for `end < start`).
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::arange;
+///
+/// let t = arange(1.0, 5.0, 1.5).unwrap(); // 1.0, 2.5, 4.0
+/// assert_eq!(t.get_f32_data().unwrap(), vec![1.0, 2.5, 4.0]);
+/// ```
 pub fn arange(start: f32, end: f32, step: f32) -> Result<Tensor, NeuraRustError> {
     if (end > start && step <= 0.0) || (end < start && step >= 0.0) || step == 0.0 {
         return Err(NeuraRustError::UnsupportedOperation(
@@ -116,6 +256,26 @@ pub fn arange(start: f32, end: f32, step: f32) -> Result<Tensor, NeuraRustError>
     Tensor::new(data_vec, vec![numel])
 }
 
+/// Creates a 1-D CPU tensor containing evenly spaced values over a specified interval with `DType::F32`.
+///
+/// Generates `steps` values starting from `start` and ending at `end` (inclusive).
+/// Similar to Python's `numpy.linspace`.
+///
+/// # Arguments
+/// * `start`: The starting value of the sequence.
+/// * `end`: The ending value of the sequence.
+/// * `steps`: The total number of steps (samples) to generate.
+///
+/// # Errors
+/// Returns `NeuraRustError::UnsupportedOperation` if `steps` is less than 2.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::linspace;
+///
+/// let t = linspace(0.0, 10.0, 5).unwrap(); // 0.0, 2.5, 5.0, 7.5, 10.0
+/// assert_eq!(t.get_f32_data().unwrap(), vec![0.0, 2.5, 5.0, 7.5, 10.0]);
+/// ```
 pub fn linspace(start: f32, end: f32, steps: usize) -> Result<Tensor, NeuraRustError> {
     if steps < 2 {
         return Err(NeuraRustError::UnsupportedOperation(
@@ -130,6 +290,24 @@ pub fn linspace(start: f32, end: f32, steps: usize) -> Result<Tensor, NeuraRustE
     Tensor::new(data_vec, vec![steps])
 }
 
+/// Creates a 2-D CPU identity matrix (tensor) with `DType::F32`.
+///
+/// Generates an `n x n` tensor with ones on the diagonal and zeros elsewhere.
+///
+/// # Arguments
+/// * `n`: The size of the square matrix (number of rows and columns).
+///
+/// # Returns
+/// A `Result` containing the identity tensor or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::eye;
+///
+/// let t = eye(3).unwrap();
+/// assert_eq!(t.shape(), &[3, 3]);
+/// assert_eq!(t.get_f32_data().unwrap(), vec![1.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 1.0]);
+/// ```
 pub fn eye(n: usize) -> Result<Tensor, NeuraRustError> {
     let mut data_vec = vec![0.0f32; n * n];
     for i in 0..n {
@@ -138,12 +316,19 @@ pub fn eye(n: usize) -> Result<Tensor, NeuraRustError> {
     Tensor::new(data_vec, vec![n, n])
 }
 
-// Note: rand and randn should ideally take a device argument later
-// and potentially use device-specific RNGs (e.g., cuRAND).
-
 use rand::Rng;
 use rand_distr::{Distribution, StandardNormal};
 
+/// Creates a CPU tensor with the given shape filled with random values from a uniform distribution between 0.0 and 1.0.
+///
+/// The tensor will have `DType::F32`.
+/// Uses the `rand` crate for random number generation.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+///
+/// # Returns
+/// A `Result` containing the new random tensor or a `NeuraRustError`.
 pub fn rand(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let mut rng = rand::thread_rng();
@@ -151,6 +336,16 @@ pub fn rand(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     Tensor::new(data_vec, shape.to_vec())
 }
 
+/// Creates a CPU tensor with the given shape filled with random values from a standard normal distribution (mean 0, variance 1).
+///
+/// The tensor will have `DType::F32`.
+/// Uses the `rand` and `rand_distr` crates for random number generation.
+///
+/// # Arguments
+/// * `shape`: A slice defining the dimensions of the tensor.
+///
+/// # Returns
+/// A `Result` containing the new random tensor or a `NeuraRustError`.
 pub fn randn(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let mut rng = rand::thread_rng();

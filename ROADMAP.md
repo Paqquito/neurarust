@@ -33,17 +33,19 @@
             *   [✅] Address remaining warnings in `tests/`. (grad_check_test.rs, tensor_ops_test.rs, view_ops_test.rs etc.)
             *   [✅] Re-run `cargo clippy --all-targets -- -D warnings` until no warnings remain.
         *   **Step 1.A.4: `rustdoc` Documentation - Core Structures**
-            *   [✅] Add module-level docs (`//!`) for `neurarust-core/src/lib.rs`.
-            *   [✅] Add docs (`///`) for `NeuraRustError` enum and variants (`src/error.rs`).
-            *   [✅] Add docs for `DType`, `StorageDevice` enums (`src/types.rs`, `src/device.rs`).
-            *   [✅] Add docs for `Buffer`, `CpuBuffer` enums and methods (`src/buffer.rs`).
-            *   [✅] Add docs for `TensorData` struct and its public methods (`src/tensor_data.rs`).
-            *   [✅] Add docs for the main `Tensor` struct (`src/tensor/mod.rs`).
+            *   [✅] Module-level docs for `lib.rs`, `error.rs`, `types.rs`, `device.rs`, `buffer.rs`, `tensor_data.rs`, `tensor/mod.rs`.
+            *   [✅] Structs: `NeuraRustError`, `DType`, `StorageDevice`, `Buffer`, `CpuBuffer`, `TensorData`, `Tensor`.
+            *   [✅] Methods/Constructors: `Buffer::try_get_cpu_f32/f64`, `TensorData::new/new_f64/new_view/buffer/...`, `Tensor::new/new_f64`.
         *   **Step 1.A.5: `rustdoc` Documentation - Tensor Methods & Traits**
-            *   [ ] Add docs for creation functions (`create.rs`).
-            *   [ ] Add docs for `TensorImpl`, `BasicTensorOps`, `TensorViewOps`, `TensorIndexing` traits (`traits.rs`).
-            *   [ ] Add docs for public methods implemented in `tensor_impl.rs`, `shape_impl.rs`, `view_methods.rs`, `indexing_impl.rs`. Include examples (`/// ````).
-            *   [ ] Add docs for utility functions (`utils.rs`).
+            *   [✅] Creation Functions: `tensor/create.rs` (`zeros`, `ones`, `full`, `from_vec*`, `*_like`, `arange`, `linspace`, `eye`, `rand*`)
+            *   [✅] Utility Functions: `tensor/utils.rs` (`calculate_strides`, `broadcast_shapes`, `index_to_coord`)
+            *   [✅] Traits: `tensor/traits.rs` (`Clone`, `Debug`, `PartialEq`, `Eq`, `Hash`, `TensorImpl`)
+            *   [✅] Tensor Method Impls:
+                *   [✅] `tensor/accessors.rs` (`shape`, `strides`, `dtype`, `device`, `rank`, `numel`, `is_contiguous`, `item_*`, `*_data`, `get_*_data`)
+                *   [✅] `tensor/autograd_methods.rs` (`requires_grad`, `set_requires_grad`, `grad`, `grad_fn`, `set_grad_fn`, `acc_grad`, `backward`, `detach`, `clear_grad`)
+                *   [✅] `tensor/reduction_methods.rs` (`mean`, `max`)
+                *   [✅] `tensor/view_methods.rs` (`slice`, `transpose`, `permute`, `reshape`, `contiguous`)
+                *   [-] `tensor/data_conversion.rs` (Methods seem covered in `accessors.rs` and `view_methods.rs`)
         *   **Step 1.A.6: `rustdoc` Documentation - Autograd**
             *   [ ] Add module-level docs for `autograd/mod.rs`.
             *   [ ] Add docs for `BackwardOp` trait (`autograd/mod.rs`).
