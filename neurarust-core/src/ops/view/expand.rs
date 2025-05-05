@@ -193,121 +193,14 @@ pub fn expand_op(tensor: &Tensor, target_shape: Vec<usize>) -> Result<Tensor, Ne
 }
 
 // --- Tests ---
+// Link the external test file
+#[cfg(test)]
+#[path = "expand_test.rs"]
+mod tests;
+
+/* --- REMOVED internal tests module --- 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tensor::Tensor;
-    use crate::error::NeuraRustError;
-    use crate::autograd::grad_check::{check_grad, GradCheckError};
-    use std::error::Error;
-
-    #[test]
-    fn test_expand_basic() -> Result<(), Box<dyn Error>> {
-        let t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
-        let expanded = expand_op(&t, vec![3, 2])?;
-        assert_eq!(expanded.shape(), vec![3, 2]);
-        assert_eq!(expanded.strides(), vec![0, 1]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_expand_add_dims() -> Result<(), Box<dyn Error>> {
-        let t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
-        let expanded = expand_op(&t, vec![2, 1, 2])?;
-        assert_eq!(expanded.shape(), vec![2, 1, 2]);
-        assert_eq!(expanded.strides(), vec![0, 0, 1]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_expand_same_shape() -> Result<(), Box<dyn Error>> {
-        let t1 = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
-        let expanded1 = expand_op(&t1, vec![2])?;
-        assert_eq!(expanded1.shape(), vec![2]);
-        assert_eq!(expanded1.strides(), vec![1]);
-
-        let t2 = Tensor::new(vec![1.0], vec![1]).unwrap();
-        let expanded2 = expand_op(&t2, vec![1])?;
-        assert_eq!(expanded2.shape(), vec![1]);
-        assert_eq!(expanded2.strides(), vec![1]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_expand_incompatible_dim() {
-        let t = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
-        let result = expand_op(&t, vec![3, 4]);
-        assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })));
-    }
-
-    #[test]
-    fn test_expand_too_small() {
-        let t = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
-        let result = expand_op(&t, vec![2]);
-        assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })));
-    }
-
-    #[test]
-    fn test_expand_backward_f64() -> Result<(), GradCheckError> {
-        let t = Tensor::new_f64(vec![1.0, 2.0], vec![2])?;
-        t.set_requires_grad(true)?;
-        let _target_shape = vec![3, 2];
-
-        let expand_fn = |inputs: &[Tensor]| -> Result<Tensor, NeuraRustError> {
-            assert_eq!(inputs.len(), 1);
-            expand_op(&inputs[0], _target_shape.clone())
-        };
-        
-        let output_grad = crate::tensor::ones_f64(&_target_shape).unwrap();
-
-        let result = check_grad(expand_fn, &[t], &output_grad, 1e-5, 1e-7, 1e-5);
-        assert!(result.is_ok());
-        Ok(())
-    }
-
-    #[test]
-    fn test_expand_invalid_rank() {
-        let t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
-        let result = expand_op(&t, vec![2]);
-        assert!(result.is_ok());
-        let expanded = result.unwrap();
-        assert_eq!(expanded.shape(), vec![2]);
-    }
-
-    #[test]
-    fn test_expand_invalid_dim_size_case1() {
-        let t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
-        let result = expand_op(&t, vec![3]);
-        println!("Result for expand([2], [3]): {:?}", result); // Add print for debugging
-        assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })), "Expanding [2] to [3] should fail");
-    }
-
-    #[test]
-    fn test_expand_invalid_dim_size_case2() { // Split test case 2
-        // Expand dim 1 to 3 and add dim 2 - Should succeed
-        let t2 = Tensor::new(vec![1.0], vec![1]).unwrap();
-        let result2 = expand_op(&t2, vec![2, 3]);
-         println!("Result for expand([1], [2, 3]): {:?}", result2); // Add print for debugging
-        assert!(result2.is_ok(), "Expanding [1] to [2, 3] should succeed");
-        let expanded = result2.unwrap();
-        assert_eq!(expanded.shape(), vec![2, 3], "Shape should be [2, 3]");
-        // Optionally, check strides if needed (should be [0, 0] ? or maybe [0, 1] if t2 stride was 1? Check expand_op logic)
-        // Let's check expand_op calculation: target=[2,3], orig=[1], orig_stride=[1? or 0?]
-        // i=1 (target_dim=3): shape_idx=0 (orig_dim=1, stride=?). stride=0. shape_idx=-1
-        // i=0 (target_dim=2): shape_idx=-1. stride=0.
-        // Result strides should be [0, 0]
-        assert_eq!(expanded.strides(), vec![0, 0], "Strides should be [0, 0]");
-    }
-
-    #[test]
-    fn test_expand_backward() {
-        println!("Skipping test_expand_backward until view ops/tensor methods are adapted and grad check.");
-        // ... (grad check code)
-    }
-
-    #[test]
-    fn test_expand_backward_add_dims() {
-        println!("Skipping test_expand_backward_add_dims until view ops/tensor methods are adapted and grad check.");
-        // ... (grad check code)
-    }
-} 
+    // ... (contenu de l'ancien module de tests) ...
+}
+*/ 
