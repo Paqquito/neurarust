@@ -1,14 +1,12 @@
-use neurarust_core::{
-    error::NeuraRustError,
-    ops::view::SliceArg, // Correct path for SliceArg
-    tensor::Tensor, 
-};
+use neurarust_core::utils::testing::check_tensor_near;
+use neurarust_core::ops::view::slice::SliceArg;
+use neurarust_core::tensor::Tensor;
+use neurarust_core::NeuraRustError;
 use approx::assert_relative_eq;
- // Import Arc for ptr_eq
 
 // Include the common helper module
-mod common;
-use common::create_test_tensor;
+mod common; // Reactivate common module
+use common::create_test_tensor; // Reactivate usage
 
 // --- Slice Tests ---
 
@@ -17,9 +15,9 @@ fn test_simple_slice() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
     let ranges: Vec<SliceArg> = vec![
-        SliceArg::new(0, 1),
-        SliceArg::new(0, 3),
-        SliceArg::new(0, 4),
+        SliceArg::Slice(0, 1, 1),
+        SliceArg::Slice(0, 3, 1),
+        SliceArg::Slice(0, 4, 1),
     ];
     let view = tensor.slice(&ranges).expect("Simple slice failed");
 
@@ -55,9 +53,9 @@ fn test_slice_metadata() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
     let ranges: Vec<SliceArg> = vec![
-        SliceArg::new(1, 2), // Row index 1 -> size 1
-        SliceArg::new(1, 3), // Col indices 1, 2 -> size 2
-        SliceArg::new(0, 2), // Depth indices 0, 1 -> size 2
+        SliceArg::Slice(1, 2, 1),
+        SliceArg::Slice(1, 3, 1),
+        SliceArg::Slice(0, 2, 1),
     ];
     let view = tensor.slice(&ranges).expect("Metadata slice failed");
 
@@ -79,31 +77,35 @@ fn test_slice_invalid_range() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
 
-    // End > size
+    // End > size (should be clamped by normalize_slice, op should succeed)
     let ranges_end: Vec<SliceArg> = vec![
-        SliceArg::new(0, 1),
-        SliceArg::new(0, 4), // Invalid: dim 1 size is 3
-        SliceArg::new(0, 4),
+        SliceArg::Slice(0, 1, 1),
+        SliceArg::Slice(0, 4, 1), // dim size is 3, end=4 should be clamped to 3
+        SliceArg::Slice(0, 4, 1),
     ];
     let result_end = tensor.slice(&ranges_end);
-    // Allow either SliceError or IndexOutOfBounds for end > size
-    assert!(matches!(result_end, Err(NeuraRustError::SliceError { .. }) | Err(NeuraRustError::IndexOutOfBounds { .. })), "Expected SliceError or IndexOutOfBounds for end > size");
+    assert!(result_end.is_ok(), "Slice with end > size should succeed (clamped)");
+    let view_end = result_end.unwrap();
+    // Shape should reflect clamping: [1, 3, 4]
+    assert_eq!(view_end.shape(), vec![1, 3, 4], "Shape mismatch for end > size slice");
 
-    // Start > end
+    // Start > end (should produce empty slice, op should succeed)
     let ranges_start: Vec<SliceArg> = vec![
-        SliceArg::new(0, 1),
-        SliceArg::new(3, 2), // Invalid: start > end
-        SliceArg::new(0, 4),
+        SliceArg::Slice(0, 1, 1),
+        SliceArg::Slice(3, 2, 1), // start=3 > end=2
+        SliceArg::Slice(0, 4, 1),
     ];
     let result_start = tensor.slice(&ranges_start);
-    // Expected: Err(NeuraRustError::SliceError { .. })
-    assert!(matches!(result_start, Err(NeuraRustError::SliceError { .. })), "Expected SliceError for start > end");
+    assert!(result_start.is_ok(), "Slice with start > end should succeed (empty slice)");
+    let view_start = result_start.unwrap();
+    // Shape should be empty along the affected dimension: [1, 0, 4]
+    assert_eq!(view_start.shape(), vec![1, 0, 4], "Shape mismatch for start > end slice");
 
-    // Empty slice (valid)
+    // Empty slice (start == end) (valid)
     let ranges_empty: Vec<SliceArg> = vec![
-        SliceArg::new(0, 1),
-        SliceArg::new(2, 2), // Valid: creates dim of size 0
-        SliceArg::new(0, 4),
+        SliceArg::Slice(0, 1, 1),
+        SliceArg::Slice(2, 2, 1),
+        SliceArg::Slice(0, 4, 1),
     ];
     let result_empty = tensor.slice(&ranges_empty);
     assert!(result_empty.is_ok());
@@ -115,8 +117,8 @@ fn test_slice_wrong_ndim() {
     let data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
     let tensor = create_test_tensor(data, vec![2, 3, 4]);
     let ranges: Vec<SliceArg> = vec![
-        SliceArg::new(0, 1),
-        SliceArg::new(0, 1),
+        SliceArg::Slice(0, 1, 1),
+        SliceArg::Slice(0, 1, 1),
     ];
     let result = tensor.slice(&ranges);
     // Expect SliceError because validate_and_adjust_ranges checks rank
@@ -228,21 +230,21 @@ fn test_is_contiguous() {
     let tensor_permuted_id = tensor_std.permute(&[0, 1, 2]).unwrap();
     assert!(tensor_permuted_id.is_contiguous(), "Identity-permuted tensor view should be contiguous");
     let slice_contig1: Vec<SliceArg> = vec![
-        SliceArg::new(0, 2), // Full dim 0
-        SliceArg::new(0, 3), // Full dim 1
-        SliceArg::new(1, 3), // Inner slice -> contiguous? (Should be [1, 3) -> size 2)
+        SliceArg::Slice(0, 2, 1),
+        SliceArg::Slice(0, 3, 1),
+        SliceArg::Slice(1, 3, 1),
     ];
     assert!(!tensor_std.slice(&slice_contig1).unwrap().is_contiguous(), "Slice on inner dimension should not be contiguous");
     let slice_contig2: Vec<SliceArg> = vec![
-        SliceArg::new(1, 2), // Outer slice -> contiguous
-        SliceArg::new(0, 3),
-        SliceArg::new(0, 4),
+        SliceArg::Slice(1, 2, 1),
+        SliceArg::Slice(0, 3, 1),
+        SliceArg::Slice(0, 4, 1),
     ];
     assert!(tensor_std.slice(&slice_contig2).unwrap().is_contiguous());
     let slice_noncontig: Vec<SliceArg> = vec![
-        SliceArg::new(0, 2),
-        SliceArg::new(1, 3), // Non-full inner slice -> non-contiguous
-        SliceArg::new(0, 4),
+        SliceArg::Slice(0, 2, 1),
+        SliceArg::Slice(1, 3, 1),
+        SliceArg::Slice(0, 4, 1),
     ];
     assert!(!tensor_std.slice(&slice_noncontig).unwrap().is_contiguous());
 }
@@ -328,7 +330,7 @@ fn test_view_creation_requires_grad() {
     tensor.set_requires_grad(true).unwrap();
 
     // Slice
-    let slice_view = tensor.slice(&[SliceArg::new(0, 1), SliceArg::new(0, 2), SliceArg::new(1, 2)]).unwrap();
+    let slice_view = tensor.slice(&[SliceArg::Slice(0, 1, 1), SliceArg::Slice(0, 2, 1), SliceArg::Slice(1, 2, 1)]).unwrap();
     assert!(slice_view.requires_grad(), "Slice view should require grad");
     assert!(slice_view.grad_fn().is_some(), "Slice view should have grad_fn");
 
@@ -366,7 +368,7 @@ fn test_view_ops_dont_require_grad() {
     assert!(!tensor.requires_grad());
 
     // Slice
-    let slice_view = tensor.slice(&[SliceArg::new(0, 1), SliceArg::new(0, 2), SliceArg::new(1, 2)]).unwrap();
+    let slice_view = tensor.slice(&[SliceArg::Slice(0, 1, 1), SliceArg::Slice(0, 2, 1), SliceArg::Slice(1, 2, 1)]).unwrap();
     assert!(!slice_view.requires_grad(), "Slice view should not require grad");
     assert!(slice_view.grad_fn().is_none(), "Slice view should not have grad_fn");
 
@@ -402,7 +404,7 @@ fn test_view_ops_on_scalar() {
 
     // Slice is invalid for 0-dim
     // Expect SliceError due to rank mismatch
-    assert!(matches!(scalar_tensor.slice(&[SliceArg::new(0, 0)]), Err(NeuraRustError::SliceError { .. })));
+    assert!(matches!(scalar_tensor.slice(&[SliceArg::Slice(0, 0, 1)]), Err(NeuraRustError::SliceError { .. })));
 
     // Transpose is invalid for 0-dim
     // Expect IndexOutOfBounds because dims 0 and 0 don't exist for rank 0
@@ -430,7 +432,7 @@ fn test_view_ops_on_zero_dim_tensor() {
     assert!(zero_dim_tensor.is_contiguous());
 
     // Slice
-    let sliced = zero_dim_tensor.slice(&[SliceArg::new(0, 1), SliceArg::new(0, 0), SliceArg::new(1, 2)]);
+    let sliced = zero_dim_tensor.slice(&[SliceArg::Slice(0, 1, 1), SliceArg::Slice(0, 0, 1), SliceArg::Slice(1, 2, 1)]);
     assert!(sliced.is_ok());
     assert_eq!(sliced.unwrap().shape(), vec![1, 0, 1]);
 
@@ -456,4 +458,130 @@ fn test_view_ops_on_zero_dim_tensor() {
     // Contiguous
     let contiguous_zero = zero_dim_tensor.contiguous().unwrap();
     assert_eq!(zero_dim_tensor, contiguous_zero);
+}
+
+#[test]
+fn test_slice_simple() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![5]).unwrap();
+    let expected = neurarust_core::tensor::create::from_vec_f32(vec![2.0, 3.0, 4.0], vec![3]).unwrap();
+    let sliced = a.slice(&[SliceArg::Slice(1, 4, 1)]).unwrap();
+    check_tensor_near(&sliced, &expected.shape(), &expected.get_f32_data().unwrap(), 1e-6);
+}
+
+#[test]
+fn test_slice_2d() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap();
+    // Slice rows 0..1 (exclusive), columns 1..3 (exclusive)
+    let expected = neurarust_core::tensor::create::from_vec_f32(vec![2., 3.], vec![1, 2]).unwrap();
+    let sliced = a
+        .slice(&[SliceArg::Slice(0, 1, 1), SliceArg::Slice(1, 3, 1)])
+        .unwrap();
+    check_tensor_near(&sliced, &expected.shape(), &expected.get_f32_data().unwrap(), 1e-6);
+}
+
+#[test]
+fn test_slice_full_range() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap();
+    let expected = a.clone(); // Slicing with full range should be identity
+    let sliced = a
+        .slice(&[SliceArg::Slice(0, 2, 1), SliceArg::Slice(0, 3, 1)])
+        .unwrap();
+    check_tensor_near(&sliced, &expected.shape(), &expected.get_f32_data().unwrap(), 1e-6);
+}
+
+#[test]
+fn test_slice_empty() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3., 4., 5., 6.], vec![2, 3]).unwrap();
+    // Slice rows 1..1 -> empty
+    let expected_shape = vec![0, 3];
+    let expected = Tensor::new(Vec::<f32>::new(), expected_shape.clone()).unwrap();
+    let sliced = a
+        .slice(&[SliceArg::Slice(1, 1, 1), SliceArg::Slice(0, 3, 1)])
+        .unwrap();
+    check_tensor_near(&sliced, &expected_shape, &expected.get_f32_data().unwrap(), 1e-6);
+
+    // Slice cols 2..2 -> empty
+    let expected_cols_shape = vec![2, 0];
+    let expected_cols = Tensor::new(Vec::<f32>::new(), expected_cols_shape.clone()).unwrap();
+    let sliced_cols = a
+        .slice(&[SliceArg::Slice(0, 2, 1), SliceArg::Slice(2, 2, 1)])
+        .unwrap();
+    check_tensor_near(&sliced_cols, &expected_cols_shape, &expected_cols.get_f32_data().unwrap(), 1e-6);
+}
+
+#[test]
+fn test_slice_step() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![0., 1., 2., 3., 4., 5., 6., 7., 8., 9.], vec![10]).unwrap();
+    let expected = neurarust_core::tensor::create::from_vec_f32(vec![0., 2., 4., 6., 8.], vec![5]).unwrap();
+    let sliced = a.slice(&[SliceArg::Slice(0, 10, 2)]).unwrap(); // Step 2
+    check_tensor_near(&sliced, &expected.shape(), &expected.get_f32_data().unwrap(), 1e-6);
+
+    let expected_rev = neurarust_core::tensor::create::from_vec_f32(vec![9., 7., 5., 3., 1.], vec![5]).unwrap();
+    // Note: Negative step requires careful range handling, assuming positive for now
+    // If negative steps were implemented:
+    // let sliced_rev = a.slice(&[SliceArg::Slice(9, -1, -2)]).unwrap(); // Hypothetical negative step
+    // check_tensor_near(&sliced_rev, &expected_rev.shape(), &expected_rev.get_f32_data().unwrap(), 1e-6);
+    let _ = expected_rev; // Avoid unused warning for now
+}
+
+#[test]
+fn test_slice_requires_grad() {
+    let a_res = neurarust_core::tensor::create::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]);
+    let a = a_res.unwrap();
+    a.set_requires_grad(true).unwrap(); // Unwrap after setting grad
+    let sliced = a.slice(&[SliceArg::Slice(0, 2, 1)]).unwrap(); // Now call slice
+    assert!(sliced.requires_grad());
+    assert!(sliced.grad_fn().is_some());
+    assert_eq!(sliced.shape(), &[2]);
+}
+
+#[test]
+fn test_slice_no_grad() {
+    let a_res = neurarust_core::tensor::create::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]);
+    let a = a_res.unwrap();
+    a.set_requires_grad(false).unwrap(); // Unwrap after setting grad
+    let sliced = a.slice(&[SliceArg::Slice(0, 2, 1)]).unwrap(); // Now call slice
+    assert!(!sliced.requires_grad());
+    assert!(sliced.grad_fn().is_none());
+}
+
+#[test]
+fn test_slice_error_rank_mismatch() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3.], vec![3]).unwrap();
+    let result = a.slice(&[SliceArg::Slice(0, 1, 1), SliceArg::Slice(0, 1, 1)]);
+    assert!(matches!(result, Err(NeuraRustError::SliceError { .. })));
+}
+
+#[test]
+fn test_slice_error_out_of_bounds() {
+    let a = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3.], vec![3]).unwrap();
+    
+    // Test 1: End index (4) > dimension size (3). Should succeed and clamp end to 3.
+    let result = a.slice(&[SliceArg::Slice(0, 4, 1)]);
+    assert!(result.is_ok(), "Slice end out of bounds should succeed (clamp)");
+    let view = result.unwrap();
+    assert_eq!(view.shape(), vec![3], "Shape mismatch for end out of bounds slice"); // Shape should be [3] (0..3)
+    check_tensor_near(&view, &vec![3], &[1.0, 2.0, 3.0], 1e-6);
+
+    // Test 2: Start index (3) == dimension size (3). Should succeed (empty slice).
+    let result_start = a.slice(&[SliceArg::Slice(3, 3, 1)]);
+    assert!(result_start.is_ok(), "Slice start == size should succeed (empty)");
+    let view_start = result_start.unwrap();
+    assert_eq!(view_start.shape(), vec![0], "Shape mismatch for start == size slice"); // Shape should be [0]
+
+    // Test 3: 2D tensor, second dimension slice end (3) > size (2). Should succeed and clamp end to 2.
+    let a_2d = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3., 4.], vec![2, 2]).unwrap();
+    let result_2d = a_2d.slice(&[SliceArg::Slice(0, 2, 1), SliceArg::Slice(1, 3, 1)]);
+    assert!(result_2d.is_ok(), "2D Slice end out of bounds should succeed (clamp)");
+    let view_2d = result_2d.unwrap();
+    assert_eq!(view_2d.shape(), vec![2, 1], "Shape mismatch for 2D end out of bounds slice"); // Shape [2, 1] (0..2, 1..2)
+    // Expected values: [[2], [4]] -> contiguous [2, 4]
+    check_tensor_near(&view_2d.contiguous().unwrap(), &vec![2, 1], &[2.0, 4.0], 1e-6);
+}
+
+#[test]
+fn test_slice_error_invalid_step() {
+     let a = neurarust_core::tensor::create::from_vec_f32(vec![1., 2., 3.], vec![3]).unwrap();
+     let result = a.slice(&[SliceArg::Slice(0, 3, 0)]);
+     assert!(matches!(result, Err(NeuraRustError::SliceError { message }) if message == "Step cannot be zero"));
 } 

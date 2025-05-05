@@ -1,4 +1,5 @@
 use crate::device::StorageDevice;
+use crate::types::DType; // Import DType
 use thiserror::Error; // Import StorageDevice
 
 /// Custom error type for the NeuraRust framework.
@@ -121,6 +122,13 @@ pub enum NeuraRustError {
 
     #[error("Backward pass error: A cycle was detected in the computation graph.")]
     BackwardGraphCycle,
+
+    #[error("Data type mismatch for operation '{operation}': expected {expected:?}, got {actual:?}")]
+    DataTypeMismatch {
+        expected: DType,
+        actual: DType,
+        operation: String,
+    },
 
     // Add more specific errors as needed
 }

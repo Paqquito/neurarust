@@ -108,42 +108,38 @@ pub fn matmul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
 
 // --- matmul_kernel (Private Calculation Core) ---
 
-/// Private kernel for matrix multiplication calculation. F32 CPU implementation.
-fn matmul_kernel(
+/// Private kernel for matrix multiplication calculation. CPU implementation, generic over T.
+fn matmul_kernel<T>(
     m: usize,
-    k: usize, // Inner dimension (k1 == k2)
+    k: usize,
     n: usize,
-    a_buffer: &[f32],
+    a_buffer: &[T],
     a_strides: &[usize],
     a_offset: usize,
-    b_buffer: &[f32],
+    b_buffer: &[T],
     b_strides: &[usize],
     b_offset: usize,
-) -> Result<Vec<f32>, NeuraRustError> {
-    let mut output_data = vec![0.0f32; m * n];
-    // Output is contiguous, calculate its strides implicitly or pass them?
-    // For simplicity, calculate index directly: output_physical_idx = i * n + j;
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Copy + Default + std::ops::AddAssign + std::ops::Mul<Output = T> + Debug
+{
+    let mut output_data = vec![T::default(); m * n]; // Use T::default()
 
-    for i in 0..m { // Row of output
-        for j in 0..n { // Col of output
-            let mut sum = 0.0f32;
-            for k_idx in 0..k { // Inner dimension
-                // Calculate physical index for A[i, k_idx]
+    for i in 0..m {
+        for j in 0..n {
+            let mut sum = T::default(); // Use T::default()
+            for k_idx in 0..k {
                 let a_physical_idx = a_offset + i * a_strides[0] + k_idx * a_strides[1];
-
-                // Calculate physical index for B[k_idx, j]
                 let b_physical_idx = b_offset + k_idx * b_strides[0] + j * b_strides[1];
 
-                // Bounds check (optional but safer)
                 if a_physical_idx >= a_buffer.len() || b_physical_idx >= b_buffer.len() {
                     return Err(NeuraRustError::InternalError(
                         format!("Matmul kernel index out of bounds ({},{},{}) -> A[{}], B[{}]", i, j, k_idx, a_physical_idx, b_physical_idx)
                     ));
                 }
-
+                // Use AddAssign and Mul traits for T
                 sum += a_buffer[a_physical_idx] * b_buffer[b_physical_idx];
             }
-            // Calculate physical index for Output[i, j] (Contiguous)
             let output_physical_idx = i * n + j;
             if output_physical_idx >= output_data.len() {
                  return Err(NeuraRustError::InternalError(
@@ -158,28 +154,42 @@ fn matmul_kernel(
 
 // --- matmul_internal Implementation (Core Logic, No Autograd Setup) ---
 
-/// Internal implementation of 2D matrix multiplication without autograd setup. F32 CPU.
+/// Internal implementation of 2D matrix multiplication without autograd setup.
+/// Handles F32 and F64 CPU tensors.
 fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
-    // --- Device and DType Checks ---
-    // ... (Assume CPU F32 for now)
+    // --- Device Check ---
+    if a_guard.device != StorageDevice::CPU || b_guard.device != StorageDevice::CPU {
+         return Err(NeuraRustError::DeviceMismatch {
+            operation: "matmul_internal".to_string(),
+            expected: StorageDevice::CPU,
+            actual: if a_guard.device != StorageDevice::CPU { a_guard.device } else { b_guard.device }
+         });
+    }
+
+    // --- DType Check --- 
+    if a_guard.dtype != b_guard.dtype {
+         return Err(NeuraRustError::DataTypeMismatch {
+            operation: "matmul_internal".to_string(),
+            expected: a_guard.dtype,
+            actual: b_guard.dtype
+        });
+    }
+    let dtype = a_guard.dtype; // Store dtype for dispatch
 
     // --- Rank Check ---
     if a_guard.shape.len() != 2 || b_guard.shape.len() != 2 {
-        // Correctly return RankMismatch error
         return Err(NeuraRustError::RankMismatch {
             expected: 2, 
-            actual: a_guard.shape.len().max(b_guard.shape.len()), // Report the max rank found
+            actual: a_guard.shape.len().max(b_guard.shape.len())
         });
     }
 
     // --- Shape Compatibility Check ---
     let a_shape = &a_guard.shape;
     let b_shape = &b_guard.shape;
-
-    // --- Inner Dimension Check ---
     let m = a_shape[0];
     let k1 = a_shape[1];
     let k2 = b_shape[0];
@@ -187,27 +197,10 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     if k1 != k2 {
         return Err(NeuraRustError::ShapeMismatch {
             operation: "matmul (inner dim)".to_string(),
-            // Format shapes into Strings
-            expected: format!("[{}, {}]", m, k1), // Or some way to show inner dim match
-            actual: format!("[{}, {}]", k2, n),
+            expected: format!("Inner dimension matching {}, got ({}, {})", k1, k1, k2),
+            actual: format!("Shapes {:?} @ {:?}", a_shape, b_shape)
         });
     }
-
-    // --- Device Check ---
-    if a_guard.device != StorageDevice::CPU || b_guard.device != StorageDevice::CPU
-        || a_guard.dtype != DType::F32 || b_guard.dtype != DType::F32
-    {
-        // Provide more specific error?
-        return Err(NeuraRustError::UnsupportedOperation(
-            "Matmul currently only supports F32 tensors on CPU".to_string(),
-        ));
-    }
-
-    // --- Extract data for kernel ---
-    let a_buffer_arc = a_guard.buffer().try_get_cpu_f32()?.clone();
-    let b_buffer_arc = b_guard.buffer().try_get_cpu_f32()?.clone();
-    let a_buffer_slice = a_buffer_arc.as_slice();
-    let b_buffer_slice = b_buffer_arc.as_slice();
 
     // Clone strides and offset BEFORE dropping the guards
     let a_strides = a_guard.strides.clone();
@@ -215,28 +208,41 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_offset = a_guard.offset;
     let b_offset = b_guard.offset;
 
-    // Release guards before calling kernel
-    drop(a_guard);
-    drop(b_guard);
-
-    // --- Call Kernel ---
+    // --- Dispatch based on DType for Kernel Call & Output Creation ---
     let output_shape = vec![m, n];
-    let output_data = matmul_kernel(
-        m,
-        k1, // k1 == k2
-        n,
-        a_buffer_slice,
-        &a_strides, // Pass as slice
-        a_offset,
-        b_buffer_slice,
-        &b_strides, // Pass as slice
-        b_offset,
-    )?;
+    let output_tensor = match dtype {
+        DType::F32 => {
+            let a_buffer_arc = a_guard.buffer().try_get_cpu_f32()?.clone();
+            let b_buffer_arc = b_guard.buffer().try_get_cpu_f32()?.clone();
+            let a_buffer_slice = a_buffer_arc.as_slice();
+            let b_buffer_slice = b_buffer_arc.as_slice();
+            drop(a_guard); drop(b_guard); // Drop guards
 
-    // --- Create Output Tensor ---
-    Tensor::new(output_data, output_shape)
+            let output_data = matmul_kernel(
+                m, k1, n,
+                a_buffer_slice, &a_strides, a_offset,
+                b_buffer_slice, &b_strides, b_offset,
+            )?;
+            Tensor::new(output_data, output_shape)?
+        }
+        DType::F64 => {
+            let a_buffer_arc = a_guard.buffer().try_get_cpu_f64()?.clone();
+            let b_buffer_arc = b_guard.buffer().try_get_cpu_f64()?.clone();
+            let a_buffer_slice = a_buffer_arc.as_slice();
+            let b_buffer_slice = b_buffer_arc.as_slice();
+            drop(a_guard); drop(b_guard); // Drop guards
+
+            let output_data: Vec<f64> = matmul_kernel(
+                m, k1, n,
+                a_buffer_slice, &a_strides, a_offset,
+                b_buffer_slice, &b_strides, b_offset,
+            )?;
+            Tensor::new_f64(output_data, output_shape)?
+        }
+    };
+
+    Ok(output_tensor)
 }
-
 
 // --- Tests ---
 #[cfg(test)]

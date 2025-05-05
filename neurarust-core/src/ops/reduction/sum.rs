@@ -25,15 +25,20 @@ impl BackwardOp for SumAxesBackward {
         let target_shape = self.input_shape.clone();
         let target_rank = target_shape.len();
 
-        // Ensure grad_output is F32 CPU
+        // --- DType Handling --- 
         let grad_output_guard = grad_output.read_data();
-        if grad_output_guard.dtype != DType::F32 || grad_output_guard.device != StorageDevice::CPU {
-            return Err(NeuraRustError::UnsupportedOperation(
-                "Sum backward currently only supports F32 CPU gradients.".to_string()
-            ));
+        let grad_dtype = grad_output_guard.dtype;
+
+        // --- Device Check --- 
+        if grad_output_guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::DeviceMismatch {
+                operation: "sum_axes_backward".to_string(),
+                expected: StorageDevice::CPU,
+                actual: grad_output_guard.device,
+            });
         }
 
-        // 1. Prepare the grad_output: Reshape if keep_dims was false to match rank.
+        // --- Reshape grad_output if necessary --- 
         let grad_output_reshaped = if !self.keep_dims && !self.axes.is_empty() {
             let mut shape_with_kept_dims = Vec::with_capacity(target_rank);
             let mut current_grad_dim = 0;
@@ -41,9 +46,15 @@ impl BackwardOp for SumAxesBackward {
                 if self.axes.contains(&i) {
                     shape_with_kept_dims.push(1);
                 } else {
-                    if current_grad_dim >= grad_output_guard.shape.len()
-                        || grad_output_guard.shape[current_grad_dim] != target_shape[i]
-                    {
+                    if current_grad_dim >= grad_output_guard.shape.len() {
+                         return Err(NeuraRustError::ShapeMismatch {
+                            expected: format!("{:?}", target_shape),
+                            actual: format!("{:?}", grad_output_guard.shape),
+                            operation: "sum_axes_backward (reshape)".to_string(),
+                        });
+                    }
+                    // Validate dimensions BEFORE pushing
+                    if grad_output_guard.shape[current_grad_dim] != target_shape[i] {
                         return Err(NeuraRustError::ShapeMismatch {
                             expected: format!("{:?}", target_shape),
                             actual: format!("{:?}", grad_output_guard.shape),
@@ -54,98 +65,125 @@ impl BackwardOp for SumAxesBackward {
                     current_grad_dim += 1;
                 }
             }
-            // Release guard before reshape
             drop(grad_output_guard);
             crate::ops::view::reshape_op(grad_output, shape_with_kept_dims)?
         } else if self.axes.is_empty() && !self.keep_dims {
-             // Release guard before reshape
-            drop(grad_output_guard);
             let shape_all_ones = vec![1; target_rank];
+            drop(grad_output_guard);
             crate::ops::view::reshape_op(grad_output, shape_all_ones)?
         } else {
-             // Release guard, clone original tensor
             drop(grad_output_guard);
             grad_output.clone()
         };
+        
+        // Re-acquire guard after potential reshape
+        let reshaped_grad_guard = grad_output_reshaped.read_data();
 
-        // 2. Ensure gradient for expansion is contiguous (Manual Copy)
-        let grad_output_for_expand = {
-            let guard = grad_output_reshaped.read_data();
-            if guard.is_contiguous() {
-                 // Drop guard, clone tensor
-                drop(guard);
-                grad_output_reshaped.clone()
-            } else {
-                // Manual contiguous copy logic (assuming F32)
-                let shape = guard.shape.clone();
-                let numel = guard.numel();
-                let mut new_data = vec![0.0f32; numel]; // Initialize with 0.0f32
-                // Use correct buffer access
-                let buffer_arc = guard.buffer().try_get_cpu_f32()?.clone();
-                let data_slice = buffer_arc.as_slice();
-                let mut current_indices = vec![0usize; shape.len()];
-                for idx in 0..numel {
-                    let offset = guard.get_offset(&current_indices);
-                    if offset < data_slice.len() {
-                        new_data[idx] = data_slice[offset]; // Direct assignment for f32
+        // --- Dispatch based on DType for Contiguous Copy and Expansion --- 
+        let input_gradient = match grad_dtype {
+            DType::F32 => {
+                // --- Ensure Contiguous F32 --- 
+                let (contiguous_grad_data_arc, contiguous_grad_shape, contiguous_grad_strides, contiguous_grad_offset) = 
+                    if reshaped_grad_guard.is_contiguous() {
+                        (reshaped_grad_guard.buffer().try_get_cpu_f32()?.clone(), 
+                         reshaped_grad_guard.shape.clone(), 
+                         reshaped_grad_guard.strides.clone(), 
+                         reshaped_grad_guard.offset)
                     } else {
-                         return Err(NeuraRustError::InternalError(
-                            "Index out of bounds during contiguous copy in sum backward".to_string()
-                         ));
-                    }
-
-                    // Increment indices (standard contiguous iteration logic)
-                    if numel > 0 && idx < numel - 1 {
-                        let mut dim_to_increment = shape.len();
-                        while dim_to_increment > 0 {
-                            dim_to_increment -= 1;
-                            current_indices[dim_to_increment] += 1;
-                            if current_indices[dim_to_increment] < shape[dim_to_increment] {
-                                break;
-                            }
-                            current_indices[dim_to_increment] = 0;
+                         // Manual contiguous copy F32
+                        let shape = reshaped_grad_guard.shape.clone();
+                        let numel = reshaped_grad_guard.numel();
+                        let mut new_data = vec![0.0f32; numel];
+                        let buffer_arc = reshaped_grad_guard.buffer().try_get_cpu_f32()?.clone();
+                        let data_slice = buffer_arc.as_slice();
+                        let mut current_indices = vec![0usize; shape.len()];
+                        for idx in 0..numel {
+                            let offset = reshaped_grad_guard.get_offset(&current_indices);
+                            if offset < data_slice.len() { new_data[idx] = data_slice[offset]; } 
+                            else { return Err(NeuraRustError::InternalError(
+                                "Index out of bounds during contiguous copy in sum backward".to_string()
+                            )); }
+                            // Increment indices
+                            if numel > 0 && idx < numel - 1 {
+                                let mut dim_to_increment = shape.len();
+                                while dim_to_increment > 0 {
+                                    dim_to_increment -= 1;
+                                    current_indices[dim_to_increment] += 1;
+                                    if current_indices[dim_to_increment] < shape[dim_to_increment] { break; }
+                                    current_indices[dim_to_increment] = 0;
+                                }
+                             }
                         }
-                    }
-                }
-                // Drop guard before creating new tensor
-                let tensor_shape = guard.shape.clone();
-                drop(guard);
-                Tensor::new(new_data, tensor_shape)?
+                        let new_buffer = Arc::new(new_data);
+                        // Contiguous tensor has standard strides and zero offset
+                        let strides = TensorData::calculate_contiguous_strides(&shape);
+                        (new_buffer, shape, strides, 0)
+                    };
+                drop(reshaped_grad_guard); // Drop guard before kernel call
+
+                // --- Expand F32 using Generic Kernel ---
+                let grad_data_slice = contiguous_grad_data_arc.as_slice();
+                let expanded_data = expand_kernel(
+                    &target_shape,
+                    grad_data_slice,
+                    &contiguous_grad_shape,
+                    &contiguous_grad_strides,
+                    contiguous_grad_offset,
+                )?;
+                Tensor::new(expanded_data, target_shape)?
+            }
+            DType::F64 => {
+                 // --- Ensure Contiguous F64 --- 
+                let (contiguous_grad_data_arc, contiguous_grad_shape, contiguous_grad_strides, contiguous_grad_offset) = 
+                    if reshaped_grad_guard.is_contiguous() {
+                        (reshaped_grad_guard.buffer().try_get_cpu_f64()?.clone(), 
+                         reshaped_grad_guard.shape.clone(), 
+                         reshaped_grad_guard.strides.clone(), 
+                         reshaped_grad_guard.offset)
+                    } else {
+                         // Manual contiguous copy F64
+                        let shape = reshaped_grad_guard.shape.clone();
+                        let numel = reshaped_grad_guard.numel();
+                        let mut new_data = vec![0.0f64; numel]; // Use f64
+                        let buffer_arc = reshaped_grad_guard.buffer().try_get_cpu_f64()?.clone(); // Use f64
+                        let data_slice = buffer_arc.as_slice();
+                        let mut current_indices = vec![0usize; shape.len()];
+                        for idx in 0..numel {
+                            let offset = reshaped_grad_guard.get_offset(&current_indices);
+                            if offset < data_slice.len() { new_data[idx] = data_slice[offset]; } // Use f64
+                            else { return Err(NeuraRustError::InternalError(
+                                "Index out of bounds during contiguous copy in sum backward".to_string()
+                            )); }
+                            // Increment indices (same logic)
+                            if numel > 0 && idx < numel - 1 {
+                                let mut dim_to_increment = shape.len();
+                                while dim_to_increment > 0 {
+                                    dim_to_increment -= 1;
+                                    current_indices[dim_to_increment] += 1;
+                                    if current_indices[dim_to_increment] < shape[dim_to_increment] { break; }
+                                    current_indices[dim_to_increment] = 0;
+                                }
+                            }
+                        }
+                        let new_buffer = Arc::new(new_data);
+                        let strides = TensorData::calculate_contiguous_strides(&shape);
+                        (new_buffer, shape, strides, 0)
+                    };
+                drop(reshaped_grad_guard); // Drop guard before kernel call
+
+                 // --- Expand F64 using Generic Kernel ---
+                let grad_data_slice = contiguous_grad_data_arc.as_slice();
+                let expanded_data = expand_kernel(
+                    &target_shape,
+                    grad_data_slice,
+                    &contiguous_grad_shape,
+                    &contiguous_grad_strides,
+                    contiguous_grad_offset,
+                )?;
+                Tensor::new_f64(expanded_data, target_shape)?
             }
         };
 
-        // 3. Expand the (now contiguous) grad_output_for_expand to the target shape using kernel.
-        if grad_output_for_expand.shape() == target_shape {
-            return Ok(vec![grad_output_for_expand]);
-        }
-
-        // --- Call expand_kernel --- 
-        let grad_guard = grad_output_for_expand.read_data();
-        // Ensure it's F32 CPU before getting slice
-        if grad_guard.dtype != DType::F32 || grad_guard.device != StorageDevice::CPU {
-             return Err(NeuraRustError::UnsupportedOperation(
-                "Sum backward expand kernel requires F32 CPU gradient.".to_string()
-             ));
-        }
-        // Use correct buffer access
-        let grad_data_arc = grad_guard.buffer().try_get_cpu_f32()?.clone();
-        let grad_data_slice = grad_data_arc.as_slice();
-        let grad_shape = &grad_guard.shape;
-        let grad_strides = &grad_guard.strides;
-        let grad_offset = grad_guard.offset;
-
-        let expanded_data = expand_kernel(
-            &target_shape,
-            grad_data_slice,
-            grad_shape,
-            grad_strides,
-            grad_offset,
-        )?;
-
-        // Drop guard after use
-        drop(grad_guard);
-
-        let input_gradient = Tensor::new(expanded_data, target_shape)?;
         Ok(vec![input_gradient])
     }
 
@@ -155,15 +193,19 @@ impl BackwardOp for SumAxesBackward {
 }
 
 /// Noyau de calcul privé pour la somme avec réduction d'axes.
-pub(crate) fn sum_kernel(
+/// Rendue générique sur le type numérique T.
+pub(crate) fn sum_kernel<T>(
     input_guard: &RwLockReadGuard<'_, TensorData>,
-    input_data_slice: &[f32],
+    input_data_slice: &[T],
     axes: &[usize],
     keep_dims: bool,
     output_shape: &[usize],
-) -> Result<Vec<f32>, NeuraRustError> {
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: Copy + Default + std::ops::AddAssign + Debug // Traits requis pour l'opération
+{
     let output_numel: usize = if output_shape.is_empty() { 1 } else { output_shape.iter().product::<usize>() };
-    let mut result_data = vec![0.0f32; output_numel];
+    let mut result_data = vec![T::default(); output_numel]; // Utilise T::default()
 
     let input_shape = &input_guard.shape;
     let input_rank = input_shape.len();
@@ -188,7 +230,7 @@ pub(crate) fn sum_kernel(
                  input_data_slice.len()
             )));
         }
-        let val = input_data_slice[logical_offset];
+        let val: T = input_data_slice[logical_offset]; // Le type est T
 
         // Calculer l'index de sortie (indices multi-dimensionnels)
         let mut output_indices = Vec::with_capacity(output_shape.len());
@@ -230,7 +272,7 @@ pub(crate) fn sum_kernel(
             }
         } // else: output_shape is empty, output_flat_idx reste 0 pour le scalaire
 
-        // Accumuler la valeur (f32 addition)
+        // Accumuler la valeur (Utilise AddAssign pour T)
         if output_flat_idx < result_data.len() {
             result_data[output_flat_idx] += val;
         } else {
@@ -254,118 +296,125 @@ pub(crate) fn sum_kernel(
             }
         }
     }
+
     Ok(result_data)
 }
 
-/// Calculates the sum of elements along specified axes.
-/// Requires the tensor to be on CPU.
-/// Supports autograd.
-pub fn sum_axes(
+/// Calcule la somme d'un tenseur le long des axes spécifiés.
+pub(crate) fn sum_axes(
     input: &Tensor,
     axes: &[usize],
     keep_dims: bool,
 ) -> Result<Tensor, NeuraRustError> {
     let input_guard = input.read_data();
 
-    // --- Device and DType Checks ---
-    if input_guard.device != StorageDevice::CPU || input_guard.dtype != DType::F32 {
-        return Err(NeuraRustError::UnsupportedOperation(
-            "sum_axes currently only supports F32 CPU tensors.".to_string(),
-        ));
+    // Device Check
+    if input_guard.device != StorageDevice::CPU {
+        return Err(NeuraRustError::DeviceMismatch {
+            operation: "sum_axes".to_string(),
+            expected: StorageDevice::CPU,
+            actual: input_guard.device,
+        });
     }
 
-    let input_shape = &input_guard.shape;
-    let input_rank = input_shape.len();
-
-    // --- Axis Validation & Processing ---
-    // Si l'utilisateur passe un slice vide et que le tenseur n'est pas scalaire, cela signifie "tous les axes".
-    let axes_to_process: Vec<usize> = if axes.is_empty() && input_rank > 0 {
-        (0..input_rank).collect()
-    } else {
-        axes.to_vec()
-    };
-
-    let mut processed_axes = Vec::with_capacity(axes_to_process.len());
-    for &axis in &axes_to_process { // Utiliser axes_to_process ici
+    // Validate axes
+    let input_rank = input_guard.shape.len();
+    for &axis in axes {
         if axis >= input_rank {
-            return Err(NeuraRustError::DimensionMismatch {
-                expected: input_rank, // Rank
-                actual: axis,      // Invalid axis
+            return Err(NeuraRustError::ShapeMismatch {
+                operation: "sum_axes (axis validation)".to_string(),
+                expected: format!("axis < {}", input_rank),
+                actual: format!("axis {}", axis),
             });
         }
-        // Handle potential duplicate axes gracefully
-        if !processed_axes.contains(&axis) {
-            processed_axes.push(axis);
-        }
     }
-    processed_axes.sort_unstable(); // Sorting helps in consistent processing
 
-    // --- Calculate Output Shape ---
-    // Utiliser processed_axes qui contient maintenant les axes corrects.
-    let output_shape: Vec<usize> = if processed_axes.len() == input_rank { // Tous les axes sont réduits
-        if keep_dims {
-            // La shape est de rang input_rank, avec que des 1
-            // Sauf si le rang initial était 0 (scalaire), auquel cas on garde []
-            if input_rank == 0 { vec![] } else { vec![1; input_rank] }
-        } else {
-            vec![] // Scalaire
+    // Calculate output shape
+    let mut output_shape = Vec::new();
+    if keep_dims {
+        for (i, &dim_size) in input_guard.shape.iter().enumerate() {
+            if axes.contains(&i) {
+                output_shape.push(1);
+            } else {
+                output_shape.push(dim_size);
+            }
         }
     } else {
-        input_shape
-            .iter()
-            .enumerate()
-            .filter_map(|(i, &dim)| {
-                if processed_axes.contains(&i) {
-                    if keep_dims { Some(1) } else { None } // Keep dim as 1 or remove
-                } else {
-                    Some(dim) // Keep original dimension
+        if axes.len() == input_rank && input_rank > 0 {
+            // Summing all axes, result is scalar
+            output_shape.clear(); // Shape is []
+        } else {
+            // Keep dimensions that are *not* in axes
+            for (i, &dim_size) in input_guard.shape.iter().enumerate() {
+                if !axes.contains(&i) {
+                    output_shape.push(dim_size);
                 }
-            })
-            .collect()
+            }
+            // If input was scalar, output is scalar
+            if input_rank == 0 {
+                 output_shape.clear();
+            }
+        }
+    }
+    
+    let final_output_shape = output_shape; // Use the corrected shape
+
+    // --- Prepare for Autograd ---
+    let requires_grad = input_guard.requires_grad;
+    let input_node_arc = if requires_grad { Some(Arc::clone(&input.data)) } else { None };
+    let input_shape_clone = input_guard.shape.clone();
+    let axes_clone = axes.to_vec(); // Clone axes needed for backward
+    let keep_dims_clone = keep_dims;
+
+    // --- DType Dispatch for Computation --- 
+    let output_tensor = match input_guard.dtype {
+        DType::F32 => {
+            let input_buffer_arc = input_guard.buffer().try_get_cpu_f32()?;
+            let input_data_slice = input_buffer_arc.as_slice();
+            // Call generic kernel
+            let result_data = sum_kernel(
+                &input_guard,
+                input_data_slice,
+                &axes_clone,
+                keep_dims_clone,
+                &final_output_shape // Use the potentially corrected shape
+            )?;
+            drop(input_guard);
+            Tensor::new(result_data, final_output_shape)? // Use the potentially corrected shape
+        }
+        DType::F64 => {
+            let input_buffer_arc = input_guard.buffer().try_get_cpu_f64()?;
+            let input_data_slice = input_buffer_arc.as_slice();
+             // Call generic kernel
+            let result_data = sum_kernel(
+                &input_guard,
+                input_data_slice,
+                &axes_clone,
+                keep_dims_clone,
+                &final_output_shape // Use the potentially corrected shape
+            )?;
+            drop(input_guard);
+            Tensor::new_f64(result_data, final_output_shape)? // Use the potentially corrected shape
+        }
     };
 
-    // --- Extract Data Slice ---
-    let input_data_arc = input_guard.buffer().try_get_cpu_f32()?.clone();
-    let input_data_slice = input_data_arc.as_slice();
-
-    // --- Call Kernel ---
-    // Need to clone required fields before dropping guard
-    let kernel_axes = processed_axes.clone(); // kernel_axes contient maintenant tous les axes si nécessaire
-    let kernel_output_shape = output_shape.clone();
-    let requires_grad = input.requires_grad();
-    let input_node_arc = if requires_grad { Some(input.data.clone()) } else { None };
-    let original_input_shape = input_guard.shape.clone(); // For backward pass
-
-    let result_data = sum_kernel(
-        &input_guard, // Pass the guard reference itself
-        input_data_slice,
-        &kernel_axes, // Utilise la liste d'axes correctement traitée
-        keep_dims,
-        &kernel_output_shape,
-    )?;
-
-    // Drop guard after kernel call
-    drop(input_guard);
-
-    // --- Create Output Tensor ---
-    let output_tensor = Tensor::new(result_data, kernel_output_shape)?;
-
-    // --- Autograd Integration ---
+    // --- Autograd Setup ---
     if requires_grad {
-        if let Some(input_arc) = input_node_arc {
-            let grad_fn = SumAxesBackward {
-                input_node: input_arc,
-                input_shape: original_input_shape,
-                axes: kernel_axes, // Utilise la liste d'axes correctement traitée
-                keep_dims,
+        if let Some(node_arc) = input_node_arc {
+            let mut output_data_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::LockError {
+                lock_type: "write".to_string(),
+                reason: "Failed to lock output TensorData for write (autograd setup in sum_axes)".to_string(),
+            })?;
+            output_data_write_guard.requires_grad = true;
+            let backward_op = SumAxesBackward {
+                input_node: node_arc,
+                input_shape: input_shape_clone,
+                axes: axes_clone,
+                keep_dims: keep_dims_clone,
             };
-            let mut output_write_guard = output_tensor.write_data();
-            output_write_guard.grad_fn = Some(Arc::new(grad_fn));
-            output_write_guard.requires_grad = true;
+            output_data_write_guard.grad_fn = Some(Arc::new(backward_op));
         } else {
-            return Err(NeuraRustError::InternalError(
-                "SumAxes requires grad but input Arc<TensorData> was not available".to_string(),
-            ));
+             return Err(NeuraRustError::InternalError("Input requires grad but its Node Arc is missing in sum_axes".to_string()));
         }
     }
 
@@ -398,11 +447,16 @@ mod tests {
 
     #[test]
     fn test_sum_all() -> Result<(), NeuraRustError> {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-        let result = sum_axes(&t, &[], false)?;
-        let result_data = get_f32_data(&result)?;
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let expected_sum = 21.0;
+        // Appel via sum_op avec axes=None pour sommer sur tout
+        let result = sum_op(&t, None, false)?;
+
+        // Assertions
         assert_eq!(result.shape(), &[] as &[usize], "Result shape should be scalar");
-        assert_relative_eq!(result_data[0], 21.0, epsilon = 1e-6);
+        let data = get_f32_data(&result)?;
+        assert_eq!(data.len(), 1, "Result data should have one element");
+        assert!((data[0] - expected_sum).abs() < 1e-6, "Sum value mismatch");
         Ok(())
     }
 
@@ -435,9 +489,14 @@ mod tests {
 
     #[test]
     fn test_sum_invalid_axis() -> Result<(), NeuraRustError> {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?;
-        let result = sum_axes(&t, &[1], false);
-        assert!(matches!(result, Err(NeuraRustError::DimensionMismatch { .. })));
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
+        let axes = vec![0, 2]; // Axis 2 is invalid for rank 2
+        let result = sum_op(&t, Some(&axes), false);
+        // Check for the specific error (now ShapeMismatch)
+        assert!(
+            matches!(result, Err(NeuraRustError::ShapeMismatch { .. })),
+            "Expected ShapeMismatch for invalid axis, got {:?}", result
+        );
         Ok(())
     }
 
@@ -465,10 +524,22 @@ mod tests {
     }
 }
 
-/// Computes the sum of all elements in the tensor or along specified axes.
-/// This is a convenience wrapper.
+/// Public facing sum operation.
+/// Handles optional axes argument.
+/// If axes is None, sums over all axes.
 pub(crate) fn sum_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
-    let all_axes: Vec<usize> = (0..tensor.shape().len()).collect();
-    let axes_to_sum = axes.unwrap_or(&all_axes);
-    sum_axes(tensor, axes_to_sum, keep_dims)
+    let all_axes: Vec<usize>; // Variable pour stocker les axes si nécessaire
+    
+    let axes_slice: &[usize] = match axes {
+        Some(ax) => ax, // Utilise les axes fournis
+        None => {
+            // Si None, génère les axes 0..rank
+            let rank = tensor.shape().len(); // Utilise shape().len() pour obtenir le rang
+            all_axes = (0..rank).collect(); // Stocke dans `all_axes`
+            &all_axes // Passe une référence au vecteur détenu
+        }
+    };
+    
+    // Appelle sum_axes avec le slice d'axes déterminé
+    sum_axes(tensor, axes_slice, keep_dims)
 }

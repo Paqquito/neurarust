@@ -52,10 +52,10 @@ mod tests {
         
         // Should be equal within default epsilon (1e-6)
         let result_ab = equal_op(&a, &b).unwrap();
-        check_tensor_near(&result_ab, &[1], &vec![1.0], 1e-7);
+        check_tensor_near(&result_ab, &[1], &[1.0], 1e-7);
         
         // Should NOT be equal within default epsilon
         let result_ac = equal_op(&a, &c).unwrap();
-        check_tensor_near(&result_ac, &[1], &vec![0.0], 1e-7);
+        check_tensor_near(&result_ac, &[1], &[0.0], 1e-7);
     }
 } 

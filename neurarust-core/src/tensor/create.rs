@@ -2,6 +2,7 @@
 
 use crate::tensor::Tensor;
 use crate::error::NeuraRustError;
+use crate::types::DType;
  // Import necessary types
 
 /// Creates a new tensor filled with zeros with the specified shape.
@@ -12,12 +13,26 @@ pub fn zeros(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     Tensor::new(data_vec, shape.to_vec())
 }
 
+/// Creates a new F64 tensor filled with zeros with the specified shape on the CPU.
+pub fn zeros_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+    let numel = shape.iter().product();
+    let data_vec: Vec<f64> = vec![0.0; numel]; // Create f64 data
+    Tensor::new_f64(data_vec, shape.to_vec())
+}
+
 /// Creates a new tensor filled with ones with the specified shape.
 /// Currently creates an f32 tensor on the CPU.
 pub fn ones(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let data_vec: Vec<f32> = vec![1.0; numel]; // Create f32 data
     Tensor::new(data_vec, shape.to_vec())
+}
+
+/// Creates a new F64 tensor filled with ones with the specified shape on the CPU.
+pub fn ones_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+    let numel = shape.iter().product();
+    let data_vec: Vec<f64> = vec![1.0; numel]; // Create f64 data
+    Tensor::new_f64(data_vec, shape.to_vec())
 }
 
 /// Creates a new tensor filled with a specific value with the specified shape.
@@ -28,26 +43,62 @@ pub fn full(shape: &[usize], value: f32) -> Result<Tensor, NeuraRustError> { // 
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new tensor filled with zeros, having the same shape and device as the input tensor.
-/// Currently creates an f32 tensor.
-pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
-    // TODO: Later, use tensor.device() to create on the same device.
-    // For now, always creates on CPU.
-    let shape = tensor.shape(); // Use the new accessor
+/// Creates a new F64 tensor filled with a specific value with the specified shape on the CPU.
+pub fn full_f64(shape: &[usize], value: f64) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f32> = vec![0.0; numel]; // Create f32 data
+    let data_vec: Vec<f64> = vec![value; numel]; // Create f64 data
+    Tensor::new_f64(data_vec, shape.to_vec())
+}
+
+/// Creates a new CPU F32 Tensor from a Vec<f32> and shape.
+/// (Moved from tensor/mod.rs for consistency)
+pub fn from_vec_f32(data_vec: Vec<f32>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     Tensor::new(data_vec, shape)
 }
 
+/// Creates a new CPU F64 Tensor from a Vec<f64> and shape.
+pub fn from_vec_f64(data_vec: Vec<f64>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+    Tensor::new_f64(data_vec, shape)
+}
+
+/// Creates a new tensor filled with zeros, having the same shape and device as the input tensor.
+/// Creates a tensor of the same DType as the input.
+pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
+    // TODO: Later, use tensor.device() to create on the same device.
+    let shape = tensor.shape();
+    match tensor.dtype() {
+        DType::F32 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<f32> = vec![0.0; numel];
+            Tensor::new(data_vec, shape)
+        }
+        DType::F64 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<f64> = vec![0.0; numel];
+            Tensor::new_f64(data_vec, shape)
+        }
+        // Add other dtypes later
+    }
+}
+
 /// Creates a new tensor filled with ones, having the same shape and device as the input tensor.
-/// Currently creates an f32 tensor.
+/// Creates a tensor of the same DType as the input.
 pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
     // TODO: Later, use tensor.device() to create on the same device.
-    // For now, always creates on CPU.
-    let shape = tensor.shape(); // Use the new accessor
-    let numel = shape.iter().product();
-    let data_vec: Vec<f32> = vec![1.0; numel]; // Create f32 data
-    Tensor::new(data_vec, shape)
+    let shape = tensor.shape();
+    match tensor.dtype() {
+        DType::F32 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<f32> = vec![1.0; numel];
+            Tensor::new(data_vec, shape)
+        }
+        DType::F64 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<f64> = vec![1.0; numel];
+            Tensor::new_f64(data_vec, shape)
+        }
+        // Add other dtypes later
+    }
 }
 
 // --- Keep other creation functions like arange, linspace, eye, rand, randn --- 
@@ -199,5 +250,73 @@ mod tests {
         assert_eq!(t.dtype(), DType::F32);
         // Basic check: Data exists. More rigorous checks would involve statistical tests.
         assert!(!t.get_f32_data().unwrap().is_empty());
+    }
+
+    #[test]
+    fn test_zeros_f64() {
+        let shape = vec![2, 3];
+        let t = zeros_f64(&shape).unwrap();
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.numel(), 6);
+        assert_eq!(t.device(), StorageDevice::CPU);
+        assert_eq!(t.dtype(), DType::F64);
+        assert!(t.get_f64_data().unwrap().iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn test_ones_f64() {
+        let shape = vec![1, 4];
+        let t = ones_f64(&shape).unwrap();
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.numel(), 4);
+        assert_eq!(t.device(), StorageDevice::CPU);
+        assert_eq!(t.dtype(), DType::F64);
+        assert!(t.get_f64_data().unwrap().iter().all(|&x| x == 1.0));
+    }
+
+    #[test]
+    fn test_full_f64() {
+        let shape = vec![3, 1, 2];
+        let fill_val = -3.14159_f64;
+        let t = full_f64(&shape, fill_val).unwrap();
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.numel(), 6);
+        assert_eq!(t.device(), StorageDevice::CPU);
+        assert_eq!(t.dtype(), DType::F64);
+        assert!(t.get_f64_data().unwrap().iter().all(|&x| (x - fill_val).abs() < 1e-9));
+    }
+
+    #[test]
+    fn test_from_vec_f64() {
+        let data = vec![1.1, 2.2, 3.3];
+        let shape = vec![3];
+        let t = from_vec_f64(data.clone(), shape.clone()).unwrap();
+        assert_eq!(t.shape(), shape);
+        assert_eq!(t.numel(), 3);
+        assert_eq!(t.device(), StorageDevice::CPU);
+        assert_eq!(t.dtype(), DType::F64);
+        assert_eq!(t.get_f64_data().unwrap(), data);
+    }
+
+    #[test]
+    fn test_zeros_like_f64() {
+        let tensor_f64 = from_vec_f64(vec![10.0, 20.0], vec![2]).unwrap();
+        let zeros_t = zeros_like(&tensor_f64).unwrap();
+        assert_eq!(zeros_t.shape(), tensor_f64.shape());
+        assert_eq!(zeros_t.numel(), tensor_f64.numel());
+        assert_eq!(zeros_t.device(), tensor_f64.device()); // Assumes CPU
+        assert_eq!(zeros_t.dtype(), DType::F64);
+        assert!(zeros_t.get_f64_data().unwrap().iter().all(|&x| x == 0.0));
+    }
+
+    #[test]
+    fn test_ones_like_f64() {
+        let tensor_f64 = from_vec_f64(vec![-5.0], vec![1]).unwrap();
+        let ones_t = ones_like(&tensor_f64).unwrap();
+        assert_eq!(ones_t.shape(), tensor_f64.shape());
+        assert_eq!(ones_t.numel(), tensor_f64.numel());
+        assert_eq!(ones_t.device(), tensor_f64.device()); // Assumes CPU
+        assert_eq!(ones_t.dtype(), DType::F64);
+        assert!(ones_t.get_f64_data().unwrap().iter().all(|&x| x == 1.0));
     }
 }

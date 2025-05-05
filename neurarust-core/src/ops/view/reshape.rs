@@ -14,56 +14,66 @@ use std::sync::{Arc, RwLock};
 ///
 /// # Returns
 /// A new Tensor representing the reshaped view, or an error.
-pub fn reshape_op(tensor: &Tensor, new_shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    let tensor_data = tensor.data.read().unwrap();
+pub fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+    let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
+        lock_type: "read".to_string(),
+        reason: "Failed to lock input TensorData for read in reshape_op".to_string(),
+    })?;
 
-    let original_numel: usize = tensor_data.shape.iter().product();
-    let new_numel: usize = new_shape.iter().product();
+    let input_shape = input_data_guard.shape.clone();
+    let numel: usize = input_shape.iter().product();
+    let new_numel: usize = new_shape_vec.iter().product();
 
-    if original_numel != new_numel {
+    if numel != new_numel {
         return Err(NeuraRustError::ShapeMismatch {
-            expected: format!("{:?}", tensor_data.shape),
-            actual: format!("{:?}", new_shape),
-            operation: "reshape (numel mismatch)".to_string(),
+            expected: format!("numel={}", numel),
+            actual: format!("numel={}", new_numel),
+            operation: "reshape".to_string(),
         });
     }
 
-    // --- Contiguity Check and View Creation ---
-    let new_strides: Vec<usize>;
-    let new_offset = tensor_data.offset;
-    let can_view = tensor_data.is_contiguous(); // Simple check for now
-
-    if can_view {
-        new_strides = TensorData::calculate_contiguous_strides(&new_shape);
-    } else {
-        // TODO: Implement non-contiguous reshape view check if possible
-        // For now, require .contiguous() before reshape if non-contiguous
+    // Reshape is only possible on contiguous tensors without copying
+    if !input_data_guard.is_contiguous() {
         return Err(NeuraRustError::UnsupportedOperation(
-            "Reshaping non-contiguous tensor requires calling .contiguous() first".to_string(),
+            "Reshape requires a contiguous tensor. Call .contiguous() first.".to_string(),
         ));
     }
 
-    // --- Create View TensorData ---
-    let view_td = TensorData::new_view(
-        Arc::clone(&tensor_data.buffer),
-        tensor_data.device,
-        new_offset,
-        new_shape.clone(),
-        new_strides,
-    );
+    // Create view: reuse buffer, offset, device; update shape, calculate new strides
+    let new_strides = TensorData::calculate_contiguous_strides(&new_shape_vec);
+    let buffer_arc = Arc::clone(&input_data_guard.buffer);
+    let device = input_data_guard.device;
+    let offset = input_data_guard.offset;
+    let input_requires_grad = input_data_guard.requires_grad;
+    let input_node_arc = if input_requires_grad { Some(Arc::clone(&input.data)) } else { None };
 
-    // --- Wrap in Tensor and Setup Autograd ---
+    drop(input_data_guard); // Drop lock before creating new TensorData
+
+    let view_td = TensorData::new_view(
+        buffer_arc,
+        device,
+        offset,
+        new_shape_vec.clone(), // Use the input shape vec
+        new_strides,
+    )?;
+
     let output_tensor = Tensor { data: Arc::new(RwLock::new(view_td)) };
 
-    if tensor_data.requires_grad {
-        let backward_context = ReshapeBackward {
-            input_shape: tensor_data.shape.clone(),
-        };
-        let backward_op_arc: Arc<dyn BackwardOp + Send + Sync> = Arc::new(backward_context);
-        {
-            let mut output_guard = output_tensor.data.write().unwrap();
-            output_guard.requires_grad = true;
-            output_guard.grad_fn = Some(backward_op_arc);
+    // Autograd setup
+    if input_requires_grad {
+        if let Some(node_arc) = input_node_arc {
+            let mut output_data_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::LockError {
+                 lock_type: "write".to_string(),
+                 reason: "Failed to lock output TensorData for write (autograd setup in reshape_op)".to_string(),
+             })?;
+             output_data_write_guard.requires_grad = true;
+             let backward_op = ReshapeBackward {
+                 input_node: node_arc,
+                 original_shape: input_shape, // Store original shape for backward
+             };
+             output_data_write_guard.grad_fn = Some(Arc::new(backward_op));
+        } else {
+             return Err(NeuraRustError::InternalError("Input requires grad but its Node Arc is missing in reshape_op".to_string()));
         }
     }
 
@@ -74,19 +84,20 @@ pub fn reshape_op(tensor: &Tensor, new_shape: Vec<usize>) -> Result<Tensor, Neur
 
 #[derive(Debug)]
 struct ReshapeBackward {
-    input_shape: Vec<usize>,
+    input_node: Arc<RwLock<TensorData>>,
+    original_shape: Vec<usize>,
 }
 
 impl BackwardOp for ReshapeBackward {
-    fn backward(&self, _grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        reshape_op(_grad_output, self.input_shape.clone())
-            .map(|grad_input| vec![grad_input])
-            .map_err(|e| NeuraRustError::BackwardError(format!("Error in ReshapeBackward: {}", e)))
-    }
-
-    fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
-        Vec::new() // TODO: Adapt graph linkage
-    }
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        reshape_op(grad_output, self.original_shape.clone())
+             .map(|grad_input| vec![grad_input])
+             .map_err(|e| NeuraRustError::BackwardError(format!("Error in ReshapeBackward: {}", e)))
+     }
+ 
+     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
+         vec![Arc::as_ptr(&self.input_node)]
+     }
 }
 
 // --- Tests for Reshape Op ---

@@ -64,31 +64,45 @@ pub fn broadcast_shapes(shape_a: &[usize], shape_b: &[usize]) -> Result<Vec<usiz
     Ok(result_shape)
 }
 
-// Helper to convert a linear index to multi-dimensional coordinates
-// TODO: Handle strides/shape containing 0 more robustly?
-pub fn index_to_coord(index: usize, strides: &[usize], shape: &[usize]) -> Vec<usize> {
+/// Converts a linear index into multi-dimensional coordinates based on shape.
+/// Panics if the index is out of bounds for the given shape.
+pub fn index_to_coord(index: usize, shape: &[usize]) -> Vec<usize> {
     if shape.is_empty() {
+        // Handle scalar tensor case
+        assert_eq!(index, 0, "Index must be 0 for scalar tensor");
         return vec![];
     }
     let rank = shape.len();
     let mut coord = vec![0; rank];
     let mut current_index = index;
-    for i in 0..rank {
-        if strides[i] == 0 {
-            if shape[i] > 0 {
-                // Avoid division by zero if stride is 0 but dim is not
-                // This happens in shapes like [2,0,3] where stride[0] is 0
-                // If index > 0, this coordinate must be 0 anyway?
-                coord[i] = 0;
-            } else {
-                // If shape[i] is 0, coord must be 0
-                coord[i] = 0;
-            }
+
+    // Check if index is out of bounds
+    // Calculate numel carefully to handle shapes with 0
+    let numel: usize = shape.iter().try_fold(1usize, |acc, &dim| acc.checked_mul(dim)).unwrap_or(0);
+    if numel == 0 {
+         if index == 0 { // Allow index 0 for empty tensors
+             return coord; // Return vec![0, 0, ...] for shape like [2, 0, 3]
+         } else {
+             panic!("Index {} out of bounds for empty tensor with shape {:?}", index, shape);
+         }
+    } else if index >= numel {
+         panic!("Index {} out of bounds for shape {:?} with numel {}", index, shape, numel);
+    }
+
+    for i in (0..rank).rev() {
+        let dim_size = shape[i];
+        if dim_size == 0 {
+            // For dim size 0, coordinate must be 0. current_index remains unchanged.
+            coord[i] = 0;
         } else {
-            coord[i] = current_index / strides[i];
-            current_index %= strides[i];
+             // Calculate coordinate for this dimension
+             coord[i] = current_index % dim_size;
+             // Update the index for the next (higher) dimension
+             current_index /= dim_size;
         }
     }
+    // After the loop, current_index should be 0 if the original index was valid.
+    // assert_eq!(current_index, 0, "Error in index_to_coord logic");
     coord
 }
 

@@ -2,13 +2,26 @@
 
 use crate::device::StorageDevice;
 use crate::tensor::Tensor;
- // Import DType
+use crate::types::DType; // Import DType
 use crate::buffer::{Buffer, CpuBuffer}; // Import Buffer types
 use std::fmt::{self, Debug};
 use std::hash::{Hash, Hasher};
 // use std::marker::Copy; // No longer needed for impls
 use std::sync::Arc;
 use std::cmp::PartialEq;
+
+// Define the TensorImpl trait (assuming it was removed by mistake)
+#[allow(dead_code)]
+pub trait TensorImpl {
+    fn shape(&self) -> Vec<usize>;
+    fn strides(&self) -> Vec<usize>;
+    fn device(&self) -> StorageDevice;
+    fn dtype(&self) -> DType;
+    fn rank(&self) -> usize;
+    fn numel(&self) -> usize;
+    fn is_contiguous(&self) -> bool;
+    // Add other methods that were part of the trait if necessary
+}
 
 // --- Trait Implementations ---
 
@@ -53,6 +66,19 @@ impl Debug for Tensor {
                         // TODO: This preview ignores strides/offset for simplicity
                         for i in 0..preview_len {
                             write!(f, "{:?}{}", data_slice.get(i).unwrap_or(&f32::NAN), if i < preview_len - 1 { ", " } else { "" })?;
+                        }
+                        if numel > preview_len { write!(f, ", ...")?; }
+                        write!(f, "]")?;
+                    }
+                    CpuBuffer::F64(data_arc) => {
+                        // Get slice for preview (limit number of elements shown)
+                        let data_slice: &Vec<f64> = data_arc;
+                        let numel = td.numel();
+                        let preview_len = std::cmp::min(numel, 10); // Show max 10 elements
+                        write!(f, "[... ~{} elements (F64): ", numel)?;
+                        // TODO: This preview ignores strides/offset for simplicity
+                        for i in 0..preview_len {
+                            write!(f, "{:?}{}", data_slice.get(i).unwrap_or(&f64::NAN), if i < preview_len - 1 { ", " } else { "" })?;
                         }
                         if numel > preview_len { write!(f, ", ...")?; }
                         write!(f, "]")?;
@@ -122,12 +148,12 @@ impl PartialEq for Tensor {
 
                 // Element-wise comparison respecting strides/offset
                 let shape = &self_guard.shape;
-                let self_strides = &self_guard.strides;
+                let _self_strides = &self_guard.strides;
                 // No need for other_strides if shapes/strides already matched
 
                 for i in 0..numel {
-                    // Use the utility function from the tensor module directly
-                    let coords = crate::tensor::utils::index_to_coord(i, self_strides, shape);
+                    // Corrected: Use the utility function with only index and shape
+                    let coords = crate::tensor::utils::index_to_coord(i, shape); // Pass only shape
                     let self_abs_offset = self_guard.get_offset(&coords);
                     let other_abs_offset = other_guard.get_offset(&coords);
 
@@ -171,3 +197,64 @@ impl Hash for Tensor {
 
 // Note: Implementations for Add, Sub, Mul, Neg etc. using the op functions
 // should also go in this file or a dedicated ops_impl.rs file.
+
+// Generic implementation for any type that Derefs to TensorData?
+// Or specific impl for Tensor?
+impl TensorImpl for Tensor {
+    fn shape(&self) -> Vec<usize> {
+        self.data.read().unwrap().shape.clone()
+    }
+
+    fn strides(&self) -> Vec<usize> {
+        self.data.read().unwrap().strides.clone()
+    }
+
+    fn device(&self) -> StorageDevice {
+        self.data.read().unwrap().device
+    }
+
+    fn dtype(&self) -> DType {
+        self.data.read().unwrap().dtype
+    }
+
+    fn rank(&self) -> usize {
+        self.data.read().unwrap().shape.len()
+    }
+
+    fn numel(&self) -> usize {
+        self.data.read().unwrap().shape.iter().product()
+    }
+
+    fn is_contiguous(&self) -> bool {
+        let self_guard = self.data.read().unwrap();
+        let self_shape = &self_guard.shape;
+        let rank = self_shape.len();
+
+        if rank == 0 {
+            return true;
+        }
+
+        // Use actual strides for calculation
+        let self_strides = &self_guard.strides;
+        // Recalculate expected strides
+        let mut expected_stride = 1;
+        for i in (0..rank).rev() {
+            let current_shape = self_shape[i];
+            if current_shape == 0 {
+                // Tensor with dimension 0 is considered contiguous
+                continue;
+            }
+            // Skip dimension with size 1 for contiguity check, but its stride must be consistent if not the last dim
+            if current_shape == 1 {
+                // We don't update expected_stride here for size 1 dims
+                continue;
+            }
+
+            if self_strides[i] != expected_stride {
+                return false;
+            }
+            expected_stride *= current_shape;
+        }
+        true
+    }
+}

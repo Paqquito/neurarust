@@ -2,11 +2,12 @@
 ///
 /// This enum allows the framework to handle tensors with different
 /// numerical types dynamically.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DType {
     /// 32-bit floating-point type.
     F32,
     // Add other types like I64, F64, Bool etc. here later.
+    F64,
 }
 
 // Optional: Add helper methods later if needed, e.g.,

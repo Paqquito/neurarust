@@ -4,6 +4,7 @@ use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
+use super::utils;
 
 /// Performs the transpose operation between two dimensions, creating a view.
 ///
@@ -14,43 +15,59 @@ use std::fmt::Debug;
 ///
 /// # Returns
 /// A new Tensor representing the transposed view, or an error.
-pub fn transpose_op(tensor: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, NeuraRustError> {
-    let tensor_data = tensor.data.read().unwrap();
-    let rank = tensor_data.shape.len();
+pub fn transpose_op(input: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, NeuraRustError> {
+    let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
+        lock_type: "read".to_string(),
+        reason: "Failed to lock input TensorData for read in transpose_op".to_string(),
+    })?;
 
-    if dim1 >= rank || dim2 >= rank {
-        return Err(NeuraRustError::IndexOutOfBounds {
-            index: vec![dim1.max(dim2)],
-            shape: tensor_data.shape.clone(),
-        });
-    }
+    // Validate dimensions
+    utils::validate_transpose_dims(input_data_guard.shape.len(), dim1, dim2)?;
 
-    let mut new_shape = tensor_data.shape.clone();
-    let mut new_strides = tensor_data.strides.clone();
-    new_shape.swap(dim1, dim2);
-    new_strides.swap(dim1, dim2);
+    // Calculate new shape and strides
+    let new_shape = {
+        let mut current_shape = input_data_guard.shape.clone();
+        current_shape.swap(dim1, dim2); // Swap dimensions in shape
+        current_shape
+    };
+    let new_strides = {
+        let mut current_strides = input_data_guard.strides.clone();
+        current_strides.swap(dim1, dim2);
+        current_strides
+    };
+    let offset = input_data_guard.offset;
+    let device = input_data_guard.device;
+    let buffer_arc = Arc::clone(&input_data_guard.buffer); // Clone the Arc<Buffer>
+    let input_requires_grad = input_data_guard.requires_grad;
+    let input_node_arc = if input_requires_grad { Some(Arc::clone(&input.data)) } else { None };
+    let original_shape_clone = input_data_guard.shape.clone(); // For backward
 
-    let view_td = TensorData::new_view(
-        Arc::clone(&tensor_data.buffer),
-        tensor_data.device,
-        tensor_data.offset,
-        new_shape,
-        new_strides,
-    );
+    // Drop guard before creating new TensorData
+    drop(input_data_guard);
 
+    // Create the view TensorData
+    let view_td = TensorData::new_view(buffer_arc, device, offset, new_shape, new_strides)?;
+
+    // Create the output tensor
     let output_tensor = Tensor { data: Arc::new(RwLock::new(view_td)) };
 
-    if tensor_data.requires_grad {
-        let backward_context = TransposeBackward {
-            input_node: Arc::clone(&tensor.data),
-            dim1,
-            dim2,
-        };
-        let backward_op_arc: Arc<dyn BackwardOp + Send + Sync> = Arc::new(backward_context);
-        {
-            let mut output_guard = output_tensor.data.write().unwrap();
-            output_guard.requires_grad = true;
-            output_guard.grad_fn = Some(backward_op_arc);
+    // --- Autograd Setup --- (If input requires grad)
+    if input_requires_grad {
+        if let Some(node_arc) = input_node_arc {
+             let mut output_data_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::LockError {
+                 lock_type: "write".to_string(),
+                 reason: "Failed to lock output TensorData for write (autograd setup in transpose_op)".to_string(),
+             })?;
+             output_data_write_guard.requires_grad = true;
+             let backward_op = TransposeBackward {
+                 input_node: node_arc,
+                 dim1, // Store transposed dims for backward
+                 dim2,
+                 _original_shape: original_shape_clone,
+             };
+             output_data_write_guard.grad_fn = Some(Arc::new(backward_op));
+        } else {
+            return Err(NeuraRustError::InternalError("Input requires grad but its Node Arc is missing in transpose_op".to_string()));
         }
     }
 
@@ -64,45 +81,17 @@ struct TransposeBackward {
     input_node: Arc<RwLock<TensorData>>,
     dim1: usize,
     dim2: usize,
+    _original_shape: Vec<usize>,
 }
 
 // --- Backward Operation Implementation ---
 impl BackwardOp for TransposeBackward {
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // The backward of transpose(dim1, dim2) is transpose(dim1, dim2).
-        // We need to create a new Tensor view representing the transpose of grad_output,
-        // WITHOUT calling transpose_op recursively to avoid autograd issues.
+        // Transposing the gradient is the same as transposing the input
+        let grad_input = transpose_op(grad_output, self.dim1, self.dim2)?;
 
-        let grad_output_guard = grad_output.read_data();
-
-        let rank = grad_output_guard.shape.len();
-        if self.dim1 >= rank || self.dim2 >= rank {
-            // This should ideally not happen if forward pass validated dims
-            return Err(NeuraRustError::BackwardError(format!(
-                "Invalid dimensions ({}, {}) for rank {} in TransposeBackward",
-                self.dim1, self.dim2, rank
-            )));
-        }
-
-        let mut grad_input_shape = grad_output_guard.shape.clone();
-        let mut grad_input_strides = grad_output_guard.strides.clone();
-        grad_input_shape.swap(self.dim1, self.dim2);
-        grad_input_strides.swap(self.dim1, self.dim2);
-
-        // Create the TensorData for the view directly
-        let grad_input_td = TensorData::new_view(
-            Arc::clone(&grad_output_guard.buffer), // Share buffer from grad_output
-            grad_output_guard.device,
-            grad_output_guard.offset,
-            grad_input_shape,
-            grad_input_strides,
-        );
-
-        // Create the final Tensor
-        // This tensor does NOT require grad and has no grad_fn from this operation
-        let grad_input = Tensor { data: Arc::new(RwLock::new(grad_input_td)) };
-
-        Ok(vec![grad_input]) // Wrap in Vec for BackwardOp trait
+        // The autograd engine will handle accumulation. Just return the calculated grad.
+        Ok(vec![grad_input]) 
     }
 
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
@@ -216,5 +205,29 @@ mod tests {
 
         check_grad(func, &[input], &output_grad, epsilon, abs_tol, rel_tol)
             .expect("Transpose backward higher dim grad check failed");
+    }
+
+    // --- F64 Backward Test ---
+    #[test]
+    fn test_transpose_backward_f64() -> Result<(), crate::autograd::grad_check::GradCheckError> { // Use correct Error type
+        let input_data = vec![1.0f64, 2.0, 3.0, 4.0, 5.0, 6.0]; // f64
+        let input_shape = vec![2, 3];
+        let input = Tensor::new_f64(input_data, input_shape)?; // f64
+        input.set_requires_grad(true).expect("Setting requires_grad failed");
+
+        let func = |inputs: &[Tensor]| transpose_op(&inputs[0], 0, 1);
+
+        let output_shape = vec![3, 2]; // Transposed shape
+        let output_grad = crate::tensor::create::ones_f64(&output_shape)?; // f64
+        
+        let epsilon = 1e-6; // f64
+        let abs_tol = 1e-9; // f64
+        let rel_tol = 1e-7; // f64
+
+        println!("Running F64 backward check for transpose_op...");
+        let result = check_grad(func, &[input], &output_grad, epsilon, abs_tol, rel_tol);
+        println!("F64 backward check for transpose_op result: {:?}", result);
+        result?; // Propagate error
+        Ok(())
     }
 } 

@@ -3,14 +3,15 @@ use crate::autograd::BackwardOp;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
+use super::utils; // Use super::utils
 
 use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
 
 // --- Backward Operation Structure ---
 #[derive(Debug)]
-struct PermuteBackward { // Remove <T>
-    input_node: Arc<RwLock<TensorData>>, // Ajouter le lien vers l'entrée
+struct PermuteBackward {
+    input_node: Arc<RwLock<TensorData>>,
     original_axes: Vec<usize>,
 }
 
@@ -26,89 +27,66 @@ impl PermuteBackward {
 }
 
 // --- Backward Operation Implementation ---
-impl BackwardOp for PermuteBackward { // Remove <T>
+impl BackwardOp for PermuteBackward {
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let inverse_axes = self.inverse_axes();
         
-        // Retirer le contournement temporaire
-        // let grad_output_contig = grad_output.contiguous()?;
-
         // Appeler permute_op avec les axes inverses sur le gradient entrant original
-        permute_op(grad_output, inverse_axes)
-           .map(|grad_input| vec![grad_input]) // Envelopper dans un Vec
+        let grad_input = permute_op(grad_output, &inverse_axes)?;
+
+        // Retourner le gradient calculé dans un vecteur
+        Ok(vec![grad_input])
     }
 
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
-        // Retourner le pointeur vers les données du tenseur d'entrée
         vec![Arc::as_ptr(&self.input_node)]
     }
 }
 
 // --- Forward Operation ---
-pub fn permute_op(tensor: &Tensor, axes: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    let tensor_data = tensor.data.read().unwrap();
-    let rank = tensor_data.shape.len();
+pub fn permute_op(input: &Tensor, dims: &[usize]) -> Result<Tensor, NeuraRustError> {
+    let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
+        lock_type: "read".to_string(),
+        reason: "Failed to lock input TensorData for read in permute_op".to_string(),
+    })?;
 
-    // --- Validate Axes ---
-    if axes.len() != rank {
-        // Use RankMismatch for incorrect number of axes
-        return Err(NeuraRustError::RankMismatch {
-            expected: rank, // Expected number of axes is the rank
-            actual: axes.len(), // Actual number provided
-        });
-    }
-    let mut seen = vec![false; rank];
-    for &axis in &axes {
-        if axis >= rank {
-            return Err(NeuraRustError::IndexOutOfBounds {
-                index: vec![axis],
-                shape: tensor_data.shape.clone(),
-            });
-        }
-        if seen[axis] {
-            // Use InvalidPermutation for duplicate axis
-            return Err(NeuraRustError::InvalidPermutation {
-                 dims: axes.clone(),
-                 rank,
-            });
-        }
-        seen[axis] = true;
-    }
+    let rank = input_data_guard.shape.len();
+    // Validate permutation dimensions
+    utils::validate_permutation(rank, dims)?;
 
-    // --- Calculate New Shape and Strides ---
-    let mut new_shape = vec![0; rank];
-    let mut new_strides = vec![0; rank];
-    for (i, &axis) in axes.iter().enumerate() {
-        new_shape[i] = tensor_data.shape[axis];
-        new_strides[i] = tensor_data.strides[axis];
-    }
+    // Calculate new shape and strides
+    let new_shape = utils::permute_shape(&input_data_guard.shape, dims);
+    let new_strides = utils::permute_strides(&input_data_guard.strides, dims);
+    let offset = input_data_guard.offset;
+    let device = input_data_guard.device;
+    let buffer_arc = Arc::clone(&input_data_guard.buffer);
+    let input_requires_grad = input_data_guard.requires_grad;
+    let input_node_arc = if input_requires_grad { Some(Arc::clone(&input.data)) } else { None };
+    let original_dims_clone = dims.to_vec(); // For backward
 
-    // --- Create View TensorData ---
-    let view_td = TensorData::new_view(
-        Arc::clone(&tensor_data.buffer),
-        tensor_data.device,
-        tensor_data.offset, // Offset remains the same
-        new_shape,
-        new_strides,
-    );
+    drop(input_data_guard);
 
-    // --- Wrap in Tensor and Setup Autograd ---
+    let view_td = TensorData::new_view(buffer_arc, device, offset, new_shape, new_strides)?;
+
     let output_tensor = Tensor { data: Arc::new(RwLock::new(view_td)) };
 
-    let input_guard = tensor.read_data(); // Lire la garde pour requires_grad
-    if input_guard.requires_grad {
-        let backward_context = PermuteBackward {
-            input_node: tensor.data.clone(), // Passer l'Arc des données d'entrée
-            original_axes: axes,
-        };
-        let backward_op_arc: Arc<dyn BackwardOp + Send + Sync> = Arc::new(backward_context);
-        {
-            let mut output_guard = output_tensor.write_data(); // Utiliser write_data() qui gère le unwrap
-            output_guard.requires_grad = true;
-            output_guard.grad_fn = Some(backward_op_arc);
+    // Autograd setup
+    if input_requires_grad {
+        if let Some(node_arc) = input_node_arc {
+            let mut output_data_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::LockError {
+                 lock_type: "write".to_string(),
+                 reason: "Failed to lock output TensorData for write (autograd setup in permute_op)".to_string(),
+             })?;
+             output_data_write_guard.requires_grad = true;
+             let backward_op = PermuteBackward {
+                 input_node: node_arc,
+                 original_axes: original_dims_clone, // Store original permutation
+             };
+             output_data_write_guard.grad_fn = Some(Arc::new(backward_op));
+        } else {
+             return Err(NeuraRustError::InternalError("Input requires grad but its Node Arc is missing in permute_op".to_string()));
         }
     }
-    // La garde input_guard est libérée ici
 
     Ok(output_tensor)
 }
@@ -142,28 +120,23 @@ mod tests {
     #[test]
     fn test_permute_invalid_axes_length() {
         let t = Tensor::new(vec![1.0f32, 2.0], vec![2]).unwrap(); // Rank 1 tensor
-        
-        // result1: axes=[0, 1]. Length (2) != Rank (1). Should be RankMismatch.
-        let result1 = permute_op(&t, vec![0, 1]);
-        // Corrected assertion: Expect RankMismatch
-        assert!(matches!(result1, Err(NeuraRustError::RankMismatch { expected: 1, actual: 2 })), "result1 should be RankMismatch");
-
-        // result2: axes=[0, 1, 0]. Length (3) != Rank (1). Should be RankMismatch.
-        let result2 = permute_op(&t, vec![0, 1, 0]);
+        let result1 = permute_op(&t, &[0, 1]); // Pass as slice
+        assert!(matches!(result1, Err(NeuraRustError::RankMismatch { .. })));
+        let result2 = permute_op(&t, &[0, 1, 0]); // Pass as slice
         assert!(matches!(result2, Err(NeuraRustError::RankMismatch { .. })));
     }
 
     #[test]
     fn test_permute_invalid_axis_value() {
         let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let result = permute_op(&t, vec![0, 2]);
+        let result = permute_op(&t, &[0, 2]); // Pass as slice
         assert!(matches!(result, Err(NeuraRustError::IndexOutOfBounds { .. })));
     }
 
     #[test]
     fn test_permute_duplicate_axis() {
         let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let result = permute_op(&t, vec![0, 0]);
+        let result = permute_op(&t, &[0, 0]); // Pass as slice
         assert!(matches!(result, Err(NeuraRustError::InvalidPermutation { .. })));
     }
 
@@ -172,17 +145,16 @@ mod tests {
     fn test_permute_backward() -> Result<(), GradCheckError> {
         let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         t.set_requires_grad(true)?;
-        let axes = vec![1, 0];
-        let cloned_axes = axes.clone(); 
+        let axes = &[1, 0]; // Pass as slice
 
-        let func = |inputs: &[Tensor]| permute_op(&inputs[0], cloned_axes.clone());
+        let func = |inputs: &[Tensor]| permute_op(&inputs[0], axes); // Use slice directly
 
         let output_shape = vec![3, 2];
         let output_grad = create::ones(&output_shape)?;
         
         let epsilon = 1e-5;
-        let abs_tol = 1e-4; // Use a slightly higher abs_tol for now
-        let rel_tol = 1e-3; // Use a slightly higher rel_tol for now
+        let abs_tol = 1e-4; 
+        let rel_tol = 1e-3; 
 
         check_grad(func, &[t], &output_grad, epsilon, abs_tol, rel_tol)?; 
         Ok(())
@@ -196,19 +168,44 @@ mod tests {
         let t = Tensor::from_vec_f32(t_data, t_shape)?;
         t.set_requires_grad(true)?;
         
-        let axes = vec![1, 0, 2]; 
-        let cloned_axes = axes.clone();
+        let axes = &[1, 0, 2]; // Pass as slice
 
-        let func = |inputs: &[Tensor]| permute_op(&inputs[0], cloned_axes.clone());
+        let func = |inputs: &[Tensor]| permute_op(&inputs[0], axes); // Use slice directly
 
         let output_shape = vec![2, 2, 2]; 
         let output_grad = create::ones(&output_shape)?;
 
         let epsilon = 1e-5;
-        let abs_tol = 1e-4; // Use a slightly higher abs_tol for now
-        let rel_tol = 1e-3; // Use a slightly higher rel_tol for now
+        let abs_tol = 1e-4; 
+        let rel_tol = 1e-3; 
 
         check_grad(func, &[t], &output_grad, epsilon, abs_tol, rel_tol)?;
+        Ok(())
+    }
+
+    // --- F64 Backward Test --- 
+    #[test]
+    fn test_permute_backward_f64() -> Result<(), GradCheckError> {
+        let t_data = (0..8).map(|x| x as f64).collect::<Vec<_>>(); // Use f64
+        let t_shape = vec![2, 2, 2];
+        let t = Tensor::new_f64(t_data, t_shape)?;
+        t.set_requires_grad(true)?;
+        
+        let axes = &[1, 0, 2]; // Pass as slice
+
+        let func = |inputs: &[Tensor]| permute_op(&inputs[0], axes); // Use slice directly
+
+        let output_shape = vec![2, 2, 2]; // Shape doesn't change, just strides
+        let output_grad = create::ones_f64(&output_shape)?; // F64 gradient
+
+        let epsilon = 1e-6; // f64 epsilon
+        let abs_tol = 1e-9; // f64 tolerance
+        let rel_tol = 1e-7; // f64 tolerance
+
+        println!("Running F64 backward check for permute_op...");
+        let result = check_grad(func, &[t], &output_grad, epsilon, abs_tol, rel_tol);
+        println!("F64 backward check for permute_op result: {:?}", result);
+        result?; // Propagate error if check_grad fails
         Ok(())
     }
 } 

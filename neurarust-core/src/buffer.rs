@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
+use crate::types::DType;
 
 /// Enum representing different buffer types based on device and data type.
 /// This allows TensorData to hold different kinds of data buffers.
@@ -19,10 +20,11 @@ pub enum Buffer {
 /// Enum for CPU-specific buffer types.
 #[derive(Debug, Clone)]
 pub enum CpuBuffer {
-    /// Buffer holding f32 data on the CPU.
+    /// Buffer holding `f32` values.
     F32(Arc<Vec<f32>>),
-    // Add other CPU types like I64, F64 etc. here later
-    // e.g., I64(Arc<Vec<i64>>),
+    /// Buffer holding `f64` values.
+    F64(Arc<Vec<f64>>),
+    // Potentially add other CPU buffer types like I64, Bool later
 }
 
 impl Buffer {
@@ -32,10 +34,34 @@ impl Buffer {
     pub fn try_get_cpu_f32(&self) -> Result<&Arc<Vec<f32>>, NeuraRustError> {
         match self {
             Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc),
+            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::F64,
+                operation: "try_get_cpu_f32".to_string(),
+            }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
                 operation: "try_get_cpu_f32".to_string(),
+            }),
+        }
+    }
+
+    /// Attempts to get a reference to the underlying `Arc<Vec<f64>>` if this is a CPU F64 buffer.
+    ///
+    /// Returns an error if the buffer is not a CPU buffer or not of type F64.
+    pub fn try_get_cpu_f64(&self) -> Result<&Arc<Vec<f64>>, NeuraRustError> {
+        match self {
+            Buffer::Cpu(CpuBuffer::F64(data_arc)) => Ok(data_arc),
+            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::F32,
+                operation: "try_get_cpu_f64".to_string(),
+            }),
+            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: *device,
+                operation: "try_get_cpu_f64".to_string(),
             }),
         }
     }

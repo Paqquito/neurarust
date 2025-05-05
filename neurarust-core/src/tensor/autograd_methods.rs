@@ -265,4 +265,32 @@ impl Tensor {
          }
          Ok(())
     }
+
+    /// Creates a new tensor that shares the same underlying data buffer
+    /// but is detached from the current computation graph.
+    ///
+    /// The returned tensor will have `requires_grad = false` and `grad_fn = None`.
+    /// Changes to the data in the original tensor will be reflected in the detached tensor,
+    /// and vice-versa (as they share the same buffer).
+    pub fn detach(&self) -> Tensor {
+        let old_data_guard = self.read_data();
+        // Clone the necessary data, excluding autograd info
+        let new_td = TensorData {
+            buffer: old_data_guard.buffer.clone(), // Clone the Arc<Buffer>
+            shape: old_data_guard.shape.clone(),
+            strides: old_data_guard.strides.clone(),
+            dtype: old_data_guard.dtype,
+            device: old_data_guard.device,
+            offset: old_data_guard.offset,
+            requires_grad: false, // Detached -> no grad requirement
+            grad: None,           // Detached -> no grad
+            grad_fn: None,        // Detached -> no grad function
+             // Retain other fields like maybe a name? Add if necessary.
+        };
+        drop(old_data_guard);
+
+        Tensor {
+            data: Arc::new(RwLock::new(new_td)),
+        }
+    }
 }

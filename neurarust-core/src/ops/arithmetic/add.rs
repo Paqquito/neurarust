@@ -109,7 +109,7 @@ fn reduce_gradient_to_shape(
     // Reshape to remove summed dimensions if keep_dims was true and rank differs
     // or if target_shape contained ones that were summed.
      // Check if final shape matches target_shape after potential reduction
-     let final_shape: Vec<usize> = target_shape.iter().cloned().collect();
+     let final_shape: Vec<usize> = target_shape.to_vec();
      if reduced_grad.shape() != final_shape {
          // If keep_dims=true created shape like [1, 5] instead of [5],
          // or if target was [1, 5] and we summed axis 0 -> [1, 5]

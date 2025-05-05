@@ -152,7 +152,7 @@ mod tests {
     fn test_relu_forward_zeros() -> Result<(), NeuraRustError> {
         let input = Tensor::new(vec![0.0, 0.0, 0.0], vec![3])?;
         let output = relu_op(&input)?;
-        assert_tensor_eq(&output, &vec![0.0, 0.0, 0.0], &[3]);
+        assert_tensor_eq(&output, &[0.0, 0.0, 0.0], &[3]);
         Ok(())
     }
 
@@ -160,7 +160,7 @@ mod tests {
     fn test_relu_forward_positive() -> Result<(), NeuraRustError> {
         let input = Tensor::new(vec![1.0, 10.0, 0.1], vec![3])?;
         let output = relu_op(&input)?;
-        assert_tensor_eq(&output, &vec![1.0, 10.0, 0.1], &[3]);
+        assert_tensor_eq(&output, &[1.0, 10.0, 0.1], &[3]);
         Ok(())
     }
 
@@ -173,7 +173,7 @@ mod tests {
         let grad_fn = output.grad_fn().unwrap();
         let grad_inputs = grad_fn.backward(&grad_output)?;
         assert_eq!(grad_inputs.len(), 1);
-        assert_tensor_eq(&grad_inputs[0], &vec![0.0, 1.0, 0.0, 0.0, 1.0], &[5]);
+        assert_tensor_eq(&grad_inputs[0], &[0.0, 1.0, 0.0, 0.0, 1.0], &[5]);
         Ok(())
     }
 } 

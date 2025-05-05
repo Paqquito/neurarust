@@ -85,35 +85,100 @@ impl TensorData {
         })
     }
 
+    /// Public constructor for creating a new TensorData instance with f64 data on CPU.
+    pub fn new_f64(data_vec: Vec<f64>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let numel: usize = shape.iter().product();
+        let data_len = data_vec.len();
+        if data_len != numel {
+            return Err(NeuraRustError::TensorCreationError { data_len, shape });
+        }
+
+        // Calculate strides
+        let strides = calculate_strides(&shape); // Use the utility function
+
+        // --- Create the Buffer --- Updated logic for F64
+        let data_arc = Arc::new(data_vec);
+        let cpu_buffer = CpuBuffer::F64(data_arc);
+        let buffer = Buffer::Cpu(cpu_buffer);
+        let buffer_arc = Arc::new(buffer);
+        // --- End Buffer Creation ---
+
+        Ok(TensorData {
+            buffer: buffer_arc,
+            device: StorageDevice::CPU, // Hardcode CPU for now
+            dtype: DType::F64,          // Set DType to F64
+            offset: 0,
+            shape,
+            strides,
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
+        })
+    }
+
     /// Constructor for creating views (internal usage).
     ///
     /// Takes an existing shared buffer (`Arc<Buffer>`), offset, shape, strides, and device.
-    /// Assumes the dtype is the same as the source buffer (F32 for now).
+    /// Infers DType from the provided buffer.
     /// Views do not require gradients by default.
     #[allow(dead_code)]
     pub(crate) fn new_view(
-        buffer_arc: Arc<Buffer>, // Changed from Arc<Buffer<T>>
+        buffer_arc: Arc<Buffer>,
         device: StorageDevice,
         offset: usize,
         shape: Vec<usize>,
         strides: Vec<usize>,
-    ) -> Self {
-        // TODO: Later, assert that the provided device matches the actual device
-        //       stored within the buffer_arc, once we implement accessors for it.
-        // assert_eq!(buffer_arc.device(), device, ...);
+    ) -> Result<Self, NeuraRustError> { // Return Result
+        // Infer DType from the buffer
+        let dtype = match &*buffer_arc {
+            Buffer::Cpu(CpuBuffer::F32(_)) => DType::F32,
+            Buffer::Cpu(CpuBuffer::F64(_)) => DType::F64,
+            Buffer::Gpu { .. } => { // Assuming GPU buffers will have associated DType later
+                // For now, return an error or a default/placeholder DType if GPU supported
+                return Err(NeuraRustError::UnsupportedOperation(
+                    "Cannot determine DType for GPU buffer in new_view yet.".to_string()
+                ));
+            }
+        };
 
-        TensorData {
+        // Verify device consistency (optional but good practice)
+        match (&*buffer_arc, device) {
+            (Buffer::Cpu(_), StorageDevice::CPU) => { /* Ok */ }
+            (Buffer::Gpu { device: buffer_device, .. }, StorageDevice::GPU) => {
+                if buffer_device != &device {
+                    return Err(NeuraRustError::DeviceMismatch {
+                        expected: *buffer_device,
+                        actual: device,
+                        operation: "new_view device consistency check".to_string(),
+                    });
+                }
+                /* Ok */
+            }
+            (buffer, view_device) => {
+                // Mismatch between buffer location and specified device for the view
+                let actual_device = match buffer {
+                    Buffer::Cpu(_) => StorageDevice::CPU,
+                    Buffer::Gpu { device, .. } => *device,
+                };
+                 return Err(NeuraRustError::DeviceMismatch {
+                    expected: actual_device, // The buffer's actual device
+                    actual: view_device, // The device specified for the view
+                    operation: "new_view buffer/device mismatch".to_string(),
+                 });
+            }
+        }
+
+        Ok(TensorData {
             buffer: buffer_arc, // Share the buffer Arc
             device,             // Use the provided device
-            // TODO: Later, get dtype from the buffer_arc instead of hardcoding.
-            dtype: DType::F32,  // Assume F32 for views for now
+            dtype,              // Use inferred dtype
             offset,
             shape,
             strides,
             requires_grad: false,
             grad: None,
             grad_fn: None,
-        }
+        })
     }
 
     /// Provides immutable access to the underlying shared data buffer.

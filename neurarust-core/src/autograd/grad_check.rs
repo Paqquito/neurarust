@@ -126,15 +126,35 @@ where
     let two = 2.0f64;
 
     // --- Initial Checks ---
+    let mut first_input_dtype: Option<DType> = None;
+
     for (i, input) in inputs.iter().enumerate() {
         let dtype = input.dtype();
         let device = input.device();
-        if dtype != DType::F32 {
-            return Err(GradCheckError::UnsupportedDType(dtype));
-        }
+
+        // Check device
         if device != StorageDevice::CPU {
             return Err(GradCheckError::NonCpuInput { input_index: i, device });
         }
+
+        // Check dtype and consistency
+        match dtype {
+            DType::F32 | DType::F64 => {
+                if let Some(first_dtype) = first_input_dtype {
+                    if dtype != first_dtype {
+                        return Err(GradCheckError::TensorError(NeuraRustError::DataTypeMismatch {
+                            expected: first_dtype,
+                            actual: dtype,
+                            operation: format!("check_grad input consistency (input {})", i),
+                        }));
+                    }
+                } else {
+                    first_input_dtype = Some(dtype);
+                }
+            }
+        }
+
+        // Check contiguity
         if !input.is_contiguous() {
             return Err(GradCheckError::NonContiguousInput { input_index: i });
         }
@@ -143,14 +163,29 @@ where
             return Err(GradCheckError::InputNotLeaf { input_index: i });
         }
     }
+
+    // Check output_grad
     let output_grad_dtype = output_grad.dtype();
-    if output_grad_dtype != DType::F32 {
-         return Err(GradCheckError::UnsupportedDType(output_grad_dtype));
-    }
     let output_grad_device = output_grad.device();
+
     if output_grad_device != StorageDevice::CPU {
-        // Error if output_grad is not CPU
          return Err(GradCheckError::NonCpuInput { input_index: usize::MAX, device: output_grad_device }); // Use usize::MAX for output_grad index
+    }
+
+    // Ensure output_grad dtype matches input dtype (if inputs exist)
+    if let Some(input_dtype) = first_input_dtype {
+        if output_grad_dtype != input_dtype {
+            return Err(GradCheckError::TensorError(NeuraRustError::DataTypeMismatch {
+                expected: input_dtype,
+                actual: output_grad_dtype,
+                operation: "check_grad output_grad consistency".to_string(),
+            }));
+        }
+    } else {
+        // No inputs, check if output_grad is F32 or F64
+        match output_grad_dtype {
+            DType::F32 | DType::F64 => { /* Ok */ }
+        }
     }
 
     // --- 1. Initial Forward and Backward Pass ---
@@ -196,100 +231,112 @@ where
                  return Err(GradCheckError::MissingAnalyticalGrad{ input_index: i });
             }
         };
-        // Extraire les données du gradient analytique (DOIT être contigu pour get_f32_data)
-        let analytical_grad_data: Vec<f64> = analytical_grad_tensor
-            .contiguous()? // S'assurer que le GRADIENT est contigu pour l'extraction
-            .get_f32_data()? 
-            .iter()
-            .map(|&x| x as f64)
-            .collect();
 
-        // --- 5. Iterate through Elements (Logical) and Calculate Numerical Gradient ---
-        let numel = original_input.numel();
-        let rank = original_input.shape().len();
-        let original_shape = original_input.shape(); // Obtenir shape une fois
-        let original_strides = original_input.strides(); // Obtenir strides une fois
-        let original_offset = original_input.read_data().offset; // Obtenir offset une fois
-        let original_device = original_input.device(); // Should be CPU based on initial checks
-        
-        // Obtenir le buffer original (Arc<Vec<f32>>) une fois
-        let original_buffer_arc = original_input.read_data().buffer().try_get_cpu_f32()?.clone();
+        // Ensure analytical gradient tensor is contiguous before extracting data
+        let contiguous_analytical_grad = analytical_grad_tensor.contiguous()?;
 
-        for elem_idx in 0..numel { // elem_idx représente l'index logique linéaire
-            
-            // --- 5.1 Calculer l'offset physique --- 
-            let mut current_logical_indices = vec![0; rank];
-            let mut current_linear = elem_idx;
-            for dim in (0..rank).rev() {
-                 let shape_val = original_shape[dim];
-                 if shape_val > 0 { current_logical_indices[dim] = current_linear % shape_val; current_linear /= shape_val; } else { current_logical_indices[dim] = 0; }
+        // Extract analytical gradient data based on DType
+        let analytical_grad_data: Vec<f64> = match contiguous_analytical_grad.dtype() {
+            DType::F32 => {
+                contiguous_analytical_grad.get_f32_data()? // Get Vec<f32>
+                    .iter()
+                    .map(|&x| x as f64) // Convert to Vec<f64>
+                    .collect()
             }
-            let physical_offset = original_offset + current_logical_indices.iter().zip(original_strides.iter()).map(|(&idx, &stride)| idx * stride).sum::<usize>();
+            DType::F64 => {
+                contiguous_analytical_grad.get_f64_data()? // Get Vec<f64>
+            }
+        };
 
-            // --- 5.2 Calculate Loss for f(x + eps) --- 
+        // Ensure analytical grad data is valid
+        for (elem_idx, &_val) in analytical_grad_data.iter().enumerate() {
+            // --- 5.1 Calculate Physical Offset ---
+            let mut current_logical_indices = vec![0; original_input.shape().len()];
+            let mut current_linear = elem_idx;
+            for dim in (0..original_input.shape().len()).rev() {
+                let shape_val = original_input.shape()[dim];
+                if shape_val > 0 { current_logical_indices[dim] = current_linear % shape_val; current_linear /= shape_val; } else { current_logical_indices[dim] = 0; }
+            }
+            let physical_offset = original_input.read_data().offset + current_logical_indices.iter().zip(original_input.strides().iter()).map(|(&idx, &stride)| idx * stride).sum::<usize>();
+
+            // --- 5.2 Calculate Loss for f(x + eps) ---
             let loss_plus = {
                 let mut inputs_plus = inputs.iter().map(|t| t.clone()).collect::<Vec<_>>();
-                
-                // --- 5.2.1 Créer le tenseur perturbé (+) vue --- 
-                let buffer_plus_arc = {
-                    let mut buffer_vec = original_buffer_arc.as_ref().clone(); 
-                    if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds (+) perturbation".to_string()))); }
-                    
-                    // --- Modification pour calcul en f64 --- 
-                    let current_val_f32 = buffer_vec[physical_offset];
-                    let current_val_f64 = current_val_f32 as f64;
-                    let perturbed_val_f64 = current_val_f64 + epsilon; // Calcul en f64
-                    let perturbed_val_f32 = perturbed_val_f64 as f32; // Reconversion en f32
-                    // ---------------------------------------
 
-                    buffer_vec[physical_offset] = perturbed_val_f32; // Ecriture f32
-                    Arc::new(buffer_vec) 
+                // --- 5.2.1 Create perturbed buffer (+) ---
+                // Corrected logic: Match on dereferenced Arc<Buffer>, clone inner Vec, perturb, create new Arc<Buffer>
+                let perturbed_buffer_arc_plus = match &*original_input.read_data().buffer { // Dereference Arc<Buffer> to &Buffer
+                    Buffer::Cpu(CpuBuffer::F32(arc_vec)) => {
+                        let mut buffer_vec = arc_vec.as_ref().clone(); // Clone Vec<f32>
+                        if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds F32 (+)".to_string()))); }
+                        let perturbed_val_f32 = (buffer_vec[physical_offset] as f64 + epsilon) as f32;
+                        buffer_vec[physical_offset] = perturbed_val_f32;
+                        Arc::new(Buffer::Cpu(CpuBuffer::F32(Arc::new(buffer_vec)))) // Create new Arc<Buffer>
+                    }
+                    Buffer::Cpu(CpuBuffer::F64(arc_vec)) => {
+                        let mut buffer_vec = arc_vec.as_ref().clone(); // Clone Vec<f64>
+                        if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds F64 (+)".to_string()))); }
+                        let perturbed_val_f64 = buffer_vec[physical_offset] + epsilon;
+                        buffer_vec[physical_offset] = perturbed_val_f64;
+                        Arc::new(Buffer::Cpu(CpuBuffer::F64(Arc::new(buffer_vec)))) // Create new Arc<Buffer>
+                    }
+                    // Non-CPU buffers are checked earlier
+                    _ => return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Unexpected buffer type (+)".to_string())))
                 };
-                let td_plus = TensorData::new_view(
-                    Arc::new(Buffer::Cpu(CpuBuffer::F32(buffer_plus_arc))),
-                    original_device, // Utiliser le device original
-                    original_offset, 
-                    original_shape.clone(), 
-                    original_strides.clone(),
-                );
-                let perturbed_tensor_plus = Tensor { data: Arc::new(RwLock::new(td_plus)) };
 
-                inputs_plus[i] = perturbed_tensor_plus;
+                // --- 5.2.2 Create perturbed tensor view (+) ---
+                let td_plus = TensorData::new_view(
+                    perturbed_buffer_arc_plus, // Use the newly created Arc<Buffer>
+                    original_input.device(),
+                    original_input.read_data().offset,
+                    original_input.shape().clone(),
+                    original_input.strides().clone(),
+                )?;
+                inputs_plus[i] = Tensor { data: Arc::new(RwLock::new(td_plus)) };
+
+                // --- 5.2.3 Run forward pass (+) ---
                 let output_plus = func(&inputs_plus).map_err(GradCheckError::ForwardPassError)?;
-                calculate_loss(&output_plus, output_grad)? // Renvoie f64
+                calculate_loss(&output_plus, output_grad)?
             };
 
-            // --- 5.3 Calculate Loss for f(x - eps) --- 
+            // --- 5.3 Calculate Loss for f(x - eps) ---
             let loss_minus = {
                 let mut inputs_minus = inputs.iter().map(|t| t.clone()).collect::<Vec<_>>();
-                
-                 // --- 5.3.1 Créer le tenseur perturbé (-) vue --- 
-                 let buffer_minus_arc = {
-                    let mut buffer_vec = original_buffer_arc.as_ref().clone(); 
-                    if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds (-) perturbation".to_string()))); }
 
-                    // --- Modification pour calcul en f64 --- 
-                    let current_val_f32 = buffer_vec[physical_offset];
-                    let current_val_f64 = current_val_f32 as f64;
-                    let perturbed_val_f64 = current_val_f64 - epsilon; // Calcul en f64
-                    let perturbed_val_f32 = perturbed_val_f64 as f32; // Reconversion en f32
-                    // ---------------------------------------
-                    
-                    buffer_vec[physical_offset] = perturbed_val_f32; // Ecriture f32
-                    Arc::new(buffer_vec) 
+                // --- 5.3.1 Create perturbed buffer (-) ---
+                // Corrected logic: Match on dereferenced Arc<Buffer>, clone inner Vec, perturb, create new Arc<Buffer>
+                let perturbed_buffer_arc_minus = match &*original_input.read_data().buffer { // Dereference Arc<Buffer> to &Buffer
+                     Buffer::Cpu(CpuBuffer::F32(arc_vec)) => {
+                        let mut buffer_vec = arc_vec.as_ref().clone(); // Clone Vec<f32>
+                        if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds F32 (-)".to_string()))); }
+                        let perturbed_val_f32 = (buffer_vec[physical_offset] as f64 - epsilon) as f32;
+                        buffer_vec[physical_offset] = perturbed_val_f32;
+                        Arc::new(Buffer::Cpu(CpuBuffer::F32(Arc::new(buffer_vec)))) // Create new Arc<Buffer>
+                    }
+                    Buffer::Cpu(CpuBuffer::F64(arc_vec)) => {
+                        let mut buffer_vec = arc_vec.as_ref().clone(); // Clone Vec<f64>
+                        if physical_offset >= buffer_vec.len() { return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Offset out of bounds F64 (-)".to_string()))); }
+                        let perturbed_val_f64 = buffer_vec[physical_offset] - epsilon;
+                        buffer_vec[physical_offset] = perturbed_val_f64;
+                        Arc::new(Buffer::Cpu(CpuBuffer::F64(Arc::new(buffer_vec)))) // Create new Arc<Buffer>
+                    }
+                    // Non-CPU buffers are checked earlier
+                    _ => return Err(GradCheckError::TensorError(NeuraRustError::InternalError("Unexpected buffer type (-)".to_string())))
                 };
-                 let td_minus = TensorData::new_view(
-                    Arc::new(Buffer::Cpu(CpuBuffer::F32(buffer_minus_arc))),
-                    original_device,
-                    original_offset, 
-                    original_shape.clone(), 
-                    original_strides.clone(),
-                );
-                 let perturbed_tensor_minus = Tensor { data: Arc::new(RwLock::new(td_minus)) };
 
-                 inputs_minus[i] = perturbed_tensor_minus;
-                 let output_minus = func(&inputs_minus).map_err(GradCheckError::ForwardPassError)?;
-                 calculate_loss(&output_minus, output_grad)? // Renvoie f64
+                // --- 5.3.2 Create perturbed tensor view (-) ---
+                let td_minus = TensorData::new_view(
+                    perturbed_buffer_arc_minus, // Use the newly created Arc<Buffer>
+                    original_input.device(),
+                    original_input.read_data().offset,
+                    original_input.shape().clone(),
+                    original_input.strides().clone(),
+                )?;
+                inputs_minus[i] = Tensor { data: Arc::new(RwLock::new(td_minus)) };
+
+                // --- 5.3.3 Run forward pass (-) ---
+                let output_minus = func(&inputs_minus).map_err(GradCheckError::ForwardPassError)?;
+                calculate_loss(&output_minus, output_grad)?
             };
             
             // --- 5.4 Calculate Numerical Gradient ---
@@ -336,7 +383,6 @@ where
 
 /// Helper function to calculate a scalar loss for gradient checking.
 /// Usually, this is the sum of the output tensor weighted by the output gradient.
-// Adapt signature to use Tensor
 fn calculate_loss(tensor: &Tensor, output_grad: &Tensor) -> Result<f64, GradCheckError> {
     // Ensure shapes match or are broadcastable (though they should match here)
     if tensor.shape() != output_grad.shape() {
@@ -348,17 +394,32 @@ fn calculate_loss(tensor: &Tensor, output_grad: &Tensor) -> Result<f64, GradChec
          }));
     }
 
-    // Calculer la perte comme sum(tensor * output_grad) - UTILISER LES TENSEURS ORIGINAUX
+    // Calculer la perte comme sum(tensor * output_grad)
+    // Assume mul_op and sum_op will be adapted to preserve DType
     let weighted_output = mul_op(tensor, output_grad)?;
-    
     let loss_tensor = sum_op(&weighted_output, None, false)?;
 
-    // Extract the scalar value (expecting F32 CPU)
-    let loss_data = loss_tensor.get_f32_data()?;
-    if loss_data.len() != 1 {
-         return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
-             "Loss calculation did not result in a scalar tensor".to_string(),
-         )));
-    }
-    Ok(loss_data[0] as f64) // Convert F32 scalar to f64
+    // Extract the scalar value based on DType
+    let scalar_loss: f64 = match loss_tensor.dtype() {
+        DType::F32 => {
+            let loss_data = loss_tensor.get_f32_data()?;
+            if loss_data.len() != 1 {
+                return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
+                    "Loss calculation (F32) did not result in a scalar tensor".to_string(),
+                )));
+            }
+            loss_data[0] as f64 // Convert F32 to f64
+        }
+        DType::F64 => {
+            let loss_data = loss_tensor.get_f64_data()?; // Use get_f64_data
+            if loss_data.len() != 1 {
+                return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
+                    "Loss calculation (F64) did not result in a scalar tensor".to_string(),
+                )));
+            }
+            loss_data[0] // Already f64
+        }
+    };
+
+    Ok(scalar_loss)
 }
