@@ -1,12 +1,19 @@
 // neurarust-core/src/ops/arithmetic/add.rs
 
-use crate::autograd::backward_op::BackwardOp;
-use crate::error::NeuraRustError;
-use crate::tensor_data::TensorData;
-use crate::tensor::Tensor;
-use std::sync::RwLock;
-use std::sync::Arc;
+use crate::{
+    autograd::{backward_op::BackwardOp, graph::NodeId},
+    error::NeuraRustError,
+    ops::traits::NeuraNumeric,
+    tensor::Tensor,
+    tensor_data::TensorData,
+};
+use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
+
+/// Generic kernel for element-wise addition.
+fn add_kernel<T: NeuraNumeric>(a: T, b: T) -> T {
+    a + b
+}
 
 // --- Backward Operation Structure ---
 
@@ -77,57 +84,20 @@ impl BackwardOp for AddBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise addition of two tensors (`a + b`), supporting broadcasting.
+/// Performs element-wise addition (`a + b`) on two tensors with broadcasting.
 ///
-/// Computes the sum of two tensors, element by element. If the tensors have different
-/// but compatible shapes, broadcasting rules are applied (similar to NumPy/PyTorch)
-/// to make their shapes match before performing the addition.
-///
-/// This operation supports automatic differentiation.
-///
-/// # Arguments
-/// * `a`: The first input `Tensor`.
-/// * `b`: The second input `Tensor`.
-///
-/// # Returns
-/// A `Result` containing a new `Tensor` representing the element-wise sum, or a `NeuraRustError`.
-///
-/// # Errors
-/// Returns `NeuraRustError` if:
-/// - Tensors are not on the CPU (`DeviceMismatch`).
-/// - Tensors have different `DType`s (`DataTypeMismatch`).
-/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
-/// - An internal error occurs during computation or memory allocation.
-///
-/// # Broadcasting Example
-/// ```text
-/// a (shape [3, 1]): [[1], [2], [3]]
-/// b (shape [  5]): [10, 20, 30, 40, 50]
-/// broadcast_shapes(a, b) -> [3, 5]
-/// a broadcasts to: [[1, 1, 1, 1, 1],
-///                  [2, 2, 2, 2, 2],
-///                  [3, 3, 3, 3, 3]]
-/// b broadcasts to: [[10, 20, 30, 40, 50],
-///                  [10, 20, 30, 40, 50],
-///                  [10, 20, 30, 40, 50]]
-/// result (shape [3, 5]): [[11, 21, 31, 41, 51],
-///                      [12, 22, 32, 42, 52],
-///                      [13, 23, 33, 43, 53]]
-/// ```
-pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
-    // Appelle la fonction helper centralisée
-    super::apply_binary_op_broadcasted(
+/// Supports autograd.
+pub(crate) fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
+    crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,
-        |va, vb| va + vb, // Opération pour F32
-        |va, vb| va + vb, // Opération pour F64
-        |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| { // Constructeur pour AddBackward
-            // Vérifie que les noeuds existent si le gradient est requis
-            let a_node = a_node_opt.expect("Missing a_node in add_op backward builder when grad required");
-            let b_node = b_node_opt.expect("Missing b_node in add_op backward builder when grad required");
-            // Crée l'Arc pour la structure Backward spécifique
+        |va, vb| add_kernel::<f32>(va, vb),
+        |va, vb| add_kernel::<f64>(va, vb),
+        |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
+            let a_node = a_node_opt.expect("a_node must be Some if requires_grad is true");
+            let b_node = b_node_opt.expect("b_node must be Some if requires_grad is true");
             Arc::new(AddBackward {
-                a_node, // Utilise les Arcs déballés
+                a_node,
                 b_node,
                 a_shape,
                 b_shape,
@@ -135,7 +105,7 @@ pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 b_requires_grad: b_req,
             })
         },
-        "add_op", // Nom de l'opération pour les erreurs
+        "add_op",
     )
 }
 

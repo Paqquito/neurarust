@@ -26,7 +26,7 @@
 //! - [`dtype`]: Operations related to data type conversion (cast).
 
 // Re-export key traits and types from submodules for easier use.
-// pub mod traits;
+pub mod traits;
 
 // Import necessary types for helper functions
 use crate::tensor::Tensor;

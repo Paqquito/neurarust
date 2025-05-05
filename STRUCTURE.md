@@ -69,25 +69,37 @@
 │   │   │   │   ├── mean_test.rs
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── sum.rs
-│   │   │   │   └── sum_test.rs
+│   │   │   │   ├── sum_test.rs
+│   │   │   │   └── utils.rs
 │   │   │   └── view
+│   │   │       ├── contiguous.rs
 │   │   │       ├── expand.rs
+│   │   │       ├── expand_test.rs
 │   │   │       ├── mod.rs
 │   │   │       ├── permute.rs
+│   │   │       ├── permute_test.rs
 │   │   │       ├── reshape.rs
 │   │   │       ├── reshape_test.rs
 │   │   │       ├── slice.rs
+│   │   │       ├── slice_test.rs
 │   │   │       ├── transpose.rs
 │   │   │       ├── transpose_test.rs
 │   │   │       └── utils.rs
 │   │   ├── optim
 │   │   ├── tensor
+│   │   │   ├── accessors.rs
 │   │   │   ├── autograd_methods.rs
+│   │   │   ├── autograd.rs
 │   │   │   ├── broadcast_utils.rs
 │   │   │   ├── create.rs
+│   │   │   ├── create_test.rs
+│   │   │   ├── debug.rs
+│   │   │   ├── iter_utils.rs
 │   │   │   ├── mod.rs
+│   │   │   ├── reduction_methods.rs
 │   │   │   ├── traits.rs
 │   │   │   ├── utils.rs
+│   │   │   ├── utils_test.rs
 │   │   │   └── view_methods.rs
 │   │   ├── tensor_data.rs
 │   │   ├── types.rs
@@ -104,4 +116,4 @@
 ├── ROADMAP.md
 └── STRUCTURE.md
 
-20 directories, 85 files
+20 directories, 97 files

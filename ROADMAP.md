@@ -60,16 +60,57 @@
             *   [✅] Run `cargo doc --open --no-deps` to build and view the documentation locally.
             *   [✅] Review generated docs for clarity, completeness, and correctness. Fix any issues.
         *   **Step 1.A.9: Refactoring Identification**
-            *   [ ] Review code (especially in `ops` and `tensor/utils.rs`) for duplicated logic or patterns suitable for abstraction.
+            *   [✅] Review code (especially in `ops` and `tensor/utils.rs`) for duplicated logic or patterns suitable for abstraction.
             *   [✅] Candidate 1: Broadcasting logic (e.g., `NdArrayBroadcastingIter` usage). Can it be centralized or simplified? -> Addressed for arithmetic ops via helper.
             *   [✅] Candidate 2: Gradient reduction logic (`reduce_gradient_to_shape`). Is it optimally placed and reusable? -> Addressed for arithmetic ops via helper.
-            *   [✅] Candidate 3: CPU Kernel patterns (e.g., loops iterating over buffers). Can generic helpers be created? -> Addressed for unary ops (`apply_unary_op`) and contiguous copy (`NdArraySimpleIter`).
-            *   [ ] Candidate 4: DType dispatch logic (`match tensor.dtype()`). Can macros or traits simplify this? (Maybe later phase)
+            *   [✅] Candidate 3: CPU Kernel patterns (e.g., loops iterating over buffers). Can generic helpers be created? -> Addressed for unary ops (`neg`, `ln`) and contiguous copy (`NdArraySimpleIter`). Also reduction ops (`sum`, `mean`, `max`) refactored using utilities.
+            *   [ ] Candidate 4: DType dispatch logic (`match tensor.dtype()`). Can macros or traits simplify this? -> **Initiating Incremental Refactoring (Sub-Roadmap Below)**
+                *   **Step 1.A.9.4.1: Define `NeuraNumeric` Trait**
+                    *   [✅] Create a new trait `NeuraNumeric` (e.g., in `src/types/numeric.rs` or `src/ops/traits/numeric.rs`).
+                    *   [✅] Define necessary bounds: `num_traits::Float`, `std::ops::{Add, Sub, Mul, Div, Neg}`, `PartialOrd`, `Debug`, `Clone`, `Copy`, `Send`, `Sync`, `'static`. (Updated bounds based on implementation)
+                    *   [ ] Define associated constants if needed (e.g., `ZERO`, `ONE`, `MIN_VALUE`, `MAX_VALUE`) beyond what `num_traits::Float` provides. (Decided not needed for now)
+                    *   [✅] Add `rustdoc` for the trait.
+                *   **Step 1.A.9.4.2: Implement `NeuraNumeric` for F32/F64**
+                    *   [✅] Implement `impl NeuraNumeric for f32`.
+                    *   [✅] Implement `impl NeuraNumeric for f64`.
+                    *   [✅] Add tests to verify trait bounds and constant values if applicable.
+                *   **Step 1.A.9.4.3: Refactor Unary Kernel (PoC - `neg_op`)**
+                    *   [✅] Create a generic kernel function `neg_kernel<T: NeuraNumeric>(data: &[T]) -> Vec<T>` in `ops/arithmetic/neg.rs`.
+                    *   [✅] Modify `neg_op` function:
+                        *   [✅] Keep the outer `match dtype` block.
+                        *   [✅] Inside the match arms: Get the correct buffer slice (`try_get_cpu_f32`/`f64` needs access via guard -> buffer -> match).
+                        *   [✅] Call the generic `neg_kernel::<f32>` or `neg_kernel::<f64>`.
+                        *   [✅] Create the output `Tensor` with the correct DType (`Tensor::new`/`new_f64`).
+                    *   [✅] Ensure `NegBackward` still functions correctly (verified structure and autograd tests).
+                    *   [✅] Verify with `cargo test --workspace`.
+                *   **Step 1.A.9.4.4: Refactor Binary Kernel Helper (PoC - e.g., `add_op`)**
+                    *   [✅] **Option A (Refactor Helper):** Modify `apply_binary_op_broadcasted` (in `ops/arithmetic/mod.rs`):
+                        *   [✅] Keep its signature taking `&Tensor`.
+                        *   [✅] Keep the `match dtype` for buffer access and broadcaster setup.
+                        *   [✅] Make the *inner loop/computation* call a new generic kernel/function `binary_kernel<T: NeuraNumeric>(a: T, b: T) -> T` (defined with the specific operation like `a + b`). (Achieved by passing closures calling the kernel)
+                        *   [✅] Ensure output tensor creation uses the correct DType.
+                    *   [ ] **Option B (Refactor Kernel Directly):** If helper refactoring is too complex, create a generic `add_kernel<T: NeuraNumeric>` similar to `neg_kernel` but handling two inputs (potentially with broadcasting iterators made generic or accepting slices). Modify `add_op` to call this kernel.
+                    *   [✅] Choose Option A or B. Implement the chosen approach for `add_op`. (Chose modified Option A)
+                    *   [✅] Ensure `AddBackward` still functions correctly. (Verified via tests)
+                    *   [✅] Verify with `cargo test --workspace`.
+                *   **Step 1.A.9.4.5: Evaluate PoC and Plan Wider Rollout**
+                    *   [ ] Review the refactored `neg_op` and `add_op` code.
+                    *   [ ] Assess: Is the `NeuraNumeric` trait sufficient? Is the pattern clean and repeatable? Does it significantly reduce kernel code duplication?
+                    *   [ ] Decide:
+                        *   Proceed: Apply the pattern to other ops.
+                        *   Refine: Modify the trait or pattern.
+                        *   Revert/Postpone: If the abstraction proves too complex or doesn't yield benefits now.
+                *   **Step 1.A.9.4.6: Apply Generic Kernel Pattern Iteratively (If PoC Successful)**
+                    *   [ ] Gradually refactor other arithmetic op kernels (`sub`, `mul`, `div`, `pow`, `ln`, etc.) using the established pattern.
+                    *   [ ] Refactor reduction kernels (`sum_kernel`, `mean_kernel`, `max_kernel`).
+                    *   [ ] Refactor comparison kernels (`equal_op`).
+                    *   [ ] Refactor other relevant kernels as identified.
+                    *   [ ] Ensure tests pass after each refactoring step.
         *   **Step 1.A.10: Refactoring Implementation (Iterative)**
             *   [✅] (If applicable) Implement refactoring for Candidate 1, ensuring tests pass. -> Done for arithmetic ops.
             *   [✅] (If applicable) Implement refactoring for Candidate 2, ensuring tests pass. -> Done for arithmetic ops.
-            *   [✅] (If applicable) Implement refactoring for Candidate 3, ensuring tests pass. -> Done for unary ops (`neg`, `ln`) and `contiguous`.
-            *   [✅] Document any new utility functions/modules created during refactoring. -> `apply_binary_op_broadcasted`, `apply_unary_op`, `ContiguousBackward` documented.
+            *   [✅] (If applicable) Implement refactoring for Candidate 3, ensuring tests pass. -> Done for unary ops (`neg`, `ln`), `contiguous`, and reduction ops (`sum`, `mean`, `max`) using utilities.
+            *   [✅] Document any new utility functions/modules created during refactoring. -> `apply_binary_op_broadcasted`, `apply_unary_op`, `ContiguousBackward`, reduction utils (`process_reduction_axes`, `calculate_reduction_output_shape`, `calculate_grad_broadcast_shape`) documented (implicitly via usage/commits, need explicit doc review later).
 
 *   **Sub-Phase 1.B: Foundational NN Primitives & Core Tensor API:**
     *   🎯 **Goal:** Implement essential tensor methods and the basic building blocks for neural networks.
@@ -174,83 +215,4 @@
             *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`.
 
 *   **Phase 1 Notes:**
-    *   *Other DTypes (`I64`, `I32`, `Bool`, etc.), full mixed-type operation support, and other creation functions (`arange`, `linspace`, `eye`) are deferred to later phases (e.g., Phase 2 or 4) to keep Phase 1 focused.*
-
-## Phase 2: Optimization, Data Loading & Core DTypes
-*   🎯 **Goal:** Introduce essential components for efficient model training (optimizers, data loaders) and expand core DType support to include Integers and Booleans.
-
-*   **Sub-Phase 2.A: Optimizers (`neurarust-optim` or core):**
-    *   🎯 **Goal:** Implement standard optimization algorithms.
-    *   **Detailed Steps:**
-        *   [ ] Define `Optimizer` trait (using in-place ops from Phase 1.D).
-        *   [ ] Implement SGD optimizer.
-        *   [ ] Implement Adam optimizer (requires storing momentum tensors).
-        *   [ ] Add tests for optimizers.
-        *   [ ] Add `rustdoc`.
-
-*   **Sub-Phase 2.B: Data Loading (`neurarust-data` or core):**
-    *   🎯 **Goal:** Implement basic data loading and batching capabilities.
-    *   **Detailed Steps:**
-        *   [ ] Define `Dataset` trait.
-        *   [ ] Implement a simple `VecDataset`.
-        *   [ ] Implement basic `DataLoader` (batching, shuffling on CPU). Handle collation of tensors (requires consistent DTypes in batch initially).
-        *   [ ] Add tests for DataLoader.
-        *   [ ] Add `rustdoc`.
-
-*   **Sub-Phase 2.C: Essential DType Support (Integer, Boolean):**
-    *   🎯 **Goal:** Add support for I64, I32, and Bool DTypes to core structures and operations.
-    *   **Detailed Steps:**
-        *   [ ] Extend `DType` enum with `I64`, `I32`, `Bool`.
-        *   [ ] Extend `Buffer`/`CpuBuffer` enums with corresponding variants.
-        *   [ ] Adapt creation functions (`zeros`, `ones`, `full`, `rand`, `Tensor::new`, etc.) to handle these new DTypes.
-        *   [ ] Adapt core tensor methods (`item`, `cast` if exists, etc.) for new types.
-        *   [ ] Adapt existing `ops` (arithmetic, linalg, reduction, view, etc.) to handle new DType combinations where it makes sense (e.g., basic arithmetic for Ints, logical ops for Bool). This involves adding `match` arms and potentially new kernels. *Focus on common, sensible operations initially.*
-        *   [ ] Add tests for creating and operating on tensors with these new DTypes.
-        *   [ ] Update `rustdoc`.
-
-## Phase 3: GPU Acceleration (CUDA First)
-*(Content mostly unchanged)*
-*   🎯 **Goal:** Enable high-performance training and inference by adding GPU support.
-*   **Sub-Phase 3.A: Backend Abstraction & CUDA Setup:**
-    *   Refine `StorageDevice` / `Buffer` for GPU.
-    *   Implement `Tensor::to(device)` for CPU <-> GPU copies.
-    *   Integrate CUDA bindings and context management.
-*   **Sub-Phase 3.B: GPU Kernels & Ops Integration:**
-    *   Implement CUDA kernels or integrate libraries (cuBLAS, cuDNN) for core ops (including in-place).
-    *   Adapt core operations to dispatch to GPU implementations.
-*   **Sub-Phase 3.C: Device Management & Autograd:**
-    *   Ensure autograd works seamlessly with GPU tensors.
-    *   Adapt NN layers and optimizers for device placement.
-
-## Phase 4: Expanding NN Capabilities & Interoperability
-*(Content mostly unchanged, but can explicitly include deferred items now)*
-*   🎯 **Goal:** Broaden the scope of supported architectures, DTypes, and enable interaction with the wider ML ecosystem.
-*   **Sub-Phase 4.A: Advanced Layers & Architectures:**
-    *   Implement Convolutional layers (Conv2d).
-    *   Implement Pooling layers.
-    *   Implement basic RNN layers.
-    *   (Future: Attention, Transformers...)
-*   **Sub-Phase 4.B: Advanced DType & Op Support:** *(Revised from former 4.B)*
-    *   🎯 **Goal:** Implement full mixed-type operations and support for remaining DTypes.
-    *   **Detailed Steps:**
-        *   [ ] Implement robust mixed-type operations across all supported DTypes (Numeric, Bool) with clear type promotion rules (e.g., `f32 + i64 -> f32`, `f64 * bool -> f64`).
-        *   [ ] Implement support for any other relevant DTypes if identified (e.g., `Complex`, smaller floats/ints).
-        *   [ ] Implement remaining creation functions (`arange`, `linspace`, `eye`, etc.), ensuring DType flexibility.
-        *   [ ] Add comprehensive tests for type promotion and new creation functions.
-        *   [ ] Update `rustdoc`.
-*   **Sub-Phase 4.C: Interoperability:**
-    *   ONNX export/import capabilities.
-    *   Python bindings (PyO3).
-
-## Phase 5: Deployment & Advanced Features
-*(Content mostly unchanged)*
-*   🎯 **Goal:** Target diverse deployment scenarios and implement advanced optimization techniques.
-*   **Sub-Phase 5.A: Deployment Targets:**
-    *   WebAssembly (WASM) compilation.
-    *   Native binary deployment strategies.
-    *   Edge/Embedded considerations (ARM).
-*   **Sub-Phase 5.B: Advanced Optimizations:**
-    *   Inference Optimizations (Quantization, Pruning - Exploratory).
-    *   Distributed Training (Multi-GPU/Multi-Node - Exploratory).
-
-*(This roadmap provides a high-level overview. Specific tasks within each sub-phase will be detailed as we progress.)*
+    *   *Other DTypes (`I64`, `I32`, `

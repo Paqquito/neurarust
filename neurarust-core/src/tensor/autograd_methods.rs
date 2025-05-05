@@ -352,22 +352,24 @@ impl Tensor {
     /// # Example
     /// ```
     /// use neurarust_core::tensor::Tensor;
-    /// // Import add_op via son chemin complet pour le doctest
-    /// use neurarust_core::ops::arithmetic::add::add_op;
     ///
-    /// let a = Tensor::new(vec![2.0f32], vec![]).unwrap();
+    /// let a = Tensor::new(vec![2.0f32, 5.0], vec![2]).unwrap(); // Make it non-scalar
     /// a.set_requires_grad(true).unwrap();
-    /// let b = Tensor::new(vec![3.0f32], vec![]).unwrap();
-    /// b.set_requires_grad(true).unwrap();
     ///
-    /// let c = add_op(&a, &b).unwrap(); // c requires grad and has a grad_fn
+    /// // Use a public tensor method like sum() to create a grad_fn
+    /// let c_res = a.sum(None::<Vec<usize>>.as_deref(), false); // Sum all elements
+    /// assert!(c_res.is_ok());
+    /// let c = c_res.unwrap();
+    /// 
     /// assert!(c.requires_grad());
     /// assert!(c.grad_fn().is_some());
     ///
     /// let d = c.detach(); // d shares data with c
     /// assert!(!d.requires_grad());
     /// assert!(d.grad_fn().is_none());
-    /// assert_eq!(c.item_f32().unwrap(), d.item_f32().unwrap());
+    /// // Check value (sum is 7.0)
+    /// assert!((c.item_f32().unwrap() - 7.0).abs() < 1e-6);
+    /// assert!((d.item_f32().unwrap() - 7.0).abs() < 1e-6);
     /// ```
     pub fn detach(&self) -> Tensor {
         let current_guard = self.read_data();
