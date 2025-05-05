@@ -6,16 +6,47 @@ use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 // Restore necessary imports
 
-/// Performs the reshape operation. Currently only supports creating a view
-/// for contiguous tensors. For non-contiguous tensors, call `.contiguous()` first.
+/// Reshapes the tensor into a new shape, creating a view if possible.
+///
+/// This is a crate-internal function, typically called via the `Tensor::reshape` method.
+/// It attempts to create a view of the input tensor with the `new_shape_vec`.
+///
+/// **Constraint:** This operation can only create a view (without copying data) if the
+/// input tensor is **contiguous**. If the input tensor is not contiguous, this function
+/// will return an error. In such cases, call `.contiguous()` on the tensor before reshaping
+/// to obtain a reshaped tensor (which will involve a data copy).
+///
+/// The total number of elements must remain the same between the original shape and the new shape.
 ///
 /// # Arguments
-/// * `tensor`: The input tensor.
-/// * `new_shape_vec`: The desired new shape.
+///
+/// * `input` - The input tensor (must be contiguous).
+/// * `new_shape_vec` - The desired new shape as a `Vec<usize>`.
 ///
 /// # Returns
-/// A new Tensor representing the reshaped view, or an error.
-pub fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+///
+/// A `Result` containing the reshaped `Tensor` view. Returns an error if:
+/// *   The total number of elements differs between the input and target shapes.
+/// *   The input tensor is not contiguous.
+/// *   Device or autograd operations fail.
+///
+/// # Example (Conceptual - Use `Tensor::reshape` instead)
+///
+/// ```rust,ignore
+/// // Assuming t is a contiguous Tensor of shape [2, 6]
+/// // use crate::ops::view::reshape::reshape_op; // Assuming direct access
+///
+/// let reshaped_view = reshape_op(&t, vec![4, 3])?;
+/// // reshaped_view will have shape [4, 3]
+///
+/// // Assuming non_contig is a non-contiguous Tensor of shape [2, 6]
+/// // let error = reshape_op(&non_contig, vec![4, 3]); // This will return an error
+/// // assert!(error.is_err());
+///
+/// // Correct approach for non-contiguous:
+/// // let reshaped_copied = non_contig.contiguous()?.reshape(vec![4, 3])?;
+/// ```
+pub(crate) fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),
         reason: "Failed to lock input TensorData for read in reshape_op".to_string(),
@@ -83,6 +114,11 @@ pub fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, N
 
 // --- Reshape Backward Operation ---
 
+/// Backward operation context for the `reshape` operation.
+///
+/// Stores the original input tensor node and the original shape (`original_shape`)
+/// before the reshape operation was applied. This shape is needed to reshape
+/// the incoming gradient back during the backward pass.
 #[derive(Debug)]
 struct ReshapeBackward {
     input_node: Arc<RwLock<TensorData>>,
@@ -90,9 +126,25 @@ struct ReshapeBackward {
 }
 
 impl BackwardOp for ReshapeBackward {
+    /// Computes the gradient for the reshape operation.
+    ///
+    /// The gradient of a reshape operation is simply the incoming gradient (`grad_output`)
+    /// reshaped back to the original input tensor's shape.
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output of the original reshape operation.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Tensor>` with a single element: the gradient
+    /// with respect to the original input tensor (which is the reshaped `grad_output`).
+    /// Returns an error if the reshape operation on the gradient fails.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        // Reshape the gradient back to the original input shape
         reshape_op(grad_output, self.original_shape.clone())
-             .map(|grad_input| vec![grad_input])
+             .map(|grad_input| vec![grad_input]) // Wrap the result in a Vec
              .map_err(|e| NeuraRustError::BackwardError(format!("Error in ReshapeBackward: {}", e)))
      }
  

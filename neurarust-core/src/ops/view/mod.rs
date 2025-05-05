@@ -1,5 +1,36 @@
 // neurarust-core/src/ops/view/mod.rs
 
+//! # Tensor View Operations
+//!
+//! This module provides operations that create new `Tensor` views without copying the
+//! underlying data. These operations manipulate the tensor's metadata (shape, strides, offset)
+//! to present a different perspective on the same data buffer.
+//!
+//! View operations are crucial for efficiency, especially in deep learning, as they avoid
+//! unnecessary memory allocations and copies.
+//!
+//! ## Key Operations:
+//! - **[`slice_op`](slice/fn.slice_op.html)**: Extracts a sub-tensor (slice).
+//! - **[`transpose_op`](transpose/fn.transpose_op.html)**: Swaps two dimensions.
+//! - **[`permute_op`](permute/fn.permute_op.html)**: Rearranges dimensions according to a given permutation.
+//! - **[`reshape_op`](reshape/fn.reshape_op.html)**: Changes the shape of the tensor while preserving the number of elements.
+//! - **[`expand_op`](fn.expand_op.html)**: Broadcasts singleton dimensions (size 1) to a larger size.
+//!
+//! ## Autograd Integration:
+//! Each view operation (`_op` function) typically has a corresponding `Backward` struct
+//! (e.g., `SliceBackward`, `TransposeBackward`) that implements the [`BackwardOp`](../../autograd/trait.BackwardOp.html)
+//! trait. These structures store the necessary context (like original shapes or axes)
+//! to correctly propagate gradients back through the view operation during the backward pass.
+//!
+//! For example, the backward pass of a `reshape` operation might involve reshaping the incoming
+//! gradient back to the input tensor's original shape. The backward of `expand` requires summing
+//! the gradient along the dimensions that were expanded.
+//!
+//! ## Usage:
+//! These `_op` functions are usually called internally by methods on the `Tensor` struct
+//! (e.g., [`tensor.slice()`](../../tensor/struct.Tensor.html#method.slice), [`tensor.transpose()`](../../tensor/struct.Tensor.html#method.transpose), etc.),
+//! which provide a more user-friendly interface.
+
 pub mod slice;
 pub mod transpose;
 pub mod permute;
@@ -33,20 +64,39 @@ use std::fmt::Debug;
 // --- Expand Operation ---
 
 /// Backward operation for the expand operation.
+///
+/// Stores the original input tensor node to route gradients back to it.
+/// The backward pass involves reducing the incoming gradient back to the
+/// original input shape by summing along the dimensions that were expanded.
 #[derive(Debug)]
 struct ExpandBackward {
     input_node: Arc<RwLock<TensorData>>, // Store original tensor info
-    _original_shape: Vec<usize>,
+    _original_shape: Vec<usize>, // TODO: Use this shape in backward pass
 }
 
 impl BackwardOp for ExpandBackward {
-    // Backward of expand requires reducing the gradient back to the original shape.
-    // This often involves summing along the expanded dimensions.
+    /// Computes the gradient for the expand operation.
+    ///
+    /// This requires summing the incoming gradient (`grad_output`) along the dimensions
+    /// that were expanded during the forward pass to match the original input shape.
+    ///
+    /// **Note:** This implementation is currently incomplete (`todo!`).
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output of the original expand operation.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Tensor>` with the gradient for the original input.
+    /// Should eventually return the summed gradient. Currently panics.
     fn backward(&self, _grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // TODO: Implement expand backward using a reduction operation (likely sum)
-        // Identify expanded dimensions by comparing grad_output.shape() and self.original_shape.
-        // Call sum_axes along those dimensions, with keep_dims=false.
-        todo!("Implement Expand backward using reduction (sum_axes)");
+        // Identify expanded dimensions by comparing grad_output.shape() and self._original_shape.
+        // Call sum_op along those dimensions, with keep_dims=false.
+        // Need to handle the axes correctly for sum_op.
+        todo!("Implement Expand backward using reduction (sum_op)");
     }
 
     fn inputs(&self) -> Vec<NodeId> {
@@ -55,7 +105,49 @@ impl BackwardOp for ExpandBackward {
 }
 
 /// Creates a new view of the tensor with singleton dimensions expanded
-/// to match the target shape. Does not copy data.
+/// to match the target shape, similar to broadcasting rules.
+///
+/// This operation does not copy the underlying data. It works by manipulating
+/// the tensor's strides: dimensions that are expanded from size 1 have their
+/// stride set to 0.
+///
+/// # Arguments
+///
+/// * `tensor` - The input tensor.
+/// * `target_shape` - The desired shape after expansion. Must be compatible with the
+///   input tensor's shape according to broadcasting rules:
+///   - The target shape's rank must be greater than or equal to the input's rank.
+///   - When iterating dimensions from right to left:
+///     - If the input dimension size is equal to the target dimension size, it's compatible.
+///     - If the input dimension size is 1, it can be expanded to match the target size (stride becomes 0).
+///     - If the input dimension size is different from the target dimension size and not 1, it's an error.
+///     - If the target shape has more dimensions than the input, the new leading dimensions
+///       are treated as being expanded from size 1 (stride becomes 0).
+///
+/// # Returns
+///
+/// A `Result` containing the expanded `Tensor` view. Returns an error if:
+/// *   The target shape is incompatible with the input shape.
+/// *   Device or autograd operations fail.
+///
+/// # Example
+///
+/// ```rust,ignore
+/// // Assuming t is a Tensor of shape [3, 1] with data [[1], [2], [3]]
+/// // use crate::ops::view::expand_op; // Assuming direct access
+///
+/// let expanded = expand_op(&t, vec![3, 4])?;
+/// // expanded will have shape [3, 4]
+/// // Data effectively looks like:
+/// // [[1, 1, 1, 1],
+/// //  [2, 2, 2, 2],
+/// //  [3, 3, 3, 3]]
+/// // But the underlying data buffer is unchanged.
+///
+/// // Assuming s is a scalar Tensor (shape []) with value 5
+/// let expanded_scalar = expand_op(&s, vec![2, 2])?;
+/// // expanded_scalar will have shape [2, 2] with all elements 5.
+/// ```
 pub fn expand_op(tensor: &Tensor, target_shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let input_guard = tensor.read_data();
     let input_shape = &input_guard.shape;

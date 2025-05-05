@@ -8,14 +8,34 @@ use super::utils;
 
 /// Performs the transpose operation between two dimensions, creating a view.
 ///
+/// This is a crate-internal function, typically called via the `Tensor::transpose` method.
+/// It swaps the specified dimensions `dim1` and `dim2` of the input tensor,
+/// returning a new tensor view without copying data. The underlying data buffer
+/// and offset remain the same, only the shape and strides are modified.
+///
 /// # Arguments
-/// * `tensor`: The input tensor.
-/// * `dim1`: The first dimension to transpose.
-/// * `dim2`: The second dimension to transpose.
+///
+/// * `input` - The input tensor.
+/// * `dim1` - The first dimension to transpose.
+/// * `dim2` - The second dimension to transpose.
 ///
 /// # Returns
-/// A new Tensor representing the transposed view, or an error.
-pub fn transpose_op(input: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, NeuraRustError> {
+///
+/// A `Result` containing the transposed `Tensor` view. Returns an error if:
+/// *   `dim1` or `dim2` are out of bounds for the tensor's rank.
+/// *   Device or autograd operations fail.
+///
+/// # Example (Conceptual - Use `Tensor::transpose` instead)
+///
+/// ```rust,ignore
+/// // Assuming t is a Tensor of shape [2, 3, 4]
+/// // use crate::ops::view::transpose::transpose_op; // Assuming direct access
+///
+/// // Transpose dimensions 0 and 2
+/// let transposed_view = transpose_op(&t, 0, 2)?;
+/// // transposed_view will have shape [4, 3, 2]
+/// ```
+pub(crate) fn transpose_op(input: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),
         reason: "Failed to lock input TensorData for read in transpose_op".to_string(),
@@ -74,28 +94,44 @@ pub fn transpose_op(input: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, 
     Ok(output_tensor)
 }
 
-// --- Backward Operation Structure ---
+/// Backward operation context for the `transpose` operation.
+///
+/// Stores the original input tensor node and the dimensions that were swapped
+/// (`dim1`, `dim2`) during the forward pass. This information is needed to
+/// transpose the incoming gradient correctly.
 #[derive(Debug)]
 struct TransposeBackward {
-    // Store the input node Arc for graph traversal
     input_node: Arc<RwLock<TensorData>>,
     dim1: usize,
     dim2: usize,
     _original_shape: Vec<usize>,
 }
 
-// --- Backward Operation Implementation ---
 impl BackwardOp for TransposeBackward {
+    /// Computes the gradient for the transpose operation.
+    ///
+    /// The gradient of a transpose operation is simply the transpose of the incoming
+    /// gradient (`grad_output`) with the same dimensions swapped back.
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output of the original transpose operation.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Tensor>` with a single element: the gradient
+    /// with respect to the original input tensor (which is the transposed `grad_output`).
+    /// Returns an error if the transpose operation on the gradient fails.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // Transposing the gradient is the same as transposing the input
         let grad_input = transpose_op(grad_output, self.dim1, self.dim2)?;
 
         // The autograd engine will handle accumulation. Just return the calculated grad.
-        Ok(vec![grad_input]) 
+        Ok(vec![grad_input])
     }
 
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
-        // Return the pointer to the stored input node
         vec![Arc::as_ptr(&self.input_node)]
     }
 }

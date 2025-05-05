@@ -11,33 +11,66 @@ use crate::buffer::{Buffer, CpuBuffer};
 use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
 
-// Define SliceArg if it doesn't exist or import it
+/// Represents the different ways to index or slice a tensor dimension.
+///
+/// This enum is used as input to the `slice` operation.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum SliceArg {
-    Ellipsis,        // Represents `...`
-    Slice(isize, isize, isize), // Represents start, end, step
-    Index(isize),      // Represents a single index
-    NewAxis,         // Represents `None` or `np.newaxis`
+    /// Represents the `...` ellipsis, expanding to the necessary number of full slices (`:`).
+    Ellipsis,
+    /// Represents a standard slice `start:end:step`.
+    /// Indices can be negative (counting from the end).
+    Slice(isize, isize, isize),
+    /// Represents indexing with a single integer.
+    /// Removes the dimension being indexed.
+    Index(isize),
+    /// Represents inserting a new dimension of size 1 (like `np.newaxis`).
+    NewAxis,
 }
 
-// Simplified SliceRange used internally after parsing SliceArg
+/// Internal representation of a processed slice for a single dimension.
 #[derive(Debug, Clone, Copy)]
 pub(crate) struct SliceRange {
+    /// The starting index (inclusive) in the original dimension.
     pub start: usize,
+    /// The step size for the slice.
     pub step: usize,
-    pub size: usize, // Size of this dimension after slicing
+    /// The number of elements selected in this dimension (size of the dimension after slicing).
+    pub size: usize,
 }
 
-// --- Backward Operation Structure ---
+/// Backward operation context for the `slice` operation.
+///
+/// Stores information needed to propagate gradients back through a slice:
+/// - The original input tensor's data (`input_node`).
+/// - The shape of the original input tensor (`original_shape`).
+/// - The calculated `SliceRange` for each dimension (`ranges`), defining the exact slice taken.
 #[derive(Debug)]
 struct SliceBackward {
     input_node: Arc<RwLock<TensorData>>,
     original_shape: Vec<usize>,
-    ranges: Vec<SliceRange>, // Use SliceRange
+    ranges: Vec<SliceRange>,
 }
 
 // --- Backward Operation Implementation ---
 impl BackwardOp for SliceBackward {
+    /// Computes the gradient for the slice operation.
+    ///
+    /// This involves creating a gradient tensor filled with zeros that has the same
+    /// shape as the original input tensor. Then, the incoming gradient (`grad_output`)
+    /// is added (scattered) into this zero tensor at the locations corresponding to
+    /// the original slice.
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output slice of the original operation.
+    ///
+    /// # Returns
+    ///
+    /// An `Ok(vec![])` as the gradient is accumulated directly into the input node's
+    /// `.grad` field. Returns an error if memory allocation, buffer access, or
+    /// arithmetic operations fail.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let input_node_guard = self.input_node.read().map_err(|_| NeuraRustError::LockError {
             lock_type: "read".to_string(),
@@ -179,8 +212,52 @@ impl BackwardOp for SliceBackward {
     }
 }
 
-// --- Forward Operation ---
-pub fn slice_op(
+/// Creates a view of the tensor representing a slice along multiple dimensions.
+///
+/// This is a crate-internal function, typically called via the `Tensor::slice` method.
+/// It takes an input tensor and a slice of `SliceArg` enums, returning a new tensor
+/// view without copying data.
+///
+/// **Note:** The parsing logic for `SliceArg` (handling Ellipsis, negative indices,
+/// NewAxis) is complex and currently marked as TODO/partially implemented in the source.
+/// The backward pass assumes valid `SliceRange` are computed.
+///
+/// # Arguments
+///
+/// * `input` - The tensor to slice.
+/// * `ranges` - A slice of `SliceArg` specifying the slice for each dimension.
+///   The number and interpretation of args must be compatible with the tensor's rank.
+///
+/// # Returns
+///
+/// A `Result` containing the sliced `Tensor` view. Returns an error if:
+/// *   Slice arguments are invalid or incompatible with the tensor shape.
+/// *   Memory allocation or autograd operations fail.
+///
+/// # Example (Conceptual - Use `Tensor::slice` instead)
+///
+/// ```rust,ignore
+/// // Assuming t is a Tensor of shape [5, 10]
+/// // use crate::ops::view::slice::slice_op;
+/// // use crate::ops::view::slice::SliceArg;
+///
+/// // Slice corresponding to t[1:4:2, 5:]
+/// let slice_args = [
+///     SliceArg::Slice(1, 4, 2), // Dimension 0: start=1, end=4 (exclusive), step=2 -> indices 1, 3
+///     SliceArg::Slice(5, 10, 1), // Dimension 1: start=5, end=10 (exclusive), step=1 -> indices 5, 6, 7, 8, 9
+/// ];
+/// let sliced_view = slice_op(&t, &slice_args)?;
+/// // sliced_view will have shape [2, 5]
+///
+/// // Slice corresponding to t[..., 0] (last element along first axis)
+/// let slice_args_ellipsis = [
+///     SliceArg::Ellipsis,
+///     SliceArg::Index(0),
+/// ];
+/// let sliced_view_ellipsis = slice_op(&t, &slice_args_ellipsis)?;
+/// // sliced_view_ellipsis will have shape [5]
+/// ```
+pub(crate) fn slice_op(
     input: &Tensor,
     ranges: &[SliceArg],
 ) -> Result<Tensor, NeuraRustError> {
