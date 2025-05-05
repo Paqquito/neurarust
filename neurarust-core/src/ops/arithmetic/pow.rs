@@ -7,10 +7,19 @@ use crate::tensor::utils::broadcast_shapes;
 use crate::ops::arithmetic::mul_op;
 use crate::ops::math_elem::ln_op;
 use crate::types::DType;
+use crate::ops::traits::NeuraNumeric;
+use crate::tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64};
 
-use num_traits::{Float, Zero};
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
+
+// --- Simple Generic Kernel ---
+
+/// Generic kernel for element-wise power operation.
+fn pow_kernel<T: NeuraNumeric>(base: T, exponent: T) -> T {
+    // NeuraNumeric requires Float trait which has powf/powi
+    base.powf(exponent) // Use powf for T^T (float^float)
+}
 
 // --- PowBackward Definition ---
 
@@ -115,203 +124,113 @@ impl BackwardOp for PowBackward {
     }
 }
 
-// --- pow_kernel (Private Calculation Core) ---
-
-/// **(Internal)** Private kernel for element-wise power calculation with broadcasting.
-///
-/// This function performs the core `base.powf(exponent)` calculation for each element,
-/// handling broadcasting logic manually by iterating through the output shape and calculating
-/// the corresponding physical indices in the potentially broadcasted input buffers.
-///
-/// # Type Constraints
-/// Requires the generic type `T` to implement `Float`, `Copy`, `Zero`, and `Debug`.
-///
-/// # Arguments
-/// * `output_shape`: The shape of the output tensor after broadcasting.
-/// * `base_data`, `exponent_data`: Slices containing the underlying data for base and exponent.
-/// * `base_shape`, `exponent_shape`: Original shapes of base and exponent tensors.
-/// * `base_strides`, `exponent_strides`: Strides of base and exponent tensors.
-/// * `base_offset`, `exponent_offset`: Starting offsets within the data buffers.
-///
-/// # Returns
-/// A `Result` containing a `Vec<T>` with the computed output data, or a `NeuraRustError` if an index is out of bounds.
-fn pow_kernel<T>(
-    output_shape: &[usize],
-    base_data: &[T],
-    base_shape: &[usize],
-    base_strides: &[usize],
-    base_offset: usize,
-    exponent_data: &[T],
-    exponent_shape: &[usize],
-    exponent_strides: &[usize],
-    exponent_offset: usize,
-) -> Result<Vec<T>, NeuraRustError>
-where
-    T: Float + Copy + Zero + Debug,
-{
-    let output_numel = output_shape.iter().product::<usize>();
-    let mut output_data = vec![T::zero(); output_numel];
-    let mut current_coords = vec![0; output_shape.len()];
-
-    for i in 0..output_numel {
-        let mut base_physical_idx = base_offset;
-        for dim in 0..base_shape.len() {
-            let broadcast_dim_offset = output_shape.len() - base_shape.len();
-            let coord_idx = broadcast_dim_offset + dim;
-            let index = if base_shape[dim] == 1 && output_shape[coord_idx] > 1 { 0 } else { current_coords[coord_idx] };
-            base_physical_idx += index * base_strides[dim];
-        }
-
-        let mut exp_physical_idx = exponent_offset;
-        for dim in 0..exponent_shape.len() {
-            let broadcast_dim_offset = output_shape.len() - exponent_shape.len();
-            let coord_idx = broadcast_dim_offset + dim;
-            let index = if exponent_shape[dim] == 1 && output_shape[coord_idx] > 1 { 0 } else { current_coords[coord_idx] };
-            exp_physical_idx += index * exponent_strides[dim];
-        }
-
-        if base_physical_idx >= base_data.len() || exp_physical_idx >= exponent_data.len() {
-            return Err(NeuraRustError::InternalError(format!(
-                 "Pow kernel index out of bounds. TargetCoords: {:?}, BaseIdx: {}, ExpIdx: {}, BaseLen: {}, ExpLen: {}",
-                 current_coords,
-                 base_physical_idx,
-                 exp_physical_idx,
-                 base_data.len(),
-                 exponent_data.len()
-            )));
-        }
-
-        let base_val = base_data[base_physical_idx];
-        let exp_val = exponent_data[exp_physical_idx];
-        output_data[i] = base_val.powf(exp_val);
-
-        if i < output_numel - 1 {
-            let mut dim_to_inc = output_shape.len();
-            while dim_to_inc > 0 {
-                dim_to_inc -= 1;
-                current_coords[dim_to_inc] += 1;
-                if current_coords[dim_to_inc] < output_shape[dim_to_inc] { break; }
-                current_coords[dim_to_inc] = 0;
-            }
-        }
-    }
-    Ok(output_data)
-}
-
-// --- pow_op Implementation (Public API + Autograd Setup) ---
+// --- pow_op Implementation (Refactored) ---
 
 /// Computes `base` raised to the power of `exponent` element-wise (`base` ^ `exponent`).
-///
-/// Supports broadcasting between `base` and `exponent` if their shapes are compatible.
-///
-/// This operation supports automatic differentiation.
-///
-/// # Arguments
-/// * `base`: The base `Tensor`.
-/// * `exponent`: The exponent `Tensor`.
-///
-/// # Returns
-/// A `Result` containing a new `Tensor` representing `base` raised to the power of `exponent`,
-/// or a `NeuraRustError`.
-///
-/// # Errors
-/// Returns `NeuraRustError` if:
-/// - Tensors are not on the CPU (`DeviceMismatch`).
-/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
-/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
-/// - An internal error occurs during computation or memory allocation.
-///
-/// **Note on Domain:** Standard floating-point `powf` behavior applies. For example,
-/// a negative base raised to a non-integer exponent can result in `NaN`.
-/// The gradient calculation w.r.t the exponent also involves \( \ln(\text{base}) \),
-/// which is undefined for non-positive bases.
 pub fn pow_op(base: &Tensor, exponent: &Tensor) -> Result<Tensor, NeuraRustError> {
-    let base_guard = base.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock base data".to_string()))?;
-    let exponent_guard = exponent.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock exponent data".to_string()))?;
+    let base_guard = base.read_data();
+    let exponent_guard = exponent.read_data();
 
-    if base_guard.device != exponent_guard.device {
+    // --- Device Check ---
+    if base_guard.device != StorageDevice::CPU || exponent_guard.device != StorageDevice::CPU {
         return Err(NeuraRustError::DeviceMismatch {
             operation: "pow_op".to_string(),
-            expected: base_guard.device,
-            actual: exponent_guard.device,
+            expected: StorageDevice::CPU,
+            actual: if base_guard.device != StorageDevice::CPU { base_guard.device } else { exponent_guard.device },
         });
     }
-    let device = base_guard.device;
-    if device != StorageDevice::CPU {
-         return Err(NeuraRustError::UnsupportedOperation(
-            "pow_op currently only supports CPU tensors.".to_string(),
-        ));
+    // --- DType Check (Allow matching F32 or F64) ---
+    if base_guard.dtype != exponent_guard.dtype {
+        return Err(NeuraRustError::DataTypeMismatch {
+            operation: "pow_op".to_string(),
+            expected: base_guard.dtype,
+            actual: exponent_guard.dtype,
+        });
     }
+    let dtype = base_guard.dtype;
 
-    if base_guard.dtype != DType::F32 || exponent_guard.dtype != DType::F32 {
-        return Err(NeuraRustError::UnsupportedOperation(
-            "pow_op currently only supports F32 tensors.".to_string(),
-        ));
-    }
-    let _output_dtype = DType::F32;
-
+    // --- Broadcasting ---
     let output_shape = broadcast_shapes(&base_guard.shape, &exponent_guard.shape)?;
+    let numel = output_shape.iter().product();
 
-    let base_shape = base_guard.shape.clone();
-    let exponent_shape = exponent_guard.shape.clone();
-    let base_strides = base_guard.strides.clone();
-    let exponent_strides = exponent_guard.strides.clone();
-    let base_offset = base_guard.offset;
-    let exponent_offset = exponent_guard.offset;
-    let base_requires_grad = base_guard.requires_grad;
-    let exponent_requires_grad = exponent_guard.requires_grad;
-    let autograd_needed = base_requires_grad || exponent_requires_grad;
+    // --- Prepare for Autograd (Clones needed by PowBackward) --- 
+    let requires_grad = base_guard.requires_grad || exponent_guard.requires_grad;
+    let base_node_arc = if requires_grad { Some(Arc::clone(&base.data)) } else { None };
+    let exponent_node_arc = if requires_grad { Some(Arc::clone(&exponent.data)) } else { None };
+    // PowBackward specifically needs these clones
+    let base_clone = if requires_grad { Some(base.clone()) } else { None }; 
+    let exponent_clone = if requires_grad { Some(exponent.clone()) } else { None };
 
-    let base_buffer_arc = base_guard.buffer().try_get_cpu_f32()?.clone(); 
-    let exponent_buffer_arc = exponent_guard.buffer().try_get_cpu_f32()?.clone();
-    
-    let base_node_arc = if autograd_needed { Some(base.data.clone()) } else { None };
-    let exponent_node_arc = if autograd_needed { Some(exponent.data.clone()) } else { None };
-    let base_clone = if autograd_needed { Some(base.clone()) } else { None };
-    let exponent_clone = if autograd_needed { Some(exponent.clone()) } else { None };
-    
-    drop(base_guard);
-    drop(exponent_guard);
+    // --- DType Dispatch for Computation using Broadcasting Iterators --- 
+    let result_tensor = match dtype {
+        DType::F32 => {
+            let base_buffer = base_guard.buffer.try_get_cpu_f32()?;
+            let exponent_buffer = exponent_guard.buffer.try_get_cpu_f32()?;
+            
+            let iter_base = NdArrayBroadcastingIter::new(base_buffer, &base_guard.shape, &base_guard.strides, base_guard.offset, &output_shape)?;
+            let iter_exponent = NdArrayBroadcastingIter::new(exponent_buffer, &exponent_guard.shape, &exponent_guard.strides, exponent_guard.offset, &output_shape)?;
+            
+            // Use the simple pow_kernel
+            let output_data_vec: Vec<f32> = iter_base.zip(iter_exponent)
+                .map(|(vbase, vexponent)| pow_kernel::<f32>(vbase, vexponent))
+                .collect();
+            
+            if output_data_vec.len() != numel {
+                 return Err(NeuraRustError::InternalError(format!(
+                    "pow_op F32: Output vec len {} mismatch with expected numel {}",
+                     output_data_vec.len(), numel
+                )));
+            }
+            
+            drop(base_guard); drop(exponent_guard);
+            Tensor::new(output_data_vec, output_shape)?
+        }
+        DType::F64 => {
+            let base_buffer = base_guard.buffer.try_get_cpu_f64()?;
+            let exponent_buffer = exponent_guard.buffer.try_get_cpu_f64()?;
 
-    let result_data_vec = pow_kernel(
-        &output_shape,
-        base_buffer_arc.as_slice(),
-        &base_shape,
-        &base_strides,
-        base_offset,
-        exponent_buffer_arc.as_slice(),
-        &exponent_shape,
-        &exponent_strides,
-        exponent_offset,
-    )?;
-    let result_buffer_arc = Arc::new(result_data_vec);
+            let iter_base = NdArrayBroadcastingIterF64::new(base_buffer, &base_guard.shape, &base_guard.strides, base_guard.offset, &output_shape)?;
+            let iter_exponent = NdArrayBroadcastingIterF64::new(exponent_buffer, &exponent_guard.shape, &exponent_guard.strides, exponent_guard.offset, &output_shape)?;
 
-    let output_td = TensorData::new(
-        result_buffer_arc.as_ref().clone(),
-        output_shape,
-    )?;
-    let result_tensor = Tensor { data: Arc::new(RwLock::new(output_td)) };
+            // Use the simple pow_kernel
+            let output_data_vec: Vec<f64> = iter_base.zip(iter_exponent)
+                .map(|(vbase, vexponent)| pow_kernel::<f64>(vbase, vexponent))
+                .collect();
 
-    if autograd_needed {
-        let a_arc = base_node_arc.ok_or_else(|| NeuraRustError::InternalError("Missing base_node_arc".to_string()))?;
-        let e_arc = exponent_node_arc.ok_or_else(|| NeuraRustError::InternalError("Missing exponent_node_arc".to_string()))?;
-        let b_clone = base_clone.ok_or_else(|| NeuraRustError::InternalError("Missing base_clone".to_string()))?;
-        let exp_clone = exponent_clone.ok_or_else(|| NeuraRustError::InternalError("Missing exponent_clone".to_string()))?;
+            if output_data_vec.len() != numel {
+                 return Err(NeuraRustError::InternalError(format!(
+                    "pow_op F64: Output vec len {} mismatch with expected numel {}",
+                     output_data_vec.len(), numel
+                )));
+            }
+
+            drop(base_guard); drop(exponent_guard);
+            Tensor::new_f64(output_data_vec, output_shape)?
+        }
+    };
+
+    // --- Autograd Setup --- 
+    if requires_grad {
+        let a_arc = base_node_arc.ok_or_else(|| NeuraRustError::InternalError("Missing base_node_arc for pow_op autograd".to_string()))?;
+        let e_arc = exponent_node_arc.ok_or_else(|| NeuraRustError::InternalError("Missing exponent_node_arc for pow_op autograd".to_string()))?;
+        let b_clone = base_clone.ok_or_else(|| NeuraRustError::InternalError("Missing base_clone for pow_op autograd".to_string()))?;
+        let exp_clone = exponent_clone.ok_or_else(|| NeuraRustError::InternalError("Missing exponent_clone for pow_op autograd".to_string()))?;
+        // Crucially, PowBackward also needs the output clone
         let output_clone = result_tensor.clone();
 
-        let mut output_guard = result_tensor.data.write().map_err(|_| NeuraRustError::InternalError("Failed to lock output tensor data for writing".to_string()))?;
+        let mut output_guard = result_tensor.write_data(); // Use helper method
         output_guard.requires_grad = true;
         let backward_context = PowBackward {
             base_node: a_arc,
             exponent_node: e_arc,
             base_clone: b_clone,
             exponent_clone: exp_clone,
-            output_clone,
-            base_requires_grad,
-            exponent_requires_grad,
+            output_clone, // Pass the output clone
+            base_requires_grad: base.requires_grad(), // Read requires_grad again just in case
+            exponent_requires_grad: exponent.requires_grad(),
         };
         output_guard.grad_fn = Some(Arc::new(backward_context));
-        println!("PowBackward grad_fn set for pow result.");
+        // println!("PowBackward grad_fn set for pow result."); // Keep commented
     }
 
     Ok(result_tensor)
