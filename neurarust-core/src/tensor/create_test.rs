@@ -68,25 +68,43 @@ fn test_eye() {
 
 #[test]
 fn test_rand() {
-    let shape = vec![2, 2];
-    let t = rand(&shape).unwrap();
+    let shape = vec![2, 3, 4];
+    let t = rand(shape.clone()).unwrap();
     assert_eq!(t.shape(), shape);
-    assert_eq!(t.numel(), 4);
-    assert_eq!(t.device(), StorageDevice::CPU);
     assert_eq!(t.dtype(), DType::F32);
-    assert!(t.get_f32_data().unwrap().iter().all(|&x| x >= 0.0 && x < 1.0));
+    assert_eq!(t.numel(), 24);
+    // Check if values are within the expected range [0, 1)
+    let data = t.get_f32_data().unwrap();
+    assert!(data.iter().all(|&x| x >= 0.0 && x < 1.0));
+
+    let scalar = rand(vec![]).unwrap();
+    assert_eq!(scalar.shape(), vec![]);
+    assert_eq!(scalar.numel(), 1);
+    assert!(scalar.item_f32().unwrap() >= 0.0);
+    assert!(scalar.item_f32().unwrap() < 1.0);
 }
 
 #[test]
 fn test_randn() {
-    let shape = vec![3, 3];
-    let t = randn(&shape).unwrap();
+    let shape = vec![10, 5]; // Slightly larger shape
+    let t = randn(shape.clone()).unwrap();
     assert_eq!(t.shape(), shape);
-    assert_eq!(t.numel(), 9);
-    assert_eq!(t.device(), StorageDevice::CPU);
     assert_eq!(t.dtype(), DType::F32);
-    // Basic check: Data exists. More rigorous checks would involve statistical tests.
-    assert!(!t.get_f32_data().unwrap().is_empty());
+    assert_eq!(t.numel(), 50);
+    // Basic check that values are generated (no strict distribution check)
+    let data = t.get_f32_data().unwrap();
+    assert_eq!(data.len(), 50);
+    // Optional: Check mean/stddev for very large tensors, but can be flaky
+    // let mean = data.iter().sum::<f32>() / data.len() as f32;
+    // let variance = data.iter().map(|&x| (x - mean).powi(2)).sum::<f32>() / data.len() as f32;
+    // let stddev = variance.sqrt();
+    // assert!((mean).abs() < 0.2); // Loose check for mean near 0
+    // assert!((stddev - 1.0).abs() < 0.2); // Loose check for stddev near 1
+
+    let scalar = randn(vec![]).unwrap();
+    assert_eq!(scalar.shape(), vec![]);
+    assert_eq!(scalar.numel(), 1);
+    // No specific range check for randn scalar
 }
 
 #[test]

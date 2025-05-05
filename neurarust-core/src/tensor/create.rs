@@ -3,6 +3,8 @@
 use crate::tensor::Tensor;
 use crate::error::NeuraRustError;
 use crate::types::DType;
+use rand::Rng;
+use rand_distr::StandardNormal;
  // Import necessary types
 
 /// Creates a new CPU tensor filled with zeros with the specified shape.
@@ -316,43 +318,61 @@ pub fn eye(n: usize) -> Result<Tensor, NeuraRustError> {
     Tensor::new(data_vec, vec![n, n])
 }
 
-use rand::Rng;
-use rand_distr::{Distribution, StandardNormal};
-
-/// Creates a CPU tensor with the given shape filled with random values from a uniform distribution between 0.0 and 1.0.
+/// Creates a tensor with the given shape, filled with random numbers from a uniform
+/// distribution between 0.0 (inclusive) and 1.0 (exclusive).
 ///
-/// The tensor will have `DType::F32`.
-/// Uses the `rand` crate for random number generation.
+/// The tensor will have `DType::F32` and be located on the `CPU`.
 ///
 /// # Arguments
-/// * `shape`: A slice defining the dimensions of the tensor.
+/// * `shape`: A vector representing the desired shape of the tensor.
 ///
 /// # Returns
-/// A `Result` containing the new random tensor or a `NeuraRustError`.
-pub fn rand(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+/// A `Result` containing the new `Tensor` or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::rand;
+///
+/// let tensor = rand(vec![2, 3]).unwrap();
+/// assert_eq!(tensor.shape(), vec![2, 3]);
+/// // Values should be between 0.0 and 1.0
+/// let data = tensor.get_f32_data().unwrap();
+/// assert!(data.iter().all(|&x| x >= 0.0 && x < 1.0));
+/// ```
+pub fn rand(shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let mut rng = rand::thread_rng();
-    let data_vec: Vec<f32> = (0..numel).map(|_| rng.gen::<f32>()).collect();
-    Tensor::new(data_vec, shape.to_vec())
+    let data: Vec<f32> = (0..numel).map(|_| rng.gen::<f32>()).collect();
+    Tensor::new(data, shape)
 }
 
-/// Creates a CPU tensor with the given shape filled with random values from a standard normal distribution (mean 0, variance 1).
+/// Creates a tensor with the given shape, filled with random numbers from a standard
+/// normal distribution (mean 0, standard deviation 1).
 ///
-/// The tensor will have `DType::F32`.
-/// Uses the `rand` and `rand_distr` crates for random number generation.
+/// The tensor will have `DType::F32` and be located on the `CPU`.
 ///
 /// # Arguments
-/// * `shape`: A slice defining the dimensions of the tensor.
+/// * `shape`: A vector representing the desired shape of the tensor.
 ///
 /// # Returns
-/// A `Result` containing the new random tensor or a `NeuraRustError`.
-pub fn randn(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+/// A `Result` containing the new `Tensor` or a `NeuraRustError`.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::randn;
+///
+/// let tensor = randn(vec![2, 3]).unwrap();
+/// assert_eq!(tensor.shape(), vec![2, 3]);
+/// // Values should be normally distributed (difficult to test precisely)
+/// ```
+pub fn randn(shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
     let mut rng = rand::thread_rng();
-    let data_vec: Vec<f32> = (0..numel)
-        .map(|_| StandardNormal.sample(&mut rng))
+    // Use StandardNormal distribution from rand_distr
+    let data: Vec<f32> = (0..numel)
+        .map(|_| rng.sample(StandardNormal))
         .collect();
-    Tensor::new(data_vec, shape.to_vec())
+    Tensor::new(data, shape)
 }
 
 // Link the external tests file

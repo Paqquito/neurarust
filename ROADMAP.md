@@ -125,13 +125,8 @@
             *   [✅] Add `rustdoc` for `item()`.
         *   **Step 1.B.3: Implement Basic Random Creation (`rand`, `randn`)**
             *   [✅] Implement `rand(shape)` and `randn(shape)` creation functions (likely in `src/tensor/create.rs`). Use a simple RNG initially (e.g., `rand` crate). Specify `DType` (default F32).
-            *   [ ] Implement `item<T: Copy>()` method to extract a single scalar value from a 0-dimensional tensor (or tensor with 1 element). Should return `Result<T, NeuraRustError>`.
-            *   [ ] Add tests for correct extraction and error handling (non-scalar tensor).
-            *   [ ] Add `rustdoc` for `item()`.
-        *   **Step 1.B.3: Implement Basic Random Creation (`rand`, `randn`)**
-            *   [ ] Implement `rand(shape)` and `randn(shape)` creation functions (likely in `src/tensor/create.rs`). Use a simple RNG initially (e.g., `rand` crate). Specify `DType` (default F32).
-            *   [ ] Add tests for shape correctness and basic distribution properties (e.g., range for `rand`).
-            *   [ ] Add `rustdoc` for `rand` and `randn`.
+            *   [✅] Add tests for shape correctness and basic distribution properties (e.g., range for `rand`).
+            *   [✅] Add `rustdoc` for `rand` and `randn`.
         *   **Step 1.B.4: Implement Weight Initialization Helpers (`nn::init`)**
             *   [ ] Create `src/nn/init.rs`.
             *   [ ] Implement common initializers like `kaiming_uniform_`, `kaiming_normal_`, `xavier_uniform_`, `zeros_`, `ones_`. These should operate *in-place* on a given `Tensor`.

@@ -71,6 +71,9 @@
 │   │   │   │   ├── sum.rs
 │   │   │   │   ├── sum_test.rs
 │   │   │   │   └── utils.rs
+│   │   │   ├── traits
+│   │   │   │   └── numeric.rs
+│   │   │   ├── traits.rs
 │   │   │   └── view
 │   │   │       ├── contiguous.rs
 │   │   │       ├── expand.rs
@@ -116,4 +119,4 @@
 ├── ROADMAP.md
 └── STRUCTURE.md
 
-20 directories, 97 files
+21 directories, 99 files
