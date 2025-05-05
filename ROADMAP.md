@@ -47,10 +47,10 @@
                 *   [✅] `tensor/view_methods.rs` (`slice`, `transpose`, `permute`, `reshape`, `contiguous`)
                 *   [-] `tensor/data_conversion.rs` (Methods seem covered in `accessors.rs` and `view_methods.rs`)
         *   **Step 1.A.6: `rustdoc` Documentation - Autograd**
-            *   [ ] Add module-level docs for `autograd/mod.rs`.
-            *   [ ] Add docs for `BackwardOp` trait (`autograd/mod.rs`).
-            *   [ ] Add docs for `Graph` and related functions (`graph.rs`).
-            *   [ ] Add docs for `check_grad` function (`grad_check.rs`).
+            *   [✅] Add module-level docs for `autograd/mod.rs`.
+            *   [✅] Add docs for `BackwardOp` trait (`autograd/backward_op.rs`).
+            *   [✅] Add docs for `graph.rs` (`NodeId`, `topological_sort`).
+            *   [✅] Add docs for `grad_check.rs` (`GradCheckError`, `check_grad`, `calculate_loss`).
         *   **Step 1.A.7: `rustdoc` Documentation - Operations (`ops`)**
             *   [ ] Add module-level docs for `ops/mod.rs` and `ops/traits.rs`.
             *   [ ] Add docs for each op module (`arithmetic`, `linalg`, `nn`, `reduction`, `view`, `dtype`).

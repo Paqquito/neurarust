@@ -1,3 +1,15 @@
+//!
+//! # Gradient Checking Utilities
+//!
+//! This module provides tools for verifying the correctness of analytical gradients
+//! computed by the `autograd` system. The primary function is [`check_grad`], which
+//! compares the analytical gradient of a function with respect to its inputs against
+//! a numerical approximation computed using the finite difference method.
+//!
+//! Gradient checking is a crucial debugging technique for ensuring that the backward
+//! implementations (`BackwardOp`) for custom operations are correct.
+//!
+
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use std::fmt::Debug;
@@ -19,39 +31,56 @@ use crate::tensor_data::TensorData;
 use crate::buffer::{Buffer, CpuBuffer};
 
 /// Error type specifically for gradient checking failures.
+///
+/// Encapsulates various issues that can occur during the gradient checking process,
+/// including mismatches between analytical and numerical gradients, errors during
+/// forward/backward passes, and unsupported configurations.
 #[derive(Error, Debug, Clone, PartialEq)]
 pub enum GradCheckError {
+    /// Indicates a mismatch between the analytical and numerical gradients for a specific element.
     #[error("Gradient check failed for input tensor at index {input_index}, element index {element_index}: Analytical grad {analytical_grad:?} != Numerical grad {numerical_grad:?}. Difference: {difference:?}")]
     GradientMismatch {
+        /// Index of the input tensor in the `inputs` slice provided to `check_grad`.
         input_index: usize,
+        /// Linear index of the element within the flattened input tensor where the mismatch occurred.
         element_index: usize,
+        /// The analytical gradient value computed by the backward pass.
         analytical_grad: f64, // Use f64 for precision
+        /// The numerical gradient value estimated using finite differences.
         numerical_grad: f64,
+        /// The absolute difference between the analytical and numerical gradients.
         difference: f64,
     },
 
-    // Keep other error variants as defined before...
+    /// Error occurring while trying to mutate an input tensor element for finite differences.
     #[error("Failed to get mutable data for input tensor {input_index} at element {element_index}: {source}")]
     MutationError {
         input_index: usize,
         element_index: usize,
-        source: NeuraRustError,
+        #[source] source: NeuraRustError,
     },
+    /// Error occurred during the execution of the forward function `func`.
     #[error("Forward function execution failed during gradient check: {0}")]
-    ForwardPassError(NeuraRustError),
+    ForwardPassError(#[source] NeuraRustError),
+    /// Error occurred during the execution of the backward pass (`.backward()`).
     #[error("Backward pass execution failed during gradient check: {0}")]
-    BackwardPassError(NeuraRustError),
+    BackwardPassError(#[source] NeuraRustError),
+    /// Error accessing the analytical gradient (`.grad`) of an input tensor after backward pass.
     #[error("Could not access analytical gradient for input {input_index}: {source}")]
     AnalyticalGradAccessError {
         input_index: usize,
-        source: NeuraRustError,
+        #[source] source: NeuraRustError,
     },
+    /// Generic tensor-related error during intermediate calculations.
     #[error("Tensor error during intermediate calculation: {0}")]
-    TensorError(NeuraRustError),
-    #[error("Unsupported data type for gradient check: expected F32, got {0:?}")]
+    TensorError(#[source] NeuraRustError),
+    /// The data type of an input or output tensor is not supported (currently only F32/F64).
+    #[error("Unsupported data type for gradient check: expected F32/F64, got {0:?}")]
     UnsupportedDType(DType),
+    /// An input tensor required gradients, but its `.grad` field was `None` after the backward pass.
     #[error("Input tensor {input_index} requires grad but has no gradient after backward pass.")]
     MissingAnalyticalGrad { input_index: usize },
+    /// The calculated numerical gradient was NaN or infinite.
     #[error("Numerical gradient is NaN or infinite for input {input_index}, element {element_index}. Details: Loss+: {loss_plus:?}, Loss-: {loss_minus:?}")]
     NumericalGradNaNOrInfinite {
         input_index: usize,
@@ -59,24 +88,28 @@ pub enum GradCheckError {
         loss_plus: f64,
         loss_minus: f64,
     },
+    /// The analytical gradient was NaN or infinite.
     #[error("Analytical gradient is NaN or infinite for input {input_index}, element {element_index}. Value: {value:?}")]
     AnalyticalGradNaNOrInfinite {
         input_index: usize,
         element_index: usize,
         value: f64,
     },
+    /// Gradient checking on non-contiguous input tensors is not currently supported.
     #[error("Gradient checking on non-contiguous tensors not yet supported (Input {input_index}).")]
     NonContiguousInput { input_index: usize },
+    /// Gradient checking is currently only supported for tensors residing on the CPU.
     #[error("Gradient checking only supported on CPU tensors (Input {input_index}). Got: {device:?}")]
     NonCpuInput {
         input_index: usize,
         device: StorageDevice,
     },
+    /// An input tensor provided for checking requires gradients but is not a leaf node (it has a `grad_fn`).
     #[error("Gradient check input tensor must be a leaf node (no grad_fn). Input index: {input_index}")]
     InputNotLeaf { input_index: usize },
+    /// The function being tested did not correctly propagate the `requires_grad` flag to its output.
     #[error("Function did not propagate requires_grad correctly.")]
     RequiresGradPropagationError,
-
 }
 
 // Map NeuraRustError to GradCheckError::TensorError
@@ -86,28 +119,49 @@ impl From<NeuraRustError> for GradCheckError {
     }
 }
 
-/// Checks analytical gradients against numerical gradients using finite differences.
+/// Checks the analytical gradients computed by a function against numerical approximations.
 ///
-/// Compares the analytical gradient computed by the backward pass against a numerical
-/// approximation computed using finite differences: `num_grad ≈ [L(x+eps) - L(x-eps)] / (2*eps)`,
-/// where `L = sum(output * output_grad)` is a scalar loss.
+/// This function is a cornerstone for verifying the correctness of `BackwardOp` implementations.
+/// It operates by comparing the gradient computed via the `backward()` pass (analytical gradient)
+/// with a gradient estimated using the finite difference formula:
 ///
-/// The comparison uses both absolute and relative tolerances:
-/// `|analytical_grad - numerical_grad| <= abs_tol + rel_tol * |numerical_grad|`
+/// \\[ \nabla_{\text{num}} L(x_i) \approx \frac{L(x_1, ..., x_i + \epsilon, ...) - L(x_1, ..., x_i - \epsilon, ...)}{2 \epsilon} \\]
+///
+/// Where:
+/// - \( L \) is a scalar loss function, implicitly defined here as \( L = \sum (\text{func}(\text{inputs}) \cdot \text{output\_grad}) \).
+///   This reduction to a scalar is necessary for the finite difference method.
+/// - \( x_i \) represents a single element within one of the input tensors.
+/// - \( \epsilon \) is a small perturbation (`epsilon` argument).
+///
+/// The comparison between the analytical gradient (\( \nabla_{\text{analytical}} L(x_i) \)) and the numerical one
+/// (\( \nabla_{\text{num}} L(x_i) \)) uses both absolute and relative tolerances to account for floating-point inaccuracies:
+///
+/// \\[ | \nabla_{\text{analytical}} - \nabla_{\text{num}} | \le \text{abs\_tol} + \text{rel\_tol} \times | \nabla_{\text{num}} | \\]
+///
+/// # Type Constraints
+/// - Currently, gradient checking is only supported for `DType::F32` or `DType::F64` tensors.
+/// - All input tensors and the `output_grad` tensor must reside on the `CPU`.
+/// - All input tensors must be contiguous.
+/// - Input tensors for which gradients are checked (`requires_grad = true`) must be leaf nodes
+///   in the computation graph (i.e., they must not have a `grad_fn`).
 ///
 /// # Arguments
+/// * `func`: The function \( f \) whose gradient implementation is being tested. It takes a slice
+///   of input `Tensor`s (`&[Tensor]`) and returns a `Result<Tensor, NeuraRustError>` representing the output tensor.
+///   This function should internally build the computation graph if its inputs require gradients.
+/// * `inputs`: A slice containing the input `Tensor` instances to be passed to `func`. Tensors within this slice
+///   that have `requires_grad = true` will have their gradients checked.
+/// * `output_grad`: A `Tensor` representing the initial gradient \( \frac{dL}{d\text{Output}} \) to be backpropagated
+///   from the output of `func`. It must have the same shape, `DType`, and `StorageDevice` (CPU) as the expected output of `func`.
+///   Often, this is a tensor of ones for checking unweighted gradients.
+/// * `epsilon`: A small `f64` value used as the perturbation \( \epsilon \) for the finite difference calculation (e.g., `1e-5`).
+/// * `abs_tol`: The absolute tolerance (`f64`) allowed for the difference between analytical and numerical gradients (e.g., `1e-7`).
+/// * `rel_tol`: The relative tolerance (`f64`) allowed for the difference, scaled by the magnitude of the numerical gradient (e.g., `1e-5`).
 ///
-/// * `func`: The function (often a closure) whose gradient is being checked. It takes a slice
-///   of input `Tensor`s and returns a `Result<Tensor, NeuraRustError>`.
-/// * `inputs`: A slice of input `Tensor`s provided to `func`. Tensors requiring grad must be leaf nodes.
-/// * `output_grad`: The gradient flowing into the output of `func` (often a tensor of ones).
-/// * `epsilon`: The small perturbation used for finite differences (e.g., `1e-5`). Should be `f64`.
-/// * `abs_tol`: The absolute tolerance for the gradient comparison (e.g., `1e-7`). Should be `f64`.
-/// * `rel_tol`: The relative tolerance for the gradient comparison (e.g., `1e-5`). Should be `f64`.
-///
-/// # Errors
-///
-/// Returns `GradCheckError` if the check fails or an error occurs during computation.
+/// # Returns
+/// * `Ok(())`: If the analytical and numerical gradients match within the specified tolerances for all checked elements.
+/// * `Err(GradCheckError)`: If any gradient mismatch exceeds the tolerances, or if any other error occurs during the process
+///   (e.g., errors in forward/backward passes, unsupported types/devices, non-leaf inputs, numerical instability).
 // Remove T generic
 pub fn check_grad<F>(
     func: F,
@@ -381,45 +435,45 @@ where
     Ok(())
 }
 
-/// Helper function to calculate a scalar loss for gradient checking.
-/// Usually, this is the sum of the output tensor weighted by the output gradient.
+/// Calculates a scalar loss suitable for finite difference gradient checking.
+///
+/// The finite difference method requires evaluating a scalar loss function \( L \).
+/// This helper function computes such a scalar loss, typically defined as the sum
+/// of the element-wise product between the function's output tensor and the provided
+/// `output_grad` (which represents \( \frac{dL_{final}}{dOutput} \) where \( L_{final} \) is the final scalar loss
+/// of the overall computation, often just 1.0 for unweighted gradients).
+///
+/// \\[ L = \sum (\text{tensor} \odot \text{output\_grad}) \\]
+///
+/// This effectively weights the contribution of each output element to the final loss.
+/// The result is returned as an `f64` for numerical stability in the finite difference calculation.
+/// Handles potential `F32` to `F64` conversion internally.
+///
+/// # Arguments
+/// * `tensor`: The output tensor produced by the function being checked during one of the
+///             finite difference evaluations (e.g., \( f(x+\epsilon) \)).
+/// * `output_grad`: The gradient tensor provided to `check_grad`, representing \( \frac{dL_{final}}{dOutput} \).
+///
+/// # Returns
+/// * `Ok(f64)`: The computed scalar loss value.
+/// * `Err(GradCheckError)`: If an error occurs during the element-wise multiplication or sum operations,
+///                        or during data conversion/access.
 fn calculate_loss(tensor: &Tensor, output_grad: &Tensor) -> Result<f64, GradCheckError> {
     // Ensure shapes match or are broadcastable (though they should match here)
     if tensor.shape() != output_grad.shape() {
-        // Basic check, could be enhanced with broadcasting logic if needed
-         return Err(GradCheckError::TensorError(NeuraRustError::ShapeMismatch {
-             operation: "calculate_loss (grad_check)".to_string(),
-             expected: format!("{:?}", tensor.shape()), 
-             actual: format!("{:?}", output_grad.shape()),
-         }));
+        return Err(NeuraRustError::ShapeMismatch {
+            operation: "calculate_loss (grad_check)".to_string(),
+            expected: format!("{:?}", output_grad.shape()),
+            actual: format!("{:?}", tensor.shape()),
+        }.into()); // Convert NeuraRustError to GradCheckError
     }
 
-    // Calculer la perte comme sum(tensor * output_grad)
-    // Assume mul_op and sum_op will be adapted to preserve DType
-    let weighted_output = mul_op(tensor, output_grad)?;
-    let loss_tensor = sum_op(&weighted_output, None, false)?;
+    // Perform element-wise multiplication
+    let product = mul_op(tensor, output_grad)?;
 
-    // Extract the scalar value based on DType
-    let scalar_loss: f64 = match loss_tensor.dtype() {
-        DType::F32 => {
-            let loss_data = loss_tensor.get_f32_data()?;
-            if loss_data.len() != 1 {
-                return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
-                    "Loss calculation (F32) did not result in a scalar tensor".to_string(),
-                )));
-            }
-            loss_data[0] as f64 // Convert F32 to f64
-        }
-        DType::F64 => {
-            let loss_data = loss_tensor.get_f64_data()?; // Use get_f64_data
-            if loss_data.len() != 1 {
-                return Err(GradCheckError::TensorError(NeuraRustError::InternalError(
-                    "Loss calculation (F64) did not result in a scalar tensor".to_string(),
-                )));
-            }
-            loss_data[0] // Already f64
-        }
-    };
+    // Sum all elements to get a scalar
+    let sum_tensor = sum_op(&product, None, false)?; // Sum over all axes
 
-    Ok(scalar_loss)
+    // Extract the scalar value as f64
+    sum_tensor.item_f64().map_err(|e| e.into()) // Convert NeuraRustError to GradCheckError
 }

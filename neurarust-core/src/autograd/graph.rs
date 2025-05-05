@@ -1,15 +1,52 @@
+//! # Computation Graph Utilities
+//!
+//! This module provides functionalities for working with the computation graph
+//! implicitly defined by `Tensor` operations and their associated `BackwardOp` traits.
+//! The primary function here is `topological_sort`, which is essential for the
+//! reverse-mode automatic differentiation (`backward`) process.
+
 use crate::error::NeuraRustError;
 use crate::tensor_data::TensorData;
-use std::collections::{HashSet};
-use std::sync::{RwLock};
+use std::collections::HashSet;
+use std::sync::RwLock;
 
 /// Type alias for the unique identifier of a node in the computation graph.
-/// Uses the raw pointer to the RwLock<TensorData> as a stable ID.
+///
+/// Each `Tensor` involved in gradient computation can be considered a node.
+/// We use the raw pointer to the `RwLock<TensorData>` inside the `Tensor`'s `Arc`
+/// as a stable identifier (`NodeId`). This allows tracking nodes even if the `Tensor`
+/// wrappers are cloned or dropped, as long as the underlying `Arc<RwLock<TensorData>>` is alive.
+/// This pointer is suitable for use as a key in graph data structures like `HashMap` or `HashSet`.
+///
+/// **Safety:** The validity of this pointer relies on the `Arc` managing the `TensorData`
+/// lifetime correctly throughout the graph's existence and traversal.
 pub type NodeId = *const RwLock<TensorData>;
 
 /// Performs a topological sort of the computation graph starting from `start_node`.
-/// Returns the nodes in reverse topological order (suitable for backward pass).
-/// Uses Depth First Search (DFS) and detects cycles.
+///
+/// The computation graph is implicitly defined by `Tensor`s and their `grad_fn` fields,
+/// which link to `BackwardOp` implementations referencing their input tensors.
+/// This function traverses the graph backwards from the `start_node` (typically the tensor
+/// on which `.backward()` is called) using Depth First Search (DFS).
+///
+/// The result is a `Vec<NodeId>` containing the nodes (tensor data pointers) reachable
+/// from `start_node` in a **reverse topological order**. This order guarantees that when
+/// processing nodes during the backward pass, a node is only processed after all nodes
+/// that depend on it (i.e., nodes that use its output) have already been processed.
+/// This is crucial for correctly accumulating gradients via the chain rule.
+///
+/// The function also includes cycle detection. If a cycle is found in the graph
+/// (which should not happen in standard forward computation), it returns a
+/// `NeuraRustError::CycleDetected` error.
+///
+/// # Arguments
+/// * `start_node`: The `NodeId` (pointer to the `RwLock<TensorData>`) of the tensor
+///                 from which the backward pass originates.
+///
+/// # Returns
+/// * `Ok(Vec<NodeId>)`: A vector of node identifiers in reverse topological order.
+/// * `Err(NeuraRustError::CycleDetected)`: If a cycle is detected in the graph.
+/// * `Err(NeuraRustError::LockError)`: If a `RwLock` is poisoned during traversal (should not happen in typical use).
 pub fn topological_sort(start_node: NodeId) -> Result<Vec<NodeId>, NeuraRustError> {
     let mut sorted_nodes = Vec::new();
     let mut visited = HashSet::new(); // Nodes for which DFS has *completed*
