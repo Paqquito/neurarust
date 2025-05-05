@@ -44,10 +44,19 @@ impl Tensor {
     /// let m_axis1_keep = t.mean(Some(&[1]), true).unwrap();
     /// assert_eq!(m_axis1_keep.shape(), vec![2, 1]);
     /// assert_eq!(m_axis1_keep.get_f32_data().unwrap(), vec![2.0, 5.0]); // [(1+2+3)/3, (4+5+6)/3]
+    ///
+    /// assert_eq!(t.mean(Some(&[0]), true).unwrap().shape(), &[1, 3]);
     /// ```
-    pub fn mean(&self, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
-        // Call the mean_op function from the ops module
-        crate::ops::reduction::mean::mean_op(self, axes, keep_dims)
+    pub fn mean(&self, axes: Option<&[usize]>, keep_dims: bool) -> Result<Self, NeuraRustError> {
+        // La logique pour déterminer les axes réels (tous si None) est gérée DANS mean_op.
+        // Il suffit donc de passer l'Option directement.
+        // let all_axes: Vec<usize> = (0..self.rank()).collect();
+        // let axes_to_reduce: &[usize] = match axes {
+        //     Some(a) => a,
+        //     None => &all_axes,
+        // };
+        // mean_op(self, Some(axes_to_reduce), keep_dims) // Incorrect
+        crate::ops::reduction::mean::mean_op(self, axes, keep_dims) // Passer l'Option originale
     }
 
     /// Computes the maximum of the tensor elements over specified axes.
