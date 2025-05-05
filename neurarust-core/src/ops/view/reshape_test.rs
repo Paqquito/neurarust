@@ -1,116 +1,112 @@
 #[cfg(test)]
 mod tests {
-    
-    use crate::autograd::grad_check::check_grad;
+    use crate::ops::view::reshape::reshape_op;
+    use crate::tensor::{self, Tensor};
     use crate::error::NeuraRustError;
-    use crate::tensor::Tensor;
-    use crate::utils::testing::create_test_tensor_with_grad;
+    use crate::autograd::grad_check::{check_grad, GradCheckError};
 
     #[test]
-    fn test_reshape_backward() {
-        let reshape_fn = |inputs: &[Tensor<f64>]| -> Result<Tensor<f64>, NeuraRustError> {
-            assert_eq!(inputs.len(), 1);
-            inputs[0].reshape(vec![3, 2])
-        };
-        let input_data = create_test_tensor_with_grad(
-            (1..=6).map(|x| x as f64).collect(),
-            vec![2, 3],
-        );
-        assert!(input_data.is_contiguous());
-        let output_grad_val = Tensor::<f64>::ones(vec![3, 2]).unwrap();
-        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7, 1e-5);
-        assert!(result.is_ok(), "Gradient check failed for reshape: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_reshape_backward_flatten() {
-        let reshape_fn = |inputs: &[Tensor<f64>]| -> Result<Tensor<f64>, NeuraRustError> {
-            assert_eq!(inputs.len(), 1);
-            let numel = inputs[0].numel();
-            inputs[0].reshape(vec![numel])
-        };
-        let input_data = create_test_tensor_with_grad(
-            (1..=12).map(|x| x as f64).collect(),
-            vec![2, 2, 3],
-        );
-        assert!(input_data.is_contiguous());
-        let output_grad_val = Tensor::<f64>::ones(vec![12]).unwrap();
-        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7, 1e-5);
-        assert!(result.is_ok(), "Gradient check failed for flatten reshape: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_reshape_backward_add_dim() {
-        let reshape_fn = |inputs: &[Tensor<f64>]| -> Result<Tensor<f64>, NeuraRustError> {
-            assert_eq!(inputs.len(), 1);
-            inputs[0].reshape(vec![2, 2, 1, 3])
-        };
-        let input_data = create_test_tensor_with_grad(
-            (1..=12).map(|x| x as f64).collect(),
-            vec![2, 2, 3],
-        );
-        assert!(input_data.is_contiguous());
-        let output_grad_val = Tensor::<f64>::ones(vec![2, 2, 1, 3]).unwrap();
-        let result = check_grad(reshape_fn, &[input_data], &output_grad_val, 1e-5, 1e-7, 1e-5);
-        assert!(result.is_ok(), "Gradient check failed for reshape adding dim: {:?}", result.err());
-    }
-
-    #[test]
-    fn test_reshape_contiguous() {
-        let t = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let reshaped = t.reshape(&[3, 2]).unwrap();
+    fn test_reshape_contiguous() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let reshaped = reshape_op(&t, vec![3, 2])?;
+        assert_eq!(reshaped.shape(), &[3, 2]);
         assert!(reshaped.is_contiguous());
+        assert_eq!(reshaped.strides(), &[2, 1]);
+        Ok(())
     }
 
     #[test]
-    fn test_reshape_on_views() {
-        let t_orig = crate::tensor::from_vec_f32((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
-        let t_transposed = t_orig.transpose(0, 1).unwrap(); // Shape [2, 2, 3]
-        assert!(!t_transposed.is_contiguous());
-    }
-
-    #[test]
-    fn test_reshape_non_contiguous_error() {
-        let t_orig = crate::tensor::from_vec_f32((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
-        let t_transposed = t_orig.transpose(0, 1).unwrap(); // Non-contiguous
-        let result = t_transposed.reshape(&[4, 3]);
-    }
-
-    #[test]
-    fn test_reshape_to_scalar() {
-        let t = crate::tensor::from_vec_f32(vec![5.0], vec![1]).unwrap();
-        let reshaped = t.reshape(&[]).unwrap();
+    fn test_reshape_to_scalar() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![5.0], vec![1])?;
+        let reshaped = reshape_op(&t, vec![])?;
         assert_eq!(reshaped.shape(), &[] as &[usize]);
+        assert_eq!(reshaped.strides(), &[] as &[usize]);
+        Ok(())
     }
 
     #[test]
-    fn test_reshape_from_scalar() {
-        let t = crate::tensor::from_vec_f32(vec![5.0], vec![]).unwrap(); // Scalar
-        let reshaped = t.reshape(&[1, 1, 1]).unwrap();
+    fn test_reshape_from_scalar() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![5.0], vec![])?;
+        let reshaped = reshape_op(&t, vec![1, 1, 1])?;
         assert_eq!(reshaped.shape(), &[1, 1, 1]);
+        assert_eq!(reshaped.strides(), &[1, 1, 1]);
+        Ok(())
     }
 
     #[test]
-    fn test_reshape_backward() {
-        let t_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+    fn test_reshape_numel_mismatch() -> Result<(), NeuraRustError>{
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let result = reshape_op(&t, vec![2, 2]);
+        assert!(matches!(result, Err(NeuraRustError::ShapeMismatch { .. })));
+        Ok(())
+    }
+
+    #[test]
+    fn test_reshape_non_contiguous_error() -> Result<(), NeuraRustError> {
+        let t_orig = Tensor::new((0..12).map(|x| x as f32).collect(), vec![2, 2, 3])?;
+        let t_transposed = t_orig.transpose(0, 1)?;
+        assert!(!t_transposed.is_contiguous());
+        let result = reshape_op(&t_transposed, vec![4, 3]);
+        assert!(matches!(result, Err(NeuraRustError::UnsupportedOperation(_))));
+        Ok(())
+    }
+
+    #[test]
+    #[ignore = "Skipping F32 reshape backward due to potential check_grad precision issues."]
+    fn test_reshape_backward_f32() -> Result<(), GradCheckError> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        t.set_requires_grad(true)?;
+        let target_shape = vec![3, 2];
+
+        let reshape_fn = |inputs: &[Tensor]| reshape_op(&inputs[0], target_shape.clone());
+
+        let output_grad = tensor::ones(&target_shape)?;
+
+        check_grad(reshape_fn, &[t], &output_grad, 1e-3, 1e-4, 1e-3)
+    }
+
+    #[test]
+    fn test_reshape_backward_f64() -> Result<(), GradCheckError> {
+        let t_data = (1..=6).map(|x| x as f64).collect();
         let t_shape = vec![2, 3];
-        let t = crate::tensor::from_vec_f32(t_data.clone(), t_shape.clone()).unwrap();
-        t.set_requires_grad(true).unwrap();
+        let t = Tensor::new_f64(t_data, t_shape)?;
+        t.set_requires_grad(true)?;
+        let target_shape = vec![3, 2];
+
+        let reshape_fn = |inputs: &[Tensor]| reshape_op(&inputs[0], target_shape.clone());
+
+        let output_grad = tensor::ones_f64(&target_shape)?;
+
+        check_grad(reshape_fn, &[t], &output_grad, 1e-5, 1e-7, 1e-5)
     }
 
     #[test]
-    fn test_reshape_backward_flatten() {
-        let t_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        let t_shape = vec![2, 3];
-        let t = crate::tensor::from_vec_f32(t_data.clone(), t_shape.clone()).unwrap();
-        t.set_requires_grad(true).unwrap();
+    fn test_reshape_backward_flatten_f64() -> Result<(), GradCheckError> {
+        let t_data = (1..=12).map(|x| x as f64).collect();
+        let t_shape = vec![2, 2, 3];
+        let t = Tensor::new_f64(t_data, t_shape)?;
+        t.set_requires_grad(true)?;
+        let target_shape = vec![12];
+
+        let reshape_fn = |inputs: &[Tensor]| reshape_op(&inputs[0], target_shape.clone());
+        
+        let output_grad = tensor::ones_f64(&target_shape)?;
+        
+        check_grad(reshape_fn, &[t], &output_grad, 1e-5, 1e-7, 1e-5)
     }
 
     #[test]
-    fn test_reshape_backward_add_dim() {
-        let t_data = vec![1.0, 2.0, 3.0, 4.0];
-        let t_shape = vec![4];
-        let t = crate::tensor::from_vec_f32(t_data.clone(), t_shape.clone()).unwrap();
-        t.set_requires_grad(true).unwrap();
+    fn test_reshape_backward_add_dim_f64() -> Result<(), GradCheckError> {
+        let t_data = (1..=12).map(|x| x as f64).collect();
+        let t_shape = vec![2, 2, 3];
+        let t = Tensor::new_f64(t_data, t_shape)?;
+        t.set_requires_grad(true)?;
+        let target_shape = vec![2, 2, 1, 3];
+
+        let reshape_fn = |inputs: &[Tensor]| reshape_op(&inputs[0], target_shape.clone());
+        
+        let output_grad = tensor::ones_f64(&target_shape)?;
+        
+        check_grad(reshape_fn, &[t], &output_grad, 1e-5, 1e-7, 1e-5)
     }
 } 
