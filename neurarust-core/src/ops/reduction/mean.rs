@@ -14,7 +14,11 @@ use crate::ops::view::expand_op;
 
 // --- MeanBackward Definition ---
 
-/// Backward operation context for `mean_axes`.
+/// Backward operation context for `mean` reduction.
+///
+/// Stores information needed to compute the gradient of the mean operation:
+/// - A reference to the original input tensor's data (`input_node`).
+/// - The total number of elements that were reduced (`num_elements_reduced`) to compute the mean.
 #[derive(Debug)]
 struct MeanBackward {
     input_node: Arc<RwLock<TensorData>>,
@@ -24,6 +28,24 @@ struct MeanBackward {
 // --- BackwardOp Implementation for MeanBackward ---
 
 impl BackwardOp for MeanBackward {
+    /// Computes the gradient for the mean reduction operation.
+    ///
+    /// The gradient of the mean operation w.r.t. its input is the incoming gradient (`grad_output`)
+    /// divided by the number of elements that were reduced (`N`), and then broadcasted back
+    /// to the original input shape.
+    ///
+    /// Gradient = `expand(grad_output / N, original_input_shape)`
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output of the original mean operation.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Tensor>` with a single element: the gradient
+    /// with respect to the original input tensor. Returns an error if expansion or
+    /// device operations fail.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // Get original input shape
         let input_guard = self.input_node.read().map_err(|_| {
@@ -232,8 +254,44 @@ pub fn mean_axes(
     Ok(result_tensor)
 }
 
-/// Computes the mean of elements in the tensor over given axes.
-/// This is a convenience wrapper around `mean_axes` that handles `Option<&[usize]>`.
+/// Performs element-wise mean reduction along specified axes.
+///
+/// This is a crate-internal function, typically called via the `Tensor::mean` method.
+/// It calculates the mean of elements of a tensor `t` along the given `axes`.
+///
+/// **Note:** Currently only implemented for F32 tensors on the CPU.
+///
+/// # Arguments
+///
+/// * `t` - The input tensor (must be F32 on CPU).
+/// * `axes` - An optional slice of `usize` specifying the axes along which to reduce.
+///   If `None`, the mean is calculated over all elements, resulting in a scalar tensor.
+/// * `keep_dims` - A boolean indicating whether to keep the reduced dimensions in the
+///   output tensor's shape (with size 1). If `false`, the reduced dimensions are removed.
+///
+/// # Returns
+///
+/// A `Result` containing the reduced `Tensor`. Returns an error if:
+/// *   The input tensor is not F32 on CPU.
+/// *   An axis is out of bounds.
+/// *   Division by zero occurs (if the number of reduced elements is 0).
+/// *   Device or autograd operations fail.
+///
+/// # Example (Conceptual - Use `Tensor::mean` instead)
+///
+/// ```rust,ignore
+/// // Assuming t is a Tensor of shape [2, 3] (F32, CPU)
+/// // use crate::ops::reduction::mean::mean_op; // Assuming direct access
+///
+/// // Mean along axis 0
+/// let mean_axis0 = mean_op(&t, Some(&[0]), false)?; // Shape [3]
+///
+/// // Mean along axis 1
+/// let mean_axis1 = mean_op(&t, Some(&[1]), true)?; // Shape [2, 1]
+///
+/// // Mean of all elements
+/// let mean_all = mean_op(&t, None, false)?; // Shape [] (scalar)
+/// ```
 pub(crate) fn mean_op(
     tensor: &Tensor,
     axes: Option<&[usize]>,

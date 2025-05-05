@@ -16,6 +16,12 @@ use crate::tensor::broadcast_utils::expand_kernel;
 use crate::tensor::utils::{index_to_coord, calculate_strides};
 
 /// Backward operation context for sum reduction.
+///
+/// Stores information needed to compute the gradient of the sum operation:
+/// - The original input tensor's data (`input_node`).
+/// - The original shape of the input tensor (`input_shape`).
+/// - The axes along which the summation was performed (`axes`).
+/// - Whether the reduced dimensions were kept in the output (`keep_dims`).
 #[derive(Debug)]
 struct SumAxesBackward {
     input_node: Arc<RwLock<TensorData>>,
@@ -27,6 +33,23 @@ struct SumAxesBackward {
 // --- BackwardOp Implementation for SumAxesBackward ---
 
 impl BackwardOp for SumAxesBackward {
+    /// Computes the gradient for the sum reduction operation.
+    ///
+    /// The gradient of the sum operation with respect to its input is essentially the
+    /// incoming gradient (`grad_output`) broadcasted back to the original input shape.
+    /// If `keep_dims` was false during the forward pass, the `grad_output` is first
+    /// reshaped to include the reduced dimensions (as size 1) before broadcasting.
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output of the original sum operation.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Tensor>` with a single element: the gradient
+    /// with respect to the original input tensor. Returns an error if broadcasting or
+    /// device operations fail.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let target_shape = self.input_shape.clone();
         let target_rank = target_shape.len();
@@ -305,9 +328,41 @@ where
     Ok(result_data)
 }
 
-/// Public facing sum operation.
-/// Handles optional axes argument.
-/// If axes is None, sums over all axes.
+/// Performs element-wise sum reduction along specified axes.
+///
+/// This is a crate-internal function, typically called via the `Tensor::sum` method.
+/// It calculates the sum of elements of a tensor `t` along the given `axes`.
+///
+/// # Arguments
+///
+/// * `t` - The input tensor.
+/// * `axes` - An optional slice of `usize` specifying the axes along which to reduce.
+///   If `None`, the sum is calculated over all elements, resulting in a scalar tensor.
+/// * `keep_dims` - A boolean indicating whether to keep the reduced dimensions in the
+///   output tensor's shape (with size 1). If `false`, the reduced dimensions are removed.
+///
+/// # Returns
+///
+/// A `Result` containing the reduced `Tensor`. Returns an error if:
+/// *   An axis is out of bounds.
+/// *   Device operations fail.
+/// *   Autograd graph operations fail.
+///
+/// # Example (Conceptual - Use `Tensor::sum` instead)
+///
+/// ```rust,ignore
+/// // Assuming t is a Tensor of shape [2, 3]
+/// // use crate::ops::reduction::sum::sum_op; // Assuming direct access
+///
+/// // Sum along axis 0
+/// let sum_axis0 = sum_op(&t, Some(&[0]), false)?; // Shape [3]
+///
+/// // Sum along axis 1
+/// let sum_axis1 = sum_op(&t, Some(&[1]), true)?; // Shape [2, 1]
+///
+/// // Sum all elements
+/// let sum_all = sum_op(&t, None, false)?; // Shape [] (scalar)
+/// ```
 pub(crate) fn sum_op(
     t: &Tensor,
     axes: Option<&[usize]>,

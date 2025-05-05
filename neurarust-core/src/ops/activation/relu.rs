@@ -11,13 +11,26 @@ use crate::types::DType;
 
 // --- Relu Operation ---
 
-/// Backward pass structure for ReLU.
+/// Backward pass structure for the Rectified Linear Unit (ReLU) operation.
+///
+/// Stores a reference to the input tensor (`input_node`) to access its values
+/// during the backward pass, as the gradient depends on the input: \( \frac{dReLU(x)}{dx} = 1 \) if \( x > 0 \), and \( 0 \) otherwise.
 #[derive(Debug)]
 struct ReluBackward {
+    /// Reference counted pointer to the input tensor's data.
     input_node: Arc<RwLock<TensorData>>,
 }
 
 impl BackwardOp for ReluBackward {
+    /// Computes the gradient for the ReLU operation.
+    ///
+    /// The gradient is calculated as:
+    /// \\[ \frac{dL}{dInput} = \frac{dL}{dOutput} \cdot \frac{dOutput}{dInput} \\]
+    /// Where \( \frac{dOutput}{dInput} \) (the local gradient) is 1 if the corresponding input element
+    /// was greater than 0 during the forward pass, and 0 otherwise.
+    ///
+    /// Therefore, the gradient from the output (`grad_output`) is passed through only where
+    /// the original input was positive.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let input_guard = self.input_node.read().expect("Failed to lock input node for read");
 
@@ -57,6 +70,7 @@ impl BackwardOp for ReluBackward {
         Ok(vec![grad_input_tensor])
     }
 
+    /// Returns the identifier of the input tensor node.
     fn inputs(&self) -> Vec<NodeId> {
         vec![Arc::as_ptr(&self.input_node)]
     }
@@ -64,9 +78,30 @@ impl BackwardOp for ReluBackward {
 
 /// Applies the Rectified Linear Unit (ReLU) activation function element-wise.
 ///
-/// ReLU(x) = max(0, x)
+/// Computes:
+/// \\[ ReLU(x) = \max(0, x) \\]
+/// for each element \( x \) in the input tensor.
 ///
-/// Currently only supports F32 tensors on the CPU.
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `input`: The input `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` with the ReLU function applied, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError::UnsupportedOperation` if the input tensor is not a CPU tensor with `DType::F32` (current limitation).
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::Tensor;
+/// use neurarust_core::ops::activation::relu_op;
+///
+/// let t = Tensor::new(vec![-1.0f32, 0.0, 1.0, -2.0, 5.0], vec![5]).unwrap();
+/// let relu_t = relu_op(&t).unwrap();
+/// assert_eq!(relu_t.get_f32_data().unwrap(), vec![0.0, 0.0, 1.0, 0.0, 5.0]);
+/// ```
 pub fn relu_op(input: &Tensor) -> Result<Tensor, NeuraRustError> {
     let input_guard = input.read_data();
 

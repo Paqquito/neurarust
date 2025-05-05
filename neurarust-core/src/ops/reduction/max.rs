@@ -14,18 +14,44 @@ use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
 use num_traits::Float; // Use Float for min_value()
 
-// --- Backward Operation Structure ---
+/// Backward operation context for `max` reduction.
+///
+/// Stores information needed to compute the gradient of the max operation:
+/// - A reference to the original input tensor's data (`input_node`).
+/// - A reference to the output tensor's data (`output_node`) from the forward pass.
+///   This is needed because the gradient only flows back to the input elements
+///   that were equal to the maximum value in their respective reduction slice.
+/// - The axes along which the reduction was performed (`axes`).
+/// - Whether the reduced dimensions were kept in the output (`keep_dims`).
 #[derive(Debug)]
 struct MaxBackward {
     input_node: Arc<RwLock<TensorData>>,
     output_node: Arc<RwLock<TensorData>>, // Store output tensor to compare with input
-    // Store reduction axes and keep_dims for potential broadcasting/expansion logic
     axes: Option<Vec<usize>>,
     keep_dims: bool,
 }
 
 // --- Backward Operation Implementation ---
 impl BackwardOp for MaxBackward {
+    /// Computes the gradient for the max reduction operation.
+    ///
+    /// The gradient flows back only to the element(s) in the input tensor that contributed
+    /// to the maximum value along the reduced axes. This is achieved by creating a mask
+    /// where `input == output` (after appropriate expansion/reshaping) and multiplying
+    /// the incoming gradient by this mask.
+    ///
+    /// Gradient = `expand(grad_output) * (input == expand(output))`
+    ///
+    /// # Arguments
+    ///
+    /// * `grad_output` - The gradient flowing back from the subsequent operation,
+    ///   corresponding to the output of the original max operation.
+    ///
+    /// # Returns
+    ///
+    /// A `Result` containing a `Vec<Tensor>` with a single element: the gradient
+    /// with respect to the original input tensor. Returns an error if reshaping, expansion,
+    /// comparison, multiplication, or device operations fail.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // Backward of max: grad_input = grad_output * (input == output_expanded)
         
