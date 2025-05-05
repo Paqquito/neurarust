@@ -1,3 +1,20 @@
+//!
+//! # Element-wise Mathematical Functions
+//!
+//! This module provides element-wise mathematical functions beyond basic arithmetic,
+//! such as exponentiation, logarithm, square root, trigonometric functions, etc.
+//!
+//! These operations typically support automatic differentiation.
+//!
+//! ## Currently Implemented:
+//! - [`ln_op`](ln/fn.ln_op.html): Natural logarithm (base e).
+//!
+//! ## Future Work:
+//! - `exp_op`: Exponential function (e^x).
+//! - `sqrt_op`: Square root.
+//! - Trigonometric functions (sin, cos, tan, etc.).
+//! - Power functions involving scalars (pow with scalar exponent/base).
+
 // Declare the sqrt module within math_elem
 // pub mod sqrt;
 

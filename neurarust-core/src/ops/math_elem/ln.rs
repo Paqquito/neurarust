@@ -14,16 +14,26 @@ use crate::ops::arithmetic::{div_op, mul_op};
 
 // --- LnBackward Definition ---
 
-/// Backward operation context for `ln_op`.
+/// Backward pass structure for the element-wise natural logarithm (`ln`) operation.
+///
+/// Stores a reference to the original input tensor node, as the input value is needed
+/// to compute the gradient (1 / input).
 #[derive(Debug)]
 struct LnBackward {
-    input_node: Arc<RwLock<TensorData>>, // Store original tensor info for gradient calculation (1/x)
+    /// Reference counted pointer to the input tensor's data.
+    input_node: Arc<RwLock<TensorData>>,
 }
 
 // --- BackwardOp Implementation for LnBackward ---
 
 impl BackwardOp for LnBackward {
-    /// Computes gradient for the natural logarithm operation: grad(input) = grad_output * (1 / input)
+    /// Computes the gradient for the natural logarithm operation \( z = \ln(a) \).
+    ///
+    /// Using the chain rule \( \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} \),
+    /// where \( \frac{dz}{da} = \frac{1}{a} \), the gradient is:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{1}{a} \\]
+    ///
+    /// This method computes \( \frac{grad\_output}{input} \).
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // 1. Get input tensor from self.input_node
         //    We need the actual tensor values, not just the node ID.
@@ -43,6 +53,7 @@ impl BackwardOp for LnBackward {
         Ok(vec![grad_input])
     }
 
+    /// Returns the identifier of the input tensor node.
     fn inputs(&self) -> Vec<NodeId> {
         vec![Arc::as_ptr(&self.input_node)]
     }
@@ -50,9 +61,25 @@ impl BackwardOp for LnBackward {
 
 // --- ln_op Implementation (Public API + Autograd Setup) ---
 
-/// Computes the element-wise natural logarithm (ln) of a tensor.
-/// Input values must be positive.
-/// Currently supports F32 CPU tensors only.
+/// Computes the element-wise natural logarithm (base \( e \)) of a tensor.
+///
+/// Calculates \( \ln(x) \) for each element \( x \) in the input tensor.
+///
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `tensor`: The input `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` with the natural logarithm applied, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError::UnsupportedOperation` if the input tensor is not a CPU tensor with `DType::F32`.
+///
+/// # Domain Considerations
+/// The natural logarithm is only defined for strictly positive numbers.
+/// This implementation currently returns `f32::NAN` for non-positive inputs.
+/// The gradient \( 1/x \) is also undefined at \( x=0 \).
 pub fn ln_op(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
     let requires_grad = tensor.requires_grad();
     let input_node_arc = if requires_grad { Some(tensor.data.clone()) } else { None };
