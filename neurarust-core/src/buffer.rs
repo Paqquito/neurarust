@@ -5,32 +5,46 @@ use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::types::DType;
 
-/// Enum representing different buffer types based on device and data type.
-/// This allows TensorData to hold different kinds of data buffers.
+/// Abstract representation of a tensor's underlying data storage.
+///
+/// This enum acts as a dispatcher, holding different buffer types based on the
+/// device (`StorageDevice`) and potentially the data type (`DType`).
+/// It allows `TensorData` to manage data residing on CPU or GPU (future) uniformly.
 #[derive(Debug, Clone)] // Clone is needed if TensorData needs to be cloned
 pub enum Buffer {
-    /// Data resides on the CPU.
+    /// Data resides on the CPU, managed by a `CpuBuffer`.
     Cpu(CpuBuffer),
-    /// Placeholder for GPU buffer. Stores device and maybe size.
-    /// The actual GPU buffer handle (e.g., wgpu::Buffer) would be stored elsewhere
-    /// or managed by a dedicated GPU memory manager.
-    Gpu { device: StorageDevice, len: usize }, // Store len for consistency
+    /// Placeholder for data residing on a GPU.
+    ///
+    /// Currently, this variant only stores metadata (`device`, `len`).
+    /// Actual GPU memory management (e.g., holding buffer handles from libraries
+    /// like `wgpu` or CUDA bindings) will be implemented in future phases.
+    Gpu { 
+        /// The specific GPU device.
+        device: StorageDevice, 
+        /// The number of elements in the buffer.
+        len: usize 
+    }, 
 }
 
-/// Enum for CPU-specific buffer types.
+/// Enum representing concrete CPU buffer types, specialized by data type.
+///
+/// Each variant holds an `Arc<Vec<T>>` for cheap cloning (sharing ownership)
+/// of the underlying data vector.
 #[derive(Debug, Clone)]
 pub enum CpuBuffer {
-    /// Buffer holding `f32` values.
+    /// Buffer holding `f32` (32-bit floating-point) values.
     F32(Arc<Vec<f32>>),
-    /// Buffer holding `f64` values.
+    /// Buffer holding `f64` (64-bit floating-point) values.
     F64(Arc<Vec<f64>>),
-    // Potentially add other CPU buffer types like I64, Bool later
+    // TODO: Add other CPU buffer types like I64, I32, U8, Bool later
 }
 
 impl Buffer {
-    /// Attempts to get a reference to the underlying `Arc<Vec<f32>>` if this is a CPU F32 buffer.
+    /// Attempts to get an immutable reference to the underlying `Arc<Vec<f32>>`.
     ///
-    /// Returns an error if the buffer is not a CPU buffer or not of type F32.
+    /// Returns `Ok(&Arc<Vec<f32>>)` if the buffer is a `Buffer::Cpu(CpuBuffer::F32)`.
+    /// Returns `Err(NeuraRustError)` if the buffer is on the GPU or has a different data type.
     pub fn try_get_cpu_f32(&self) -> Result<&Arc<Vec<f32>>, NeuraRustError> {
         match self {
             Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc),
@@ -47,9 +61,10 @@ impl Buffer {
         }
     }
 
-    /// Attempts to get a reference to the underlying `Arc<Vec<f64>>` if this is a CPU F64 buffer.
+    /// Attempts to get an immutable reference to the underlying `Arc<Vec<f64>>`.
     ///
-    /// Returns an error if the buffer is not a CPU buffer or not of type F64.
+    /// Returns `Ok(&Arc<Vec<f64>>)` if the buffer is a `Buffer::Cpu(CpuBuffer::F64)`.
+    /// Returns `Err(NeuraRustError)` if the buffer is on the GPU or has a different data type.
     pub fn try_get_cpu_f64(&self) -> Result<&Arc<Vec<f64>>, NeuraRustError> {
         match self {
             Buffer::Cpu(CpuBuffer::F64(data_arc)) => Ok(data_arc),
@@ -65,6 +80,8 @@ impl Buffer {
             }),
         }
     }
+    
+    // TODO: Add similar try_get methods for other DTypes (I64, Bool, etc.) when added.
 }
 
 /* // Temporarily comment out old methods causing errors

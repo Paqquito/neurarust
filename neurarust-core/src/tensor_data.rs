@@ -30,27 +30,42 @@ pub struct TensorData {
 
     // --- Metadata --- Keep these fields ---
     /// The shape (dimensions) of the tensor.
-    pub shape: Vec<usize>,
+    pub(crate) shape: Vec<usize>,
     /// The strides for each dimension.
-    pub strides: Vec<usize>,
+    /// Strides define the jump in memory required to move one step along a given dimension.
+    pub(crate) strides: Vec<usize>,
     /// The offset into the buffer for the first element (used for views).
-    pub offset: usize,
+    /// This indicates the starting position of this tensor's data within the shared buffer.
+    pub(crate) offset: usize,
 
     // --- Autograd Metadata --- Keep these fields ---
     /// Flag indicating if the tensor requires gradient computation.
-    pub requires_grad: bool,
+    /// If true, operations involving this tensor will be tracked in the computation graph.
+    pub(crate) requires_grad: bool,
     /// Option holding the gradient tensor, if computed.
-    /// Must be on the same device as the data buffer.
-    pub grad: Option<Tensor>,
+    /// The gradient tensor has the same shape and device as this tensor.
+    /// It's typically populated during the backward pass.
+    pub(crate) grad: Option<Tensor>,
     /// Option holding the backward operation function node in the computation graph.
-    pub grad_fn: Option<Arc<dyn BackwardOp + Send + Sync>>,
+    /// This links the tensor to the operation that produced it, enabling backpropagation.
+    /// Leaf tensors (created directly by the user) have `grad_fn = None`.
+    pub(crate) grad_fn: Option<Arc<dyn BackwardOp + Send + Sync>>,
 }
 
 impl TensorData {
-    /// Public constructor for creating a new TensorData instance with f32 data on CPU.
+    /// Creates a new `TensorData` instance with the given f32 data and shape on the CPU.
     ///
-    /// Takes ownership of the data vector, calculates contiguous strides,
-    /// and initializes metadata.
+    /// This is the primary constructor for creating tensors from raw f32 data.
+    /// It takes ownership of the data vector, calculates contiguous strides automatically,
+    /// and initializes metadata (offset=0, requires_grad=false, etc.).
+    ///
+    /// # Arguments
+    /// * `data_vec`: A `Vec<f32>` containing the tensor data in a flattened, row-major order.
+    /// * `shape`: A `Vec<usize>` defining the desired tensor shape.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError::TensorCreationError` if the length of `data_vec` does not match
+    /// the total number of elements specified by `shape`.
     pub fn new(data_vec: Vec<f32>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         let numel: usize = shape.iter().product();
         let data_len = data_vec.len();
@@ -85,7 +100,16 @@ impl TensorData {
         })
     }
 
-    /// Public constructor for creating a new TensorData instance with f64 data on CPU.
+    /// Creates a new `TensorData` instance with the given f64 data and shape on the CPU.
+    ///
+    /// Similar to `new`, but for `f64` data.
+    ///
+    /// # Arguments
+    /// * `data_vec`: A `Vec<f64>` containing the tensor data.
+    /// * `shape`: A `Vec<usize>` defining the desired tensor shape.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError::TensorCreationError` if data length mismatches shape numel.
     pub fn new_f64(data_vec: Vec<f64>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         let numel: usize = shape.iter().product();
         let data_len = data_vec.len();
@@ -116,19 +140,32 @@ impl TensorData {
         })
     }
 
-    /// Constructor for creating views (internal usage).
+    /// Creates a new `TensorData` representing a view of an existing buffer.
+    /// (Used internally by view operations like slice, transpose, etc.)
     ///
-    /// Takes an existing shared buffer (`Arc<Buffer>`), offset, shape, strides, and device.
-    /// Infers DType from the provided buffer.
-    /// Views do not require gradients by default.
-    #[allow(dead_code)]
+    /// This constructor does **not** allocate new memory for the data but shares the
+    /// provided `buffer_arc`. It sets new metadata (offset, shape, strides).
+    /// Views created this way do not require gradients by default and have no `grad_fn`.
+    ///
+    /// # Arguments
+    /// * `buffer_arc`: An `Arc<Buffer>` pointing to the shared data storage.
+    /// * `device`: The `StorageDevice` where the view resides (must match the buffer's device).
+    /// * `offset`: The starting offset within the shared buffer for this view.
+    /// * `shape`: The shape of this view.
+    /// * `strides`: The strides for this view.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError::DeviceMismatch` if the provided `device` does not match the
+    /// actual device of the `buffer_arc`.
+    /// Returns `NeuraRustError::UnsupportedOperation` if the buffer type is unsupported (e.g., GPU currently).
+    #[allow(dead_code)] // May not be used directly outside the crate yet
     pub(crate) fn new_view(
         buffer_arc: Arc<Buffer>,
         device: StorageDevice,
         offset: usize,
         shape: Vec<usize>,
         strides: Vec<usize>,
-    ) -> Result<Self, NeuraRustError> { // Return Result
+    ) -> Result<Self, NeuraRustError> {
         // Infer DType from the buffer
         let dtype = match &*buffer_arc {
             Buffer::Cpu(CpuBuffer::F32(_)) => DType::F32,
@@ -181,13 +218,13 @@ impl TensorData {
         })
     }
 
-    /// Provides immutable access to the underlying shared data buffer.
+    /// Provides immutable access to the underlying shared data buffer (`Arc<Buffer>`).
     pub fn buffer(&self) -> &Arc<Buffer> {
         &self.buffer
     }
 
-    // Keep calculate_contiguous_strides as a static/associated function
-    // It doesn't depend on T or the buffer type
+    /// Calculates the strides required for a contiguous tensor of the given shape.
+    /// This is a static utility function.
     pub fn calculate_contiguous_strides(shape: &[usize]) -> Vec<usize> {
         let mut strides = vec![0; shape.len()];
         if shape.is_empty() {

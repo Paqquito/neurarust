@@ -33,12 +33,12 @@
             *   [✅] Address remaining warnings in `tests/`. (grad_check_test.rs, tensor_ops_test.rs, view_ops_test.rs etc.)
             *   [✅] Re-run `cargo clippy --all-targets -- -D warnings` until no warnings remain.
         *   **Step 1.A.4: `rustdoc` Documentation - Core Structures**
-            *   [ ] Add module-level docs (`//!`) for `neurarust-core/src/lib.rs`.
-            *   [ ] Add docs (`///`) for `NeuraRustError` enum and variants (`src/error.rs`).
-            *   [ ] Add docs for `DType`, `StorageDevice` enums (`src/types.rs`).
-            *   [ ] Add docs for `Buffer`, `CpuBuffer` enums and methods (`src/buffer.rs`).
-            *   [ ] Add docs for `TensorData` struct and its public methods (`src/tensor_data.rs`).
-            *   [ ] Add docs for the main `Tensor` struct (`src/tensor/mod.rs`).
+            *   [✅] Add module-level docs (`//!`) for `neurarust-core/src/lib.rs`.
+            *   [✅] Add docs (`///`) for `NeuraRustError` enum and variants (`src/error.rs`).
+            *   [✅] Add docs for `DType`, `StorageDevice` enums (`src/types.rs`, `src/device.rs`).
+            *   [✅] Add docs for `Buffer`, `CpuBuffer` enums and methods (`src/buffer.rs`).
+            *   [✅] Add docs for `TensorData` struct and its public methods (`src/tensor_data.rs`).
+            *   [✅] Add docs for the main `Tensor` struct (`src/tensor/mod.rs`).
         *   **Step 1.A.5: `rustdoc` Documentation - Tensor Methods & Traits**
             *   [ ] Add docs for creation functions (`create.rs`).
             *   [ ] Add docs for `TensorImpl`, `BasicTensorOps`, `TensorViewOps`, `TensorIndexing` traits (`traits.rs`).
@@ -164,7 +164,7 @@
             *   [ ] Implement `Tensor::div_`, similar to `add_`.
             *   [ ] Add tests and `rustdoc`.
         *   **Step 1.D.5: Refactor Training Loop Example (Optional but Recommended)**
-            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`).
+            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`.
 
 *   **Phase 1 Notes:**
     *   *Other DTypes (`I64`, `I32`, `Bool`, etc.), full mixed-type operation support, and other creation functions (`arange`, `linspace`, `eye`) are deferred to later phases (e.g., Phase 2 or 4) to keep Phase 1 focused.*

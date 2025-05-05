@@ -1,3 +1,23 @@
+//!
+//! # NeuraRust Core Library (`neurarust-core`)
+//! 
+//! This crate provides the foundational building blocks for the NeuraRust deep learning framework.
+//! It focuses on tensor operations, automatic differentiation (autograd), and basic numerical utilities.
+//! 
+//! ## Key Modules:
+//! - `tensor`: Defines the multi-dimensional `Tensor` struct and its core functionalities.
+//! - `tensor_data`: Internal representation of tensor metadata and buffer management.
+//! - `buffer`: Abstract representation of data buffers (CPU/GPU).
+//! - `ops`: Contains various tensor operations (arithmetic, linear algebra, views, etc.).
+//! - `autograd`: Implements the automatic differentiation engine.
+//! - `types`: Defines core data types (`DType`) and devices (`StorageDevice`).
+//! - `error`: Defines the custom error type `NeuraRustError` used throughout the crate.
+//! - `device`: Handles device abstractions (currently CPU).
+//! - `utils`: General utility functions.
+//! 
+//! The primary goal is to offer a flexible and performant tensor library inspired by PyTorch,
+//! built entirely in Rust.
+
 // Déclare les modules principaux de la crate
 pub mod autograd;
 // pub mod creation;
