@@ -4,12 +4,50 @@ use crate::tensor::utils::broadcast_shapes;
 use crate::tensor::Tensor;
 use crate::types::DType;
 
-/// Performs element-wise equality comparison between two tensors.
+/// Performs element-wise equality comparison (`a == b`) between two tensors.
 ///
-/// Returns a new tensor containing 1.0f32 where elements are equal, and 0.0f32 otherwise.
-/// Supports broadcasting.
-/// Currently only supports F32 CPU tensors.
-/// This operation does not support automatic differentiation.
+/// Compares elements of `a` and `b` after broadcasting to a common shape.
+/// Due to floating-point inaccuracies, equality for `F32` is checked using
+/// a small tolerance (epsilon, currently `1e-6`):
+/// `|a_val - b_val| < epsilon`.
+///
+/// The result is a tensor with the broadcasted shape and `DType::F32`, containing
+/// `1.0` where the elements are considered equal and `0.0` otherwise.
+///
+/// This operation **does not** support automatic differentiation.
+///
+/// # Arguments
+/// * `a`: The first input `Tensor`.
+/// * `b`: The second input `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` (DType F32) with the comparison result (1.0 or 0.0),
+/// or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` if:
+/// - Tensors are not on the CPU (`DeviceMismatch`).
+/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
+/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
+/// - An internal error occurs.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::Tensor;
+/// use neurarust_core::ops::comparison::equal_op;
+///
+/// let t1 = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+/// let t2 = Tensor::new(vec![1.0f32, 0.0, 3.0, 5.0], vec![2, 2]).unwrap();
+/// let t3 = Tensor::new(vec![1.0f32], vec![1]).unwrap(); // Broadcastable scalar-like
+///
+/// let eq12 = equal_op(&t1, &t2).unwrap();
+/// assert_eq!(eq12.shape(), vec![2, 2]);
+/// assert_eq!(eq12.get_f32_data().unwrap(), vec![1.0, 0.0, 1.0, 0.0]);
+///
+/// let eq13 = equal_op(&t1, &t3).unwrap(); // t3 broadcasts to [[1., 1.], [1., 1.]]
+/// assert_eq!(eq13.shape(), vec![2, 2]);
+/// assert_eq!(eq13.get_f32_data().unwrap(), vec![1.0, 0.0, 0.0, 0.0]);
+/// ```
 pub fn equal_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();
