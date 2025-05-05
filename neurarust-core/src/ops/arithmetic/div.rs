@@ -1,14 +1,22 @@
-use crate::autograd::BackwardOp;
-use crate::error::NeuraRustError;
-use crate::tensor::Tensor;
-use crate::tensor_data::TensorData;
+use crate::{
+    autograd::{backward_op::BackwardOp, graph::NodeId},
+    error::NeuraRustError,
+    ops::traits::NeuraNumeric,
+    tensor::Tensor,
+    tensor_data::TensorData,
+};
 use crate::ops::arithmetic::mul::mul_op;
 use crate::ops::arithmetic::neg::neg_op;
-use crate::autograd::graph::NodeId;
-
-// Keep Zero trait for division check
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
+
+/// Generic kernel for element-wise division.
+fn div_kernel<T: NeuraNumeric>(a: T, b: T) -> T {
+    // Note: Consider adding checks for division by zero if T can be integer
+    // or if robust handling is needed for floats.
+    // For Float types, this typically results in +/- infinity or NaN.
+    a / b
+}
 
 // --- Backward Operation Structure ---
 
@@ -98,20 +106,21 @@ impl BackwardOp for DivBackward {
 /// - Division by zero occurs (`DivisionByZero`).
 /// - An internal error occurs during computation or memory allocation.
 pub fn div_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
-    // Clone tensors needed for backward *before* calling helper
     let a_clone = a.clone();
     let b_clone = b.clone();
 
-    // Appelle la fonction helper centralisée
-    super::apply_binary_op_broadcasted(
+    // Call the centralized helper
+    crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,
-        |va, vb| va / vb, // Opération pour F32 (peut résulter en inf ou NaN)
-        |va, vb| va / vb, // Opération pour F64 (peut résulter en inf ou NaN)
+        // Closure for F32, calling the generic kernel
+        |va, vb| div_kernel::<f32>(va, vb),
+        // Closure for F64, calling the generic kernel
+        |va, vb| div_kernel::<f64>(va, vb),
         // Closure captures and moves the clones
         move |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
             Arc::new(DivBackward {
-                a: a_clone, // Utilise les clones capturés
+                a: a_clone,
                 b: b_clone,
                 a_node: a_node_opt,
                 b_node: b_node_opt,
@@ -121,7 +130,7 @@ pub fn div_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 b_requires_grad: b_req,
             })
         },
-        "div_op", // Nom de l'opération pour les erreurs
+        "div_op", // Operation name for errors
     )
 }
 
