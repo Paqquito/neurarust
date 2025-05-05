@@ -5,9 +5,15 @@ use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use crate::autograd::graph::NodeId;
 use std::fmt::Debug;
+use crate::ops::traits::NeuraNumeric;
 
 // Importer les opérations nécessaires pour backward
 use crate::ops::arithmetic::neg::neg_op;
+
+/// Generic kernel for element-wise subtraction.
+fn sub_kernel<T: NeuraNumeric>(a: T, b: T) -> T {
+    a - b
+}
 
 // --- Backward Operation Structure ---
 
@@ -88,7 +94,7 @@ impl BackwardOp for SubBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise subtraction of two tensors (`a - b`), supporting broadcasting.
+/// Performs element-wise subtraction (`a - b`) on two tensors with broadcasting.
 ///
 /// Computes the difference between two tensors, element by element. If the tensors have different
 /// but compatible shapes, broadcasting rules are applied.
@@ -109,12 +115,16 @@ impl BackwardOp for SubBackward {
 /// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
 /// - An internal error occurs during computation or memory allocation.
 pub fn sub_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
-    super::apply_binary_op_broadcasted(
+    // Call the centralized helper
+    crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,
-        |va, vb| va - vb, // F32 operation
-        |va, vb| va - vb, // F64 operation
-        |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| { // Closure to create BackwardOp
+        // Closure for F32, calling the generic kernel
+        |va, vb| sub_kernel::<f32>(va, vb),
+        // Closure for F64, calling the generic kernel
+        |va, vb| sub_kernel::<f64>(va, vb),
+        // Closure to create SubBackward (passes Option directly)
+        |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
             Arc::new(SubBackward {
                 a_node: a_node_opt,
                 b_node: b_node_opt,

@@ -94,12 +94,12 @@
                     *   [✅] Ensure `AddBackward` still functions correctly. (Verified via tests)
                     *   [✅] Verify with `cargo test --workspace`.
                 *   **Step 1.A.9.4.5: Evaluate PoC and Plan Wider Rollout**
-                    *   [ ] Review the refactored `neg_op` and `add_op` code.
-                    *   [ ] Assess: Is the `NeuraNumeric` trait sufficient? Is the pattern clean and repeatable? Does it significantly reduce kernel code duplication?
-                    *   [ ] Decide:
-                        *   Proceed: Apply the pattern to other ops.
-                        *   Refine: Modify the trait or pattern.
-                        *   Revert/Postpone: If the abstraction proves too complex or doesn't yield benefits now.
+                    *   [✅] Review the refactored `neg_op` and `add_op` code.
+                    *   [✅] Assess: Is the `NeuraNumeric` trait sufficient? Is the pattern clean and repeatable? Does it significantly reduce kernel code duplication?
+                    *   [✅] Decide:
+                        *   [✅] Proceed: Apply the pattern to other ops.
+                        *   [ ] Refine: Modify the trait or pattern.
+                        *   [ ] Revert/Postpone: If the abstraction proves too complex or doesn't yield benefits now.
                 *   **Step 1.A.9.4.6: Apply Generic Kernel Pattern Iteratively (If PoC Successful)**
                     *   [ ] Gradually refactor other arithmetic op kernels (`sub`, `mul`, `div`, `pow`, `ln`, etc.) using the established pattern.
                     *   [ ] Refactor reduction kernels (`sum_kernel`, `mean_kernel`, `max_kernel`).
