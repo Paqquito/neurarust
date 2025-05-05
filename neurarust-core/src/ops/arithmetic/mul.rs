@@ -250,10 +250,16 @@ pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     Ok(output_tensor)
 }
 
+// --- Tests --- 
+// Link the external test file
+#[cfg(test)]
+#[path = "mul_test.rs"]
+mod tests;
+
+/* --- REMOVED previous comments about removed internal module --- 
 // --- REMOVED internal tests module --- 
 // Tests for this module can be found in src/ops/arithmetic/mul_test.rs
 
-/*
 #[cfg(test)]
 mod tests {
     // ... (contenu de l'ancien module de tests) ...
