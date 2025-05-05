@@ -37,12 +37,18 @@ mod autograd_tests {
     use crate::tensor::Tensor;
     
     use crate::ops::activation::relu::relu_op;
+    use crate::error::NeuraRustError;
 
     // Helper for f64 tests
     fn create_tensor_f64_with_grad(data: Vec<f64>, shape: Vec<usize>) -> Tensor<f64> {
         let t = Tensor::new(data, shape).unwrap();
         t.set_requires_grad(true).unwrap();
         t
+    }
+
+    // Helper to create tensors easily
+    fn create_test_tensor(data: Vec<f32>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+        crate::tensor::from_vec_f32(data, shape)
     }
 
     #[test]

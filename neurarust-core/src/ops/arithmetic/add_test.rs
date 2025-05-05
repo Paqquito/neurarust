@@ -27,8 +27,8 @@ mod tests {
 
     #[test]
     fn test_add_tensors_ok() {
-        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let t2 = Tensor::from_vec_f32(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
+        let t1 = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let t2 = crate::tensor::from_vec_f32(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
         let result = add_op(&t1, &t2).unwrap(); 
         let result_data = get_f32_data(&result).unwrap(); 
         assert_eq!(result_data, vec![6.0, 8.0, 10.0, 12.0]);
@@ -47,8 +47,8 @@ mod tests {
 
     #[test]
     fn test_add_broadcasting() {
-        let matrix = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let row_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2]).unwrap();
+        let matrix = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let row_vector = crate::tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2]).unwrap();
         let result = add_op(&matrix, &row_vector).unwrap(); 
         let result_data = get_f32_data(&result).unwrap(); 
         assert_eq!(result_data, vec![11.0, 22.0, 13.0, 24.0]);
@@ -68,9 +68,9 @@ mod tests {
         // Pas besoin de func pour la vérif manuelle
         // let func = |inputs: &[Tensor]| add_op(&inputs[0], &inputs[1]);
 
-        let a = Tensor::from_vec_f32(a_data.clone(), a_shape.clone())?;
+        let a = crate::tensor::from_vec_f32(a_data.clone(), a_shape.clone())?;
         a.set_requires_grad(true)?;
-        let b = Tensor::from_vec_f32(b_data.clone(), b_shape.clone())?;
+        let b = crate::tensor::from_vec_f32(b_data.clone(), b_shape.clone())?;
         b.set_requires_grad(true)?;
 
         // --- Forward ---
@@ -110,9 +110,9 @@ mod tests {
         // Pas besoin de func
         // let func = |inputs: &[Tensor]| add_op(&inputs[0], &inputs[1]);
 
-        let a = Tensor::from_vec_f32(a_data.clone(), a_shape.clone())?;
+        let a = crate::tensor::from_vec_f32(a_data.clone(), a_shape.clone())?;
         a.set_requires_grad(true)?;
-        let b = Tensor::from_vec_f32(b_data.clone(), b_shape.clone())?;
+        let b = crate::tensor::from_vec_f32(b_data.clone(), b_shape.clone())?;
         b.set_requires_grad(true)?;
 
         // --- Forward ---

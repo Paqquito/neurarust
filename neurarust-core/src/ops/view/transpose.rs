@@ -103,36 +103,42 @@ impl BackwardOp for TransposeBackward {
 // --- Tests ---
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::ops::view::transpose::transpose_op;
     use crate::tensor::Tensor;
+    use crate::error::NeuraRustError;
+    // Correct path for testing utils
     use crate::utils::testing::check_tensor_near;
+    // Remove create_test_tensor import
+    // use crate::utils::testing::create_test_tensor;
+    // use crate::tensor::create; // Remove, use Tensor::new or helpers
+    // Import check_grad
     use crate::autograd::grad_check::check_grad;
-    
-    // Remove unused Buffer imports
-    // use crate::buffer::{Buffer, CpuBuffer};
+    use std::error::Error; // Needed for some test signatures
 
-    // Remove local get_f32_data, use Tensor::get_f32_data
-    /*
-    fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> { ... }
-    */
+    // // Helper to get f32 data - REMOVE, use tensor.get_f32_data()
+    // fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
+    //    // ... implementation ...
+    // }
 
     #[test]
-    fn test_transpose_basic() {
-        let tensor = Tensor::from_vec_f32((0..6).map(|x| x as f32).collect(), vec![2, 3]).expect("Failed to create tensor");
-        let transposed = tensor.transpose(0, 1).expect("Transpose failed");
-
+    fn test_transpose_basic() -> Result<(), Box<dyn Error>> {
+        let tensor = Tensor::new((0..6).map(|x| x as f32).collect(), vec![2, 3])
+            .expect("Failed to create tensor");
+        let transposed = transpose_op(&tensor, 0, 1)?;
+        let expected_data = vec![0.0, 3.0, 1.0, 4.0, 2.0, 5.0]; // Data after transpose
         assert_eq!(transposed.shape(), vec![3, 2]);
         assert_eq!(transposed.strides(), vec![1, 3]); // Strides of the view
         assert!(!transposed.is_contiguous());
 
         // Correction: Make the view contiguous before getting data
         let data = transposed.contiguous().unwrap().get_f32_data().expect("Failed to get transposed data after making contiguous");
-        assert_eq!(data, vec![0.0, 3.0, 1.0, 4.0, 2.0, 5.0]);
+        assert_eq!(data, expected_data);
+        Ok(())
     }
 
     #[test]
     fn test_transpose_invalid_dims() {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("Failed to create tensor");
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).expect("Failed to create tensor");
         let result = transpose_op(&t, 0, 2);
         assert!(matches!(result, Err(NeuraRustError::IndexOutOfBounds { .. })));
         let result2 = transpose_op(&t, 2, 1);
@@ -142,7 +148,7 @@ mod tests {
     #[test]
     fn test_transpose_higher_dim() {
         // Unskip test
-        let t = Tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4]).expect("Failed to create tensor");
+        let t = Tensor::new((0..24).map(|x| x as f32).collect(), vec![2, 3, 4]).expect("Failed to create tensor");
         // Transpose dims 1 and 2 -> shape [2, 4, 3]
         let transposed = transpose_op(&t, 1, 2).unwrap();
         assert_eq!(transposed.shape(), vec![2, 4, 3]);
@@ -167,7 +173,7 @@ mod tests {
         // Use f32 consistently for test tensor creation
         let input_data = vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0];
         let input_shape = vec![2, 3];
-        let input = Tensor::from_vec_f32(input_data, input_shape).unwrap();
+        let input = Tensor::new(input_data, input_shape).unwrap();
         input.set_requires_grad(true).expect("Setting requires_grad failed");
 
         let func = |inputs: &[Tensor]| transpose_op(&inputs[0], 0, 1);
@@ -190,7 +196,7 @@ mod tests {
         // Use f32 consistently
         let input_data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
         let input_shape = vec![2, 3, 4];
-        let input = Tensor::from_vec_f32(input_data, input_shape).unwrap();
+        let input = Tensor::new(input_data, input_shape).unwrap();
         input.set_requires_grad(true).expect("Setting requires_grad failed");
 
         let func = |inputs: &[Tensor]| transpose_op(&inputs[0], 1, 2);
@@ -218,7 +224,7 @@ mod tests {
         let func = |inputs: &[Tensor]| transpose_op(&inputs[0], 0, 1);
 
         let output_shape = vec![3, 2]; // Transposed shape
-        let output_grad = crate::tensor::create::ones_f64(&output_shape)?; // f64
+        let output_grad = crate::tensor::ones_f64(&output_shape)?; // f64
         
         let epsilon = 1e-6; // f64
         let abs_tol = 1e-9; // f64

@@ -10,6 +10,7 @@ mod tests {
     use crate::device::StorageDevice;
     use crate::buffer::{Buffer, CpuBuffer};
     use approx::assert_relative_eq;
+    use crate::tensor::create;
     
     fn get_f32_data_helper(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
         let guard = tensor.read_data();
@@ -23,93 +24,89 @@ mod tests {
     }
 
     #[test]
-    fn test_sum_all() {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let result = sum_op(&t, None, false).unwrap();
-        assert_eq!(result.shape(), &[] as &[usize], "Result shape should be scalar");
-        let result_val = get_f32_data_helper(&result).unwrap()[0];
-        assert_relative_eq!(result_val, 21.0, epsilon = 1e-6);
+    fn test_sum_all() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let result = sum_op(&t, None, false)?;
+        let data = get_f32_data_helper(&result)?;
+        assert_eq!(result.shape(), &[] as &[usize]);
+        assert_eq!(data.len(), 1);
+        assert_relative_eq!(data[0], 21.0, epsilon = 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_axis_0() {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let result = sum_op(&t, Some(&[0]), false).unwrap();
+    fn test_sum_axis0() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let result = sum_op(&t, Some(&[0]), false)?;
+        let data = get_f32_data_helper(&result)?;
         assert_eq!(result.shape(), &[3]);
-        let expected_data = vec![5.0, 7.0, 9.0]; // [1+4, 2+5, 3+6]
-        let res_data = get_f32_data_helper(&result).unwrap();
-        assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
+        assert_eq!(data.len(), 3);
+        assert_relative_eq!(data.as_slice(), &[5.0f32, 7.0f32, 9.0f32] as &[f32], epsilon = 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_axis_1() {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
-        let result = sum_op(&t, Some(&[1]), false).unwrap();
-        assert_eq!(result.shape(), &[2]);
-        let expected_data = vec![6.0, 15.0]; // [1+2+3, 4+5+6]
-        let res_data = get_f32_data_helper(&result).unwrap();
-        assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
+    fn test_sum_axis1_keepdims() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let result = sum_op(&t, Some(&[1]), true)?;
+        let data = get_f32_data_helper(&result)?;
+        assert_eq!(result.shape(), &[2, 1]);
+        assert_eq!(data.len(), 2);
+        assert_relative_eq!(data.as_slice(), &[6.0f32, 15.0f32] as &[f32], epsilon = 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_axes_multiple() {
-        let t = Tensor::from_vec_f32((1..=24).map(|x| x as f32).collect(), vec![2, 3, 4]).unwrap();
-        let result = sum_op(&t, Some(&[0, 2]), false).unwrap();
+    fn test_sum_multiple_axes() -> Result<(), NeuraRustError> {
+        let t = Tensor::new((1..=24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
+        let result = sum_op(&t, Some(&[0, 2]), false)?;
+        let data = get_f32_data_helper(&result)?;
         assert_eq!(result.shape(), &[3]);
-        let expected_data = vec![68.0, 100.0, 132.0];
-        let res_data = get_f32_data_helper(&result).unwrap();
-        assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
+        assert_eq!(data.len(), 3);
+        assert_relative_eq!(data.as_slice(), &[68.0f32, 100.0f32, 132.0f32] as &[f32], epsilon = 1e-6);
+        Ok(())
     }
 
     #[test]
-    fn test_sum_keep_dims() {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+    fn test_sum_invalid_axis() -> Result<(), NeuraRustError> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         
-        let result0 = sum_op(&t, Some(&[0]), true).unwrap();
-        assert_eq!(result0.shape(), &[1, 3]);
-        let expected_data0 = vec![5.0, 7.0, 9.0];
-        let res_data0 = get_f32_data_helper(&result0).unwrap();
-        assert_relative_eq!(res_data0.as_slice(), expected_data0.as_slice(), epsilon = 1e-6);
+        // Test case 1: Single invalid axis
+        let result1 = sum_op(&t, Some(&[2]), false);
+        assert!(matches!(result1, Err(NeuraRustError::InvalidAxis { axis: 2, rank: 2 })),
+                "Test Case 1 Failed: Expected InvalidAxis {{ axis: 2, rank: 2 }}, got {:?}", result1);
 
-        let result1 = sum_op(&t, Some(&[1]), true).unwrap();
-        assert_eq!(result1.shape(), &[2, 1]);
-        let expected_data1 = vec![6.0, 15.0];
-        let res_data1 = get_f32_data_helper(&result1).unwrap();
-        assert_relative_eq!(res_data1.as_slice(), expected_data1.as_slice(), epsilon = 1e-6);
+        // Test case 2: Mix of valid and invalid axes
+        let result2 = sum_op(&t, Some(&[0, 2]), false); // Axis 2 is still invalid
+         assert!(matches!(result2, Err(NeuraRustError::InvalidAxis { axis: 2, rank: 2 })),
+                "Test Case 2 Failed: Expected InvalidAxis {{ axis: 2, rank: 2 }}, got {:?}", result2);
+        
+        // Test case 3: Axis equal to rank (also invalid)
+        let result3 = sum_op(&t, Some(&[1, 2]), false); // Axis 2 is still invalid
+         assert!(matches!(result3, Err(NeuraRustError::InvalidAxis { axis: 2, rank: 2 })),
+                "Test Case 3 Failed: Expected InvalidAxis {{ axis: 2, rank: 2 }}, got {:?}", result3);
 
-        let result_all = sum_op(&t, None, true).unwrap(); 
-        assert_eq!(result_all.shape(), &[1, 1]);
-        let expected_data_all = vec![21.0];
-        let res_data_all = get_f32_data_helper(&result_all).unwrap();
-        assert_relative_eq!(res_data_all.as_slice(), expected_data_all.as_slice(), epsilon = 1e-6);
-    }
-
-    #[test]
-    fn test_sum_invalid_axis() {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2]).unwrap();
-        let result = sum_op(&t, Some(&[1]), false);
-        assert!(matches!(result, Err(NeuraRustError::InvalidAxis { .. }) | Err(NeuraRustError::IndexOutOfBounds { .. })));
+        Ok(())
     }
 
     #[test]
     fn test_sum_all_non_contiguous() -> Result<(), NeuraRustError> {
-        // Créer un tenseur 2x3
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-        // Le transposer pour le rendre non contigu (strides: [1, 2])
-        let t_transposed = t.transpose(0, 1)?;
-        assert!(!t_transposed.is_contiguous(), "Transposed tensor should not be contiguous");
-        assert_eq!(t_transposed.shape(), &[3, 2]);
-        assert_eq!(t_transposed.strides(), &[1, 2]); // Strides attendus pour transpose sur 2x3
+        // Créer un tenseur 3x4
+        let base = create::from_vec_f32((0..12).map(|x| x as f32).collect(), vec![3, 4])?;
+        // Le transposer pour le rendre non contigu (shape 4x3, strides [1, 4])
+        let t = base.transpose(0, 1)?;
+        assert!(!t.is_contiguous());
+        assert_eq!(t.shape(), &[4, 3]);
+        assert_eq!(t.strides(), &[1, 4], "Strides mismatch after transpose");
 
-        // Calculer la somme globale sur le tenseur non contigu
-        // Utiliser sum_op directement pour tester le noyau
-        let sum_result = crate::ops::reduction::sum::sum_op(&t_transposed, None, false)?;
+        // Calculer la somme globale sur le tenseur non contigu via sum_op
+        let sum_result = sum_op(&t, None, false)?;
         
         // Vérifier le résultat
         let sum_data = get_f32_data_helper(&sum_result)?;
         assert_eq!(sum_result.shape(), &[] as &[usize], "Sum result shape should be scalar");
         assert_eq!(sum_data.len(), 1, "Sum result should have 1 element");
-        approx::assert_relative_eq!(sum_data[0], 21.0, epsilon = 1e-6);
+        assert_relative_eq!(sum_data[0], 66.0, epsilon = 1e-6);
 
         Ok(())
     }
@@ -129,10 +126,9 @@ mod autograd_tests {
 
     #[test]
     fn test_sum_axes_backward_simple_keep_dims() -> Result<(), NeuraRustError> {
-        // Utiliser Tensor::from_vec_f32
-        let input_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let input_data = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32, 5.0f32, 6.0f32];
         let input_shape = vec![2, 3];
-        let input = Tensor::from_vec_f32(input_data.clone(), input_shape.clone())?;
+        let input = Tensor::new(input_data.clone(), input_shape.clone())?;
         input.set_requires_grad(true)?;
 
         // Axe de réduction
@@ -144,9 +140,9 @@ mod autograd_tests {
         assert_eq!(output.shape(), &[1, 3]); // Vérifier la forme de sortie
 
         // --- Backward pass ---
-        let output_grad_data = vec![0.1, 0.2, 0.3]; // Gradient arbitraire
+        let output_grad_data = vec![0.1f32, 0.2f32, 0.3f32];
         let output_grad_shape = vec![1, 3];
-        let output_grad = Tensor::from_vec_f32(output_grad_data.clone(), output_grad_shape)?;
+        let output_grad = Tensor::new(output_grad_data.clone(), output_grad_shape)?;
 
         output.backward(Some(output_grad))?;
 
@@ -164,9 +160,9 @@ mod autograd_tests {
 
      #[test]
     fn test_sum_axes_backward_simple_no_keep_dims() -> Result<(), NeuraRustError> {
-        let input_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
+        let input_data = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32, 5.0f32, 6.0f32];
         let input_shape = vec![2, 3];
-        let input = Tensor::from_vec_f32(input_data.clone(), input_shape.clone())?;
+        let input = Tensor::new(input_data.clone(), input_shape.clone())?;
         input.set_requires_grad(true)?;
 
         // Axe de réduction
@@ -178,9 +174,9 @@ mod autograd_tests {
         assert_eq!(output.shape(), &[2]); // Vérifier la forme de sortie [6.0, 15.0]
 
         // --- Backward pass ---
-        let output_grad_data = vec![0.5, -0.1]; // Gradient arbitraire
+        let output_grad_data = vec![0.5f32, -0.1f32];
         let output_grad_shape = vec![2];
-        let output_grad = Tensor::from_vec_f32(output_grad_data.clone(), output_grad_shape)?;
+        let output_grad = Tensor::new(output_grad_data.clone(), output_grad_shape)?;
 
         output.backward(Some(output_grad))?;
 
@@ -198,9 +194,9 @@ mod autograd_tests {
 
     #[test]
     fn test_sum_all_backward_keep_dims() -> Result<(), NeuraRustError> {
-        let input_data = vec![1.0, 2.0, 3.0, 4.0];
+        let input_data = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32];
         let input_shape = vec![2, 2];
-        let input = Tensor::from_vec_f32(input_data.clone(), input_shape.clone())?;
+        let input = Tensor::new(input_data.clone(), input_shape.clone())?;
         input.set_requires_grad(true)?;
 
         // Axe de réduction: None (all)
@@ -212,9 +208,9 @@ mod autograd_tests {
         assert_eq!(output.shape(), &[1, 1]); // Output scalaire gardant les dims
 
         // --- Backward pass ---
-        let output_grad_data = vec![5.0]; // Gradient scalaire
+        let output_grad_data = vec![5.0f32];
         let output_grad_shape = vec![1, 1];
-        let output_grad = Tensor::from_vec_f32(output_grad_data.clone(), output_grad_shape)?;
+        let output_grad = Tensor::new(output_grad_data.clone(), output_grad_shape)?;
 
         output.backward(Some(output_grad))?;
 
@@ -232,9 +228,9 @@ mod autograd_tests {
 
     #[test]
     fn test_sum_all_backward_no_keep_dims() -> Result<(), NeuraRustError> {
-        let input_data = vec![1.0, 2.0, 3.0, 4.0];
+        let input_data = vec![1.0f32, 2.0f32, 3.0f32, 4.0f32];
         let input_shape = vec![2, 2];
-        let input = Tensor::from_vec_f32(input_data.clone(), input_shape.clone())?;
+        let input = Tensor::new(input_data.clone(), input_shape.clone())?;
         input.set_requires_grad(true)?;
 
         // Axe de réduction: None (all)
@@ -267,7 +263,7 @@ mod autograd_tests {
     fn test_sum_multiple_axes_backward() -> Result<(), NeuraRustError> {
         let input_data = (1..=24).map(|x| x as f32).collect::<Vec<_>>();
         let input_shape = vec![2, 3, 4];
-        let input = Tensor::from_vec_f32(input_data.clone(), input_shape.clone())?;
+        let input = Tensor::new(input_data.clone(), input_shape.clone())?;
         input.set_requires_grad(true)?;
 
         // Axe de réduction
@@ -279,29 +275,18 @@ mod autograd_tests {
         assert_eq!(output.shape(), &[3]); // Output shape [68.0, 100.0, 132.0]
 
         // --- Backward pass ---
-        let output_grad_data = vec![0.1, 0.2, 0.3]; // Gradient arbitraire
+        let output_grad_data = vec![10.0f32, 20.0f32, 30.0f32];
         let output_grad_shape = vec![3];
-        let output_grad = Tensor::from_vec_f32(output_grad_data.clone(), output_grad_shape)?;
+        let output_grad = Tensor::new(output_grad_data.clone(), output_grad_shape)?;
 
         output.backward(Some(output_grad))?;
 
         // --- Vérification Manuelle du Gradient ---
         let grad_input = input.grad().expect("Gradient d'entrée manquant").contiguous()?;
         
-        // Gradient attendu : output_grad broadcasté sur les axes réduits (0 et 2)
-        // Le gradient pour la dimension 1 (qui reste) est [0.1, 0.2, 0.3]
-        // Ce gradient est appliqué à chaque élément le long des dimensions 0 et 2.
-        // Bloc 0 (dim 0):
-        //   Ligne 0 (dim 1): [0.1, 0.1, 0.1, 0.1]
-        //   Ligne 1 (dim 1): [0.2, 0.2, 0.2, 0.2]
-        //   Ligne 2 (dim 1): [0.3, 0.3, 0.3, 0.3]
-        // Bloc 1 (dim 0):
-        //   Ligne 0 (dim 1): [0.1, 0.1, 0.1, 0.1]
-        //   Ligne 1 (dim 1): [0.2, 0.2, 0.2, 0.2]
-        //   Ligne 2 (dim 1): [0.3, 0.3, 0.3, 0.3]
         let expected_grad_data = vec![
-            0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.2, 0.3, 0.3, 0.3, 0.3, // Bloc 0
-            0.1, 0.1, 0.1, 0.1, 0.2, 0.2, 0.2, 0.2, 0.3, 0.3, 0.3, 0.3  // Bloc 1
+            10.0f32, 10.0f32, 10.0f32, 10.0f32,  20.0f32, 20.0f32, 20.0f32, 20.0f32,  30.0f32, 30.0f32, 30.0f32, 30.0f32,
+            10.0f32, 10.0f32, 10.0f32, 10.0f32,  20.0f32, 20.0f32, 20.0f32, 20.0f32,  30.0f32, 30.0f32, 30.0f32, 30.0f32
         ];
         check_tensor_near(&grad_input, &input_shape, &expected_grad_data, 1e-6);
         

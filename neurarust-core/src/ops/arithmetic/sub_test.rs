@@ -24,8 +24,8 @@ fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
 
 #[test]
 fn test_sub_tensors_ok() -> Result<(), NeuraRustError> {
-    let a = Tensor::from_vec_f32(vec![10.0, 20.0], vec![2])?; // f32
-    let b = Tensor::from_vec_f32(vec![3.0, 4.0], vec![2])?;  // f32
+    let a = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+    let b = crate::tensor::from_vec_f32(vec![4.0, 5.0, 6.0], vec![3]).unwrap();
     let result = sub_op(&a, &b)?;
     let expected_data = vec![7.0, 16.0];
     assert_eq!(result.shape(), &[2]);
@@ -36,8 +36,8 @@ fn test_sub_tensors_ok() -> Result<(), NeuraRustError> {
 
 #[test]
 fn test_sub_tensors_shape_mismatch() -> Result<(), NeuraRustError> {
-    let a = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?;
-    let b = Tensor::from_vec_f32(vec![3.0, 4.0, 5.0], vec![3])?;
+    let a = crate::tensor::from_vec_f32(vec![1.0, 2.0], vec![2]).unwrap();
+    let b = crate::tensor::from_vec_f32(vec![4.0, 5.0, 6.0], vec![3]).unwrap();
     let result = sub_op(&a, &b);
     assert!(matches!(result, Err(NeuraRustError::ShapeMismatch(_))));
     Ok(())
@@ -45,8 +45,8 @@ fn test_sub_tensors_shape_mismatch() -> Result<(), NeuraRustError> {
 
 #[test]
 fn test_sub_broadcasting() -> Result<(), NeuraRustError> {
-    let matrix = Tensor::from_vec_f32(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2])?; // f32
-    let scalar = Tensor::from_vec_f32(vec![5.0], vec![1])?;                     // f32
+    let matrix = crate::tensor::from_vec_f32(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2]).unwrap();
+    let scalar = crate::tensor::from_vec_f32(vec![5.0], vec![1]).unwrap();
     let result = sub_op(&matrix, &scalar)?;
     let expected_data = vec![5.0, 15.0, 25.0, 35.0];
     assert_eq!(result.shape(), &[2, 2]);
@@ -59,36 +59,36 @@ fn test_sub_broadcasting() -> Result<(), NeuraRustError> {
 
 #[test]
 fn test_sub_backward_simple() -> Result<(), NeuraRustError> {
-    let a = Tensor::from_vec_f32(vec![10.0, 20.0], vec![2])?;
-    a.set_requires_grad(true)?;
-    let b = Tensor::from_vec_f32(vec![3.0, 4.0], vec![2])?;
-    b.set_requires_grad(true)?;
+    let a = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+    let b = crate::tensor::from_vec_f32(vec![4.0, 5.0, 6.0], vec![3]).unwrap();
+    a.set_requires_grad(true).unwrap();
+    b.set_requires_grad(true).unwrap();
 
     let result = sub_op(&a, &b)?;
-    let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2], vec![2])?;
+    let output_grad = crate::tensor::from_vec_f32(vec![0.1, 0.2, 0.3], vec![3])?;
     result.backward(Some(output_grad))?;
 
-    // grad_a = output_grad = [0.1, 0.2]
-    // grad_b = -output_grad = [-0.1, -0.2]
-    check_tensor_near(&a.grad().unwrap(), &[2], &vec![0.1, 0.2], 1e-6);
-    check_tensor_near(&b.grad().unwrap(), &[2], &vec![-0.1, -0.2], 1e-6);
+    // grad_a = output_grad = [0.1, 0.2, 0.3]
+    // grad_b = -output_grad = [-0.1, -0.2, -0.3]
+    check_tensor_near(&a.grad().unwrap(), &[3], &vec![0.1, 0.2, 0.3], 1e-6);
+    check_tensor_near(&b.grad().unwrap(), &[3], &vec![-0.1, -0.2, -0.3], 1e-6);
     Ok(())
 }
 
 #[test]
 fn test_sub_backward_broadcast() -> Result<(), NeuraRustError> {
-    let matrix = Tensor::from_vec_f32(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2])?;
-    matrix.set_requires_grad(true)?;
-    let scalar = Tensor::from_vec_f32(vec![5.0], vec![1])?;
-    scalar.set_requires_grad(true)?;
+    let matrix = crate::tensor::from_vec_f32(vec![10.0, 20.0, 30.0, 40.0], vec![2, 2]).unwrap();
+    let scalar = crate::tensor::from_vec_f32(vec![1.0, 2.0], vec![1, 2]).unwrap();
+    matrix.set_requires_grad(true).unwrap();
+    scalar.set_requires_grad(true).unwrap();
 
     let result = sub_op(&matrix, &scalar)?;
-    let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
+    let output_grad = crate::tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
     result.backward(Some(output_grad))?;
 
     // grad_matrix = output_grad = [0.1, 0.2, 0.3, 0.4]
     // grad_scalar = sum(-output_grad) = -(0.1 + 0.2 + 0.3 + 0.4) = -1.0
     check_tensor_near(&matrix.grad().unwrap(), &[2, 2], &vec![0.1, 0.2, 0.3, 0.4], 1e-6);
-    check_tensor_near(&scalar.grad().unwrap(), &[1], &vec![-1.0], 1e-6);
+    check_tensor_near(&scalar.grad().unwrap(), &[1, 2], &vec![-1.0, -1.0], 1e-6);
     Ok(())
 } 

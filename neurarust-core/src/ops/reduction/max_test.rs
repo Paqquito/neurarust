@@ -26,7 +26,7 @@ mod tests {
     // --- Forward Tests ---
     #[test]
     fn test_max_all() -> Result<(), NeuraRustError> {
-        let t = Tensor::from_vec_f32(vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0], vec![2, 3])?;
+        let t = crate::tensor::from_vec_f32(vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0], vec![2, 3])?;
         let result = t.max(None, false)?;
         let result_data = get_f32_data(&result)?;
         assert_eq!(result.shape(), &[] as &[usize]);
@@ -35,7 +35,7 @@ mod tests {
     }
     #[test]
     fn test_max_axis0() -> Result<(), NeuraRustError> {
-         let t = Tensor::from_vec_f32(vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0], vec![2, 3])?;
+         let t = crate::tensor::from_vec_f32(vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0], vec![2, 3])?;
          let result = t.max(Some(&[0]), false)?;
          let result_data = get_f32_data(&result)?;
          assert_eq!(result.shape(), &[3]);
@@ -44,7 +44,7 @@ mod tests {
     }
     #[test]
     fn test_max_axis1_keepdims() -> Result<(), NeuraRustError> {
-         let t = Tensor::from_vec_f32(vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0], vec![2, 3])?;
+         let t = crate::tensor::from_vec_f32(vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0], vec![2, 3])?;
          let result = t.max(Some(&[1]), true)?;
          let result_data = get_f32_data(&result)?;
          assert_eq!(result.shape(), &[2, 1]);
@@ -53,7 +53,7 @@ mod tests {
     }
     #[test]
     fn test_max_multiple_axes() -> Result<(), NeuraRustError> {
-         let t = Tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
+         let t = crate::tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
          let result = t.max(Some(&[0, 2]), false)?;
          let result_data = get_f32_data(&result)?;
          assert_eq!(result.shape(), &[3]);
@@ -62,7 +62,7 @@ mod tests {
     }
     #[test]
     fn test_max_invalid_axis() -> Result<(), NeuraRustError> { 
-         let t = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?; // Shape [2]
+         let t = crate::tensor::from_vec_f32(vec![1.0, 2.0], vec![2])?; // Shape [2]
          let result = t.max(Some(&[1]), false);
          assert!(matches!(result, Err(NeuraRustError::InvalidAxis { axis: 1, rank: 1 })));
          Ok(())
@@ -74,7 +74,7 @@ mod tests {
         println!("Running test_max_all_backward");
         let t_data = vec![1.0, -2.0, 3.0, 0.0, -5.0, 6.0];
         let t_shape = vec![2, 3];
-        let t = Tensor::from_vec_f32(t_data, t_shape.clone())?;
+        let t = crate::tensor::from_vec_f32(t_data, t_shape.clone())?;
         t.set_requires_grad(true)?;
 
         let output = t.max(None, false)?;
@@ -99,7 +99,7 @@ mod tests {
         println!("Running test_max_axis_backward");
         let t_data = vec![1.0, 6.0, 3.0, 4.0, 5.0, 2.0];
         let t_shape = vec![2, 3];
-        let t = Tensor::from_vec_f32(t_data, t_shape.clone())?;
+        let t = crate::tensor::from_vec_f32(t_data, t_shape.clone())?;
         t.set_requires_grad(true)?;
 
         let axis = [0];
@@ -110,7 +110,7 @@ mod tests {
         let output_shape = output.shape().to_vec(); // Convert slice to Vec
 
         let grad_output_data = vec![0.1, 0.2, 0.3];
-        let grad_output = Tensor::from_vec_f32(grad_output_data.clone(), output_shape)?;
+        let grad_output = crate::tensor::from_vec_f32(grad_output_data.clone(), output_shape)?;
 
         output.backward(Some(grad_output))?;
 
@@ -128,7 +128,7 @@ mod tests {
         println!("Running test_max_backward_keep_dims");
         let t_data = vec![1.0, 6.0, 3.0, 4.0, 5.0, 2.0];
         let t_shape = vec![2, 3];
-        let t = Tensor::from_vec_f32(t_data, t_shape.clone())?;
+        let t = crate::tensor::from_vec_f32(t_data, t_shape.clone())?;
         t.set_requires_grad(true)?;
 
         let axis = [0];
@@ -139,7 +139,7 @@ mod tests {
         assert!(output.grad_fn().is_some());
 
         let grad_output_data = vec![0.1, 0.2, 0.3];
-        let grad_output = Tensor::from_vec_f32(grad_output_data.clone(), vec![1, 3])?; // Shape avec keep_dims
+        let grad_output = crate::tensor::from_vec_f32(grad_output_data.clone(), vec![1, 3])?; // Shape avec keep_dims
 
         output.backward(Some(grad_output))?;
 
@@ -162,7 +162,7 @@ mod tests {
         println!("Running test_max_backward_multiple_axes");
         let t_data = (0..24).map(|x| x as f32).collect::<Vec<_>>();
         let t_shape = vec![2, 3, 4];
-        let t = Tensor::from_vec_f32(t_data, t_shape.clone())?;
+        let t = crate::tensor::from_vec_f32(t_data, t_shape.clone())?;
         t.set_requires_grad(true)?;
 
         let axes = &[0, 2]; // Réduire sur dim 0 et 2
@@ -173,7 +173,7 @@ mod tests {
         assert!(output.grad_fn().is_some());
 
         let grad_output_data = vec![0.1, 0.2, 0.3];
-        let grad_output = Tensor::from_vec_f32(grad_output_data.clone(), vec![3])?;
+        let grad_output = crate::tensor::from_vec_f32(grad_output_data.clone(), vec![3])?;
 
         output.backward(Some(grad_output))?;
 

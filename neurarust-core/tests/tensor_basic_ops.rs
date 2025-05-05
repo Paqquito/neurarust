@@ -6,28 +6,28 @@ use common::create_test_tensor;
 
 #[test]
 fn test_tensor_equality() {
-    let data1 = vec![1.0_f32, 2.0];
-    let shape1 = vec![2];
-    let t1 = create_test_tensor(data1.clone(), shape1.clone());
-    let t2 = create_test_tensor(data1.clone(), shape1.clone()); // Creates a separate Tensor instance
-    let t3 = t1.clone(); // Clones Arc<RwLock>, points to same allocation, new Tensor instance
-    let t4 = create_test_tensor(vec![3.0, 4.0], shape1.clone());
-    let t5 = create_test_tensor(data1.clone(), vec![1, 2]);
+    // Test case 1: Basic equality
+    let t1 = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+    let t2 = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+    assert_eq!(t1, t2, "Tensors with same data and shape should be equal");
 
-    // NOTE: PartialEq is not derived for Tensor as pointer equality is not semantic equality.
-    // Need a custom comparison function or use check_tensor_near.
-    // For now, let's test some properties.
-    assert_eq!(t1.shape(), t3.shape());
-    assert_eq!(t1.get_f32_data().unwrap(), t3.get_f32_data().unwrap());
+    // Test case 2: Different data
+    let t3 = Tensor::new(vec![1.0, 2.5], vec![2]).unwrap(); // Different data
+    assert_ne!(t1, t3, "Tensors with different data should not be equal");
 
-    assert_eq!(t1.shape(), t2.shape());
-    assert_eq!(t1.get_f32_data().unwrap(), t2.get_f32_data().unwrap());
+    // Test case 3: Different shape
+    let t4 = Tensor::new(vec![1.0, 2.0], vec![1, 2]).unwrap(); // Different shape
+    assert_ne!(t1, t4, "Tensors with different shape should not be equal");
 
-    // Optional: Check that the Tensor structs themselves are at different memory addresses
-    assert_ne!(std::ptr::addr_of!(t1), std::ptr::addr_of!(t2), "t1 and t2 should be distinct Tensor instances");
+    // REMOVED assertion comparing only data for t1 and t4, as data is the same
+    // assert_ne!(t1.get_f32_data().unwrap(), t4.get_f32_data().unwrap(), "t1 and t4 should have different data content");
 
-    assert_ne!(t1.get_f32_data().unwrap(), t4.get_f32_data().unwrap(), "t1 and t4 should have different data content");
-    assert_ne!(t1.shape(), t5.shape(), "t1 and t5 should have different shapes");
+    // This assertion compares shapes and is correct:
+    assert_ne!(t1.shape(), t4.shape(), "t1 and t4 should have different shapes"); // Keep shape comparison
+
+    // Check clone equality (this was likely intended for t5 which was removed or renamed)
+    // let t5 = t1.clone();
+    // assert_eq!(t1, t5); 
 }
 
 #[test]
@@ -79,7 +79,7 @@ fn test_get_element_wrong_ndim() {
 
 #[test]
 fn test_detach_basic() {
-    let t1_res = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]);
+    let t1_res = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]);
     assert!(t1_res.is_ok());
     let t1 = t1_res.unwrap();
     t1.set_requires_grad(true).unwrap();

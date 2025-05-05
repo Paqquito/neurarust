@@ -25,7 +25,7 @@ mod tests {
 
     #[test]
     fn test_ln_forward_basic() -> Result<(), NeuraRustError> {
-        let a = Tensor::from_vec_f32(vec![1.0, std::f32::consts::E, 10.0], vec![3])?; // f32
+        let a = crate::tensor::from_vec_f32(vec![1.0, std::f32::consts::E, 10.0], vec![3])?;
         let result = ln_op(&a)?;
         let expected_data = vec![0.0, 1.0, 10.0f32.ln()];
         assert_eq!(result.shape(), &[3]);
@@ -36,13 +36,13 @@ mod tests {
 
     #[test]
     fn test_ln_forward_non_positive() -> Result<(), NeuraRustError> {
-        let a = Tensor::from_vec_f32(vec![1.0, 0.0], vec![2])?; // Includes zero
+        let a = crate::tensor::from_vec_f32(vec![1.0, 0.0], vec![2])?; // Includes zero
         let result_a = ln_op(&a)?;
         let data_a = get_f32_data(&result_a)?;
         assert!(data_a[0].is_finite()); // ln(1) is 0
         assert!(data_a[1].is_nan());    // ln(0) should produce NaN
 
-        let b = Tensor::from_vec_f32(vec![-1.0], vec![1])?; // Negative input
+        let b = crate::tensor::from_vec_f32(vec![-1.0], vec![1])?; // Negative input
         let result_b = ln_op(&b)?;
         let data_b = get_f32_data(&result_b)?;
         assert!(data_b[0].is_nan());    // ln(-1) should produce NaN
@@ -51,11 +51,11 @@ mod tests {
 
     #[test]
     fn test_ln_backward() -> Result<(), NeuraRustError> {
-        let a = Tensor::from_vec_f32(vec![1.0, 2.0, 4.0], vec![3])?;
+        let a = crate::tensor::from_vec_f32(vec![1.0, 2.0, 4.0], vec![3])?;
         a.set_requires_grad(true)?;
 
         let result = ln_op(&a)?;
-        let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3], vec![3])?;
+        let output_grad = crate::tensor::from_vec_f32(vec![0.1, 0.2, 0.3], vec![3])?;
         result.backward(Some(output_grad))?;
 
         // grad_a = output_grad / a

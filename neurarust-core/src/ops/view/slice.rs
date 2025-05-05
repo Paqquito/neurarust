@@ -274,30 +274,34 @@ pub fn slice_op(
 // --- Tests ---
 #[cfg(test)]
 mod tests {
-    
     use crate::tensor::Tensor;
-
-    // Test helper function (commented out)
-    // fn get_f32_data(tensor: &Tensor) -> Vec<f32> {
-    //     let tensor_data = tensor.data.read().unwrap();
-    //     match &*tensor_data.buffer {
-    //         Buffer::Cpu(CpuBuffer::F32(data_arc)) => data_arc.to_vec(),
-    //         _ => panic!("Test helper expects F32 CPU tensor"),
-    //     }
-    // }
+    use std::error::Error;
 
     #[test]
-    fn test_slice_basic() {
-        // Re-enable test
-        let t = Tensor::from_vec_f32((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
+    fn test_slice_basic() -> Result<(), Box<dyn Error>> {
+        let t = Tensor::new((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
+        // Slice [0, :, 1:3]
+        let _ranges = vec![0..1, 0..2, 1..3];
         let _ = t; // Use t to avoid unused warning
+        Ok(())
     }
 
     #[test]
-    fn test_slice_full() {
-         // Re-enable test
-        let t = Tensor::from_vec_f32((0..6).map(|x| x as f32).collect(), vec![2, 3]).unwrap();
+    fn test_slice_single_element() -> Result<(), Box<dyn Error>> {
+        let t = Tensor::new((0..6).map(|x| x as f32).collect(), vec![2, 3]).unwrap();
+        // Slice [1, 2]
+        let _ranges = vec![1..2, 2..3];
         let _ = t;
+        Ok(())
+    }
+
+    #[test]
+    fn test_slice_full_range() -> Result<(), Box<dyn Error>> {
+        let t = Tensor::new((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
+        // Slice [.., .., ..]
+        let _ranges = vec![0..2, 0..2, 0..3];
+        let _ = t;
+        Ok(())
     }
 
     #[test]
@@ -320,14 +324,14 @@ mod tests {
 
     #[test]
     fn test_slice_empty_dim() {
-        let t = Tensor::from_vec_f32((0..12).map(|x| x as f32).collect(), vec![2, 2, 3]).unwrap();
+        let t = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
         let _ = t;
     }
 
     #[test]
     fn test_slice_view_data_sharing() {
          // Re-enable test - compare buffer Arc pointers
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
         let _ = t;
     }
 
@@ -335,7 +339,13 @@ mod tests {
     // COMMENTED OUT until backward logic is verified and SliceArg API stabilized
     /*
     #[test]
-    fn test_slice_backward() { ... }
+    fn test_slice_backward() -> Result<(), Box<dyn Error>> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        t.set_requires_grad(true)?;
+
+        // ... existing code ...
+        Ok(())
+    }
     #[test]
     fn test_slice_backward_scalar_result() { ... }
     #[test]

@@ -6,7 +6,6 @@ use crate::{
     tensor::Tensor,
     types::DType,
 };
-use std::convert::TryFrom; // Needed for f64::try_from(f32)
 
 impl Tensor {
     /// Returns a clone of the tensor's shape (dimensions).
@@ -118,4 +117,125 @@ impl Tensor {
 
     // NOTE: get_f32_data / get_f64_data are currently still in mod.rs
     // We can decide later if they belong here.
+
+    /// Acquires a read lock on the tensor's data.
+    ///
+    /// This allows reading the `TensorData` fields immutably.
+    /// The lock is automatically released when the guard goes out of scope.
+    /// Panics if the RwLock is poisoned.
+    pub fn read_data(&self) -> std::sync::RwLockReadGuard<'_, crate::tensor_data::TensorData> {
+        self.data.read().expect("RwLock poisoned")
+    }
+
+    /// Acquires a write lock on the tensor's data.
+    ///
+    /// This allows modifying the `TensorData` fields mutably.
+    /// The lock is automatically released when the guard goes out of scope.
+    /// Panics if the RwLock is poisoned.
+    pub fn write_data(&self) -> std::sync::RwLockWriteGuard<'_, crate::tensor_data::TensorData> {
+        self.data.write().expect("RwLock poisoned")
+    }
+
+    /// Attempts to get the tensor data as a `Vec<f32>`.
+    /// Returns an error if the tensor is not on the CPU or not F32.
+    /// This method now correctly handles non-contiguous tensors by creating a new Vec.
+    pub fn get_f32_data(&self) -> Result<Vec<f32>, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: guard.device,
+                operation: "get_f32_data".to_string(),
+            });
+        }
+        if guard.dtype != DType::F32 {
+            return Err(NeuraRustError::UnsupportedOperation(
+                format!("get_f32_data requires DType::F32, got {:?}", guard.dtype)
+            ));
+        }
+
+        let buffer_arc = guard.buffer().try_get_cpu_f32()?;
+        let underlying_data: &Vec<f32> = buffer_arc;
+
+        let numel = guard.numel();
+        let mut result_vec = Vec::with_capacity(numel);
+
+        if numel == 0 {
+            return Ok(result_vec);
+        }
+
+        // Need to use the index_to_coord utility
+        // Assuming utils is accessible, otherwise need crate::tensor::utils::index_to_coord
+        for i in 0..numel {
+            let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+            let physical_offset = guard.get_offset(&coords);
+
+            if physical_offset >= underlying_data.len() {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Calculated physical offset {} is out of bounds for buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                    physical_offset,
+                    underlying_data.len(),
+                    i,
+                    coords,
+                    guard.shape,
+                    guard.strides,
+                    guard.offset
+                )));
+            }
+            result_vec.push(underlying_data[physical_offset]);
+        }
+
+        Ok(result_vec)
+    }
+
+    /// Attempts to get the tensor data as a `Vec<f64>`.
+    /// Returns an error if the tensor is not on the CPU or not F64.
+    pub fn get_f64_data(&self) -> Result<Vec<f64>, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: guard.device,
+                operation: "get_f64_data".to_string(),
+            });
+        }
+        if guard.dtype != DType::F64 {
+            return Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: guard.dtype,
+                operation: "get_f64_data".to_string(),
+            });
+        }
+        
+        let buffer_arc = guard.buffer().try_get_cpu_f64()?;
+        let underlying_data: &Vec<f64> = buffer_arc;
+
+        let numel = guard.numel();
+        let mut result_vec = Vec::with_capacity(numel);
+
+        if numel == 0 {
+            return Ok(result_vec);
+        }
+
+        for i in 0..numel {
+            let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+            let physical_offset = guard.get_offset(&coords);
+
+            if physical_offset >= underlying_data.len() {
+                 return Err(NeuraRustError::InternalError(format!(
+                    "Calculated physical offset {} is out of bounds for F64 buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                    physical_offset,
+                    underlying_data.len(),
+                    i,
+                    coords,
+                    guard.shape,
+                    guard.strides,
+                    guard.offset
+                )));
+            }
+            result_vec.push(underlying_data[physical_offset]);
+        }
+        
+        Ok(result_vec)
+    }
 }

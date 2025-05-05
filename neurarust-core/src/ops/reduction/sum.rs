@@ -9,7 +9,13 @@ use std::fmt::Debug;
 use std::sync::{Arc, RwLock, RwLockReadGuard};
 use crate::tensor::broadcast_utils::expand_kernel;
 
-/// Backward operation context for `sum_axes`.
+// Removed simple iterator imports for now, sum needs more complex logic
+// use crate::tensor::iter_utils::{NdArraySimpleIter, NdArraySimpleIterF64};
+
+// Need index_to_coord and calculate_strides for the new logic
+use crate::tensor::utils::{index_to_coord, calculate_strides};
+
+/// Backward operation context for sum reduction.
 #[derive(Debug)]
 struct SumAxesBackward {
     input_node: Arc<RwLock<TensorData>>,
@@ -32,7 +38,7 @@ impl BackwardOp for SumAxesBackward {
         // --- Device Check --- 
         if grad_output_guard.device != StorageDevice::CPU {
             return Err(NeuraRustError::DeviceMismatch {
-                operation: "sum_axes_backward".to_string(),
+                operation: "sum_op_backward".to_string(),
                 expected: StorageDevice::CPU,
                 actual: grad_output_guard.device,
             });
@@ -50,15 +56,14 @@ impl BackwardOp for SumAxesBackward {
                          return Err(NeuraRustError::ShapeMismatch {
                             expected: format!("{:?}", target_shape),
                             actual: format!("{:?}", grad_output_guard.shape),
-                            operation: "sum_axes_backward (reshape)".to_string(),
+                            operation: "sum_op_backward (reshape)".to_string(),
                         });
                     }
-                    // Validate dimensions BEFORE pushing
                     if grad_output_guard.shape[current_grad_dim] != target_shape[i] {
                         return Err(NeuraRustError::ShapeMismatch {
                             expected: format!("{:?}", target_shape),
                             actual: format!("{:?}", grad_output_guard.shape),
-                            operation: "sum_axes_backward (reshape)".to_string(),
+                            operation: "sum_op_backward (reshape)".to_string(),
                         });
                     }
                     shape_with_kept_dims.push(target_shape[i]);
@@ -300,246 +305,216 @@ where
     Ok(result_data)
 }
 
-/// Calcule la somme d'un tenseur le long des axes spécifiés.
-pub(crate) fn sum_axes(
-    input: &Tensor,
-    axes: &[usize],
+/// Public facing sum operation.
+/// Handles optional axes argument.
+/// If axes is None, sums over all axes.
+pub(crate) fn sum_op(
+    t: &Tensor,
+    axes: Option<&[usize]>,
     keep_dims: bool,
 ) -> Result<Tensor, NeuraRustError> {
-    let input_guard = input.read_data();
+    let t_guard = t.read_data();
 
-    // Device Check
-    if input_guard.device != StorageDevice::CPU {
-        return Err(NeuraRustError::DeviceMismatch {
-            operation: "sum_axes".to_string(),
-            expected: StorageDevice::CPU,
-            actual: input_guard.device,
-        });
+    // --- Device Check ---
+    if t_guard.device != StorageDevice::CPU {
+        return Err(NeuraRustError::UnsupportedOperation(
+            "sum_op currently only supports CPU tensors.".to_string(),
+        ));
     }
 
-    // Validate axes
-    let input_rank = input_guard.shape.len();
-    for &axis in axes {
-        if axis >= input_rank {
-            return Err(NeuraRustError::ShapeMismatch {
-                operation: "sum_axes (axis validation)".to_string(),
-                expected: format!("axis < {}", input_rank),
-                actual: format!("axis {}", axis),
-            });
-        }
-    }
+    // --- Metadata Extraction --- 
+    let input_shape = t_guard.shape.clone();
+    let input_strides = t_guard.strides.clone(); 
+    let input_offset = t_guard.offset;          
+    let requires_grad = t_guard.requires_grad;
+    let dtype = t_guard.dtype;
+    let input_node_arc = if requires_grad { Some(Arc::clone(&t.data)) } else { None };
 
-    // Calculate output shape
-    let mut output_shape = Vec::new();
-    if keep_dims {
-        for (i, &dim_size) in input_guard.shape.iter().enumerate() {
-            if axes.contains(&i) {
-                output_shape.push(1);
-            } else {
-                output_shape.push(dim_size);
-            }
-        }
-    } else {
-        if axes.len() == input_rank && input_rank > 0 {
-            // Summing all axes, result is scalar
-            output_shape.clear(); // Shape is []
-        } else {
-            // Keep dimensions that are *not* in axes
-            for (i, &dim_size) in input_guard.shape.iter().enumerate() {
-                if !axes.contains(&i) {
-                    output_shape.push(dim_size);
+    let rank = input_shape.len();
+    let axes_to_reduce = match axes {
+        Some(ax) => { 
+            let mut unique_axes: Vec<usize> = ax.to_vec();
+            unique_axes.sort_unstable();
+            unique_axes.dedup();
+            for &axis in &unique_axes {
+                if axis >= rank {
+                    return Err(NeuraRustError::InvalidAxis { axis, rank });
                 }
             }
-            // If input was scalar, output is scalar
-            if input_rank == 0 {
-                 output_shape.clear();
+            unique_axes
+         }
+        None => (0..rank).collect(),
+    };
+
+    // --- Calculate Output Shape --- 
+    let mut output_shape_vec = Vec::with_capacity(rank);
+    let mut final_output_shape = Vec::new(); // Shape used for tensor creation
+    if keep_dims {
+        output_shape_vec = input_shape.clone();
+        for &axis in &axes_to_reduce {
+            output_shape_vec[axis] = 1;
+        }
+        final_output_shape = output_shape_vec.clone(); // Use the shape with ones
+    } else {
+        for i in 0..rank {
+            if !axes_to_reduce.contains(&i) {
+                output_shape_vec.push(input_shape[i]); // Temporarily store non-reduced dims
+                 final_output_shape.push(input_shape[i]);
+            } else {
+                 output_shape_vec.push(1); // Placeholder for reduced dims 
             }
         }
-    }
-    
-    let final_output_shape = output_shape; // Use the corrected shape
-
-    // --- Prepare for Autograd ---
-    let requires_grad = input_guard.requires_grad;
-    let input_node_arc = if requires_grad { Some(Arc::clone(&input.data)) } else { None };
-    let input_shape_clone = input_guard.shape.clone();
-    let axes_clone = axes.to_vec(); // Clone axes needed for backward
-    let keep_dims_clone = keep_dims;
-
-    // --- DType Dispatch for Computation --- 
-    let output_tensor = match input_guard.dtype {
-        DType::F32 => {
-            let input_buffer_arc = input_guard.buffer().try_get_cpu_f32()?;
-            let input_data_slice = input_buffer_arc.as_slice();
-            // Call generic kernel
-            let result_data = sum_kernel(
-                &input_guard,
-                input_data_slice,
-                &axes_clone,
-                keep_dims_clone,
-                &final_output_shape // Use the potentially corrected shape
-            )?;
-            drop(input_guard);
-            Tensor::new(result_data, final_output_shape)? // Use the potentially corrected shape
+        // Handle scalar output (reducing all dimensions results in empty final_output_shape)
+        if final_output_shape.is_empty() {
+             // No need to push(1) here, tensor creation handles scalar from empty vec
         }
-        DType::F64 => {
-            let input_buffer_arc = input_guard.buffer().try_get_cpu_f64()?;
-            let input_data_slice = input_buffer_arc.as_slice();
-             // Call generic kernel
-            let result_data = sum_kernel(
-                &input_guard,
-                input_data_slice,
-                &axes_clone,
-                keep_dims_clone,
-                &final_output_shape // Use the potentially corrected shape
-            )?;
-            drop(input_guard);
-            Tensor::new_f64(result_data, final_output_shape)? // Use the potentially corrected shape
+    }
+    let output_numel: usize = final_output_shape.iter().product();
+
+    // --- Perform Summation (New Logic) --- 
+    let output_tensor = match dtype {
+        DType::F32 => {
+            let input_buffer = t_guard.buffer.try_get_cpu_f32()?;
+            let mut output_data = vec![0.0f32; output_numel];
+            let _output_strides = calculate_strides(&output_shape_vec); // Prefix with underscore
+
+            let input_numel: usize = input_shape.iter().product();
+            for linear_input_idx in 0..input_numel {
+                // 1. Get logical coordinates in the input tensor
+                let input_coords = index_to_coord(linear_input_idx, &input_shape);
+
+                // 2. Calculate physical offset in the input buffer
+                let mut physical_input_offset = input_offset;
+                for d in 0..rank {
+                    physical_input_offset += input_coords[d] * input_strides[d];
+                }
+                let input_val = input_buffer[physical_input_offset];
+
+                // 3. Determine the corresponding logical coordinates in the *output* tensor
+                let mut output_coords = Vec::with_capacity(rank);
+                for d in 0..rank {
+                    if axes_to_reduce.contains(&d) {
+                       if keep_dims { output_coords.push(0); } // Index is always 0 for reduced dim if kept
+                       // If not keep_dims, this dimension doesn't exist in output, do nothing
+                    } else {
+                        output_coords.push(input_coords[d]); // Keep original coordinate
+                    }
+                }
+                // If not keep_dims, filter output_coords to remove reduced dimensions
+                let final_output_coords: Vec<usize> = if keep_dims {
+                     output_coords.clone() // Clone here to avoid moving
+                } else {
+                     input_coords.iter().enumerate()
+                        .filter(|(i, _)| !axes_to_reduce.contains(i))
+                        .map(|(_, &coord)| coord)
+                        .collect()
+                };
+
+                // 4. Calculate linear index in the output buffer
+                // Need strides for the *final* output shape
+                 let final_output_strides = calculate_strides(&final_output_shape);
+                 let mut linear_output_idx = 0;
+                 if !final_output_shape.is_empty() { // Avoid calculating for scalar output
+                    for d in 0..final_output_coords.len() {
+                        linear_output_idx += final_output_coords[d] * final_output_strides[d];
+                    }
+                 }
+                
+                // Check bounds (should not happen with correct logic, but safeguard)
+                 if linear_output_idx < output_numel {
+                     output_data[linear_output_idx] += input_val;
+                 } else if output_numel == 1 && linear_output_idx == 0 {
+                      // Handle scalar case where index might be calculated slightly off
+                      output_data[0] += input_val;
+                 } else if output_numel > 0 {
+                     // This indicates an error in index calculation
+                     eprintln!("Sum Op Error: Output index {} out of bounds {}", linear_output_idx, output_numel);
+                     eprintln!("Input Coords: {:?}, Output Coords: {:?}, Final Output Coords: {:?}, Final Shape: {:?}", input_coords, output_coords, final_output_coords, final_output_shape);
+                     return Err(NeuraRustError::InternalError("Sum op output index calculation error".to_string()));
+                 }
+                 // If output_numel is 0, do nothing (should not happen if input_numel > 0)
+            }
+            
+            drop(t_guard);
+            Tensor::new(output_data, final_output_shape)?
+        }
+        DType::F64 => { // Similar logic for F64
+             let input_buffer = t_guard.buffer.try_get_cpu_f64()?;
+            let mut output_data = vec![0.0f64; output_numel];
+            let _output_strides = calculate_strides(&output_shape_vec); // Prefix with underscore
+
+            let input_numel: usize = input_shape.iter().product();
+            for linear_input_idx in 0..input_numel {
+                let input_coords = index_to_coord(linear_input_idx, &input_shape);
+                let mut physical_input_offset = input_offset;
+                for d in 0..rank {
+                    physical_input_offset += input_coords[d] * input_strides[d];
+                }
+                let input_val = input_buffer[physical_input_offset];
+
+                let mut output_coords = Vec::with_capacity(rank);
+                 for d in 0..rank {
+                    if axes_to_reduce.contains(&d) {
+                       if keep_dims { output_coords.push(0); } 
+                    } else {
+                        output_coords.push(input_coords[d]);
+                    }
+                }
+                 let final_output_coords: Vec<usize> = if keep_dims {
+                     output_coords.clone() // Clone here to avoid moving
+                } else {
+                     input_coords.iter().enumerate()
+                        .filter(|(i, _)| !axes_to_reduce.contains(i))
+                        .map(|(_, &coord)| coord)
+                        .collect()
+                };
+
+                 let final_output_strides = calculate_strides(&final_output_shape);
+                 let mut linear_output_idx = 0;
+                 if !final_output_shape.is_empty() { 
+                     for d in 0..final_output_coords.len() {
+                        linear_output_idx += final_output_coords[d] * final_output_strides[d];
+                    }
+                 }
+                
+                 if linear_output_idx < output_numel {
+                     output_data[linear_output_idx] += input_val;
+                 } else if output_numel == 1 && linear_output_idx == 0 {
+                      output_data[0] += input_val;
+                 } else if output_numel > 0 {
+                     eprintln!("Sum Op Error F64: Output index {} out of bounds {}", linear_output_idx, output_numel);
+                     eprintln!("Input Coords: {:?}, Output Coords: {:?}, Final Output Coords: {:?}, Final Shape: {:?}", input_coords, output_coords, final_output_coords, final_output_shape);
+                      return Err(NeuraRustError::InternalError("Sum op output index calculation error F64".to_string()));
+                 }
+            }
+            
+            drop(t_guard);
+            Tensor::new_f64(output_data, final_output_shape)?
         }
     };
 
     // --- Autograd Setup ---
     if requires_grad {
-        if let Some(node_arc) = input_node_arc {
-            let mut output_data_write_guard = output_tensor.data.write().map_err(|_| NeuraRustError::LockError {
-                lock_type: "write".to_string(),
-                reason: "Failed to lock output TensorData for write (autograd setup in sum_axes)".to_string(),
-            })?;
-            output_data_write_guard.requires_grad = true;
-            let backward_op = SumAxesBackward {
-                input_node: node_arc,
-                input_shape: input_shape_clone,
-                axes: axes_clone,
-                keep_dims: keep_dims_clone,
-            };
-            output_data_write_guard.grad_fn = Some(Arc::new(backward_op));
+        if let Some(input_arc) = input_node_arc {
+             // Use the correct struct SumAxesBackward and field name 'axes'
+             let backward_context: Arc<dyn BackwardOp> = Arc::new(SumAxesBackward {
+                    input_node: input_arc,
+                    input_shape,
+                    axes: axes_to_reduce, // Assign axes_to_reduce to the 'axes' field
+                    keep_dims,
+                });
+            let mut output_guard = output_tensor.write_data();
+            output_guard.requires_grad = true;
+            output_guard.grad_fn = Some(backward_context);
         } else {
-             return Err(NeuraRustError::InternalError("Input requires grad but its Node Arc is missing in sum_axes".to_string()));
+             return Err(NeuraRustError::InternalError("Sum op requires grad but Arc node unavailable".to_string()));
         }
     }
 
     Ok(output_tensor)
 }
 
-// --- Tests ---
+// Link the tests from the separate file
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::{
-        error::NeuraRustError,
-        tensor::Tensor,
-        buffer::{Buffer, CpuBuffer},
-    };
-    use crate::utils::testing::check_tensor_near;
-    use approx::assert_relative_eq;
-
-    // Helper function to extract Vec<f32> from Tensor for checking
-    fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
-        let locked_data = tensor.data.read().map_err(|e| NeuraRustError::LockError {
-            lock_type: "read".to_string(),
-            reason: format!("Failed to read tensor data in helper: {}", e),
-        })?;
-        match &*locked_data.buffer {
-            Buffer::Cpu(CpuBuffer::F32(data_arc)) => Ok(data_arc.to_vec()),
-            _ => Err(NeuraRustError::UnsupportedOperation("Helper requires CpuF32 buffer".to_string())),
-        }
-    }
-
-    #[test]
-    fn test_sum_all() -> Result<(), NeuraRustError> {
-        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-        let expected_sum = 21.0;
-        // Appel via sum_op avec axes=None pour sommer sur tout
-        let result = sum_op(&t, None, false)?;
-
-        // Assertions
-        assert_eq!(result.shape(), &[] as &[usize], "Result shape should be scalar");
-        let data = get_f32_data(&result)?;
-        assert_eq!(data.len(), 1, "Result data should have one element");
-        assert!((data[0] - expected_sum).abs() < 1e-6, "Sum value mismatch");
-        Ok(())
-    }
-
-    #[test]
-    fn test_sum_axis0() -> Result<(), NeuraRustError> {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-        let result = sum_axes(&t, &[0], false)?;
-        let expected_data = vec![5.0, 7.0, 9.0];
-        check_tensor_near(&result, &[3], &expected_data, 1e-6);
-        Ok(())
-    }
-
-    #[test]
-    fn test_sum_axis1_keepdims() -> Result<(), NeuraRustError> {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-        let result = sum_axes(&t, &[1], true)?;
-        let expected_data = vec![6.0, 15.0];
-        check_tensor_near(&result, &[2, 1], &expected_data, 1e-6);
-        Ok(())
-    }
-
-    #[test]
-    fn test_sum_multiple_axes() -> Result<(), NeuraRustError> {
-        let t = Tensor::from_vec_f32((0..24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
-        let result = sum_axes(&t, &[0, 2], false)?;
-        let expected_data = vec![60.0, 92.0, 124.0];
-        check_tensor_near(&result, &[3], &expected_data, 1e-6);
-        Ok(())
-    }
-
-    #[test]
-    fn test_sum_invalid_axis() -> Result<(), NeuraRustError> {
-        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
-        let axes = vec![0, 2]; // Axis 2 is invalid for rank 2
-        let result = sum_op(&t, Some(&axes), false);
-        // Check for the specific error (now ShapeMismatch)
-        assert!(
-            matches!(result, Err(NeuraRustError::ShapeMismatch { .. })),
-            "Expected ShapeMismatch for invalid axis, got {:?}", result
-        );
-        Ok(())
-    }
-
-    // --- Test Non Contigu --- 
-    #[test]
-    fn test_sum_all_non_contiguous() -> Result<(), NeuraRustError> {
-        // Créer un tenseur 2x3
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
-        // Le transposer pour le rendre non contigu
-        let t_transposed = crate::ops::view::transpose_op(&t, 0, 1)?; 
-        assert!(!t_transposed.is_contiguous(), "Transposed tensor should not be contiguous");
-        assert_eq!(t_transposed.shape(), &[3, 2]);
-        assert_eq!(t_transposed.strides(), &[1, 3], "Strides mismatch after transpose"); 
-
-        // Calculer la somme globale sur le tenseur non contigu via sum_op
-        let sum_result = sum_op(&t_transposed, None, false)?;
-        
-        // Vérifier le résultat
-        let sum_data = get_f32_data(&sum_result)?;
-        assert_eq!(sum_result.shape(), &[] as &[usize], "Sum result shape should be scalar");
-        assert_eq!(sum_data.len(), 1, "Sum result should have 1 element");
-        assert_relative_eq!(sum_data[0], 21.0, epsilon = 1e-6);
-
-        Ok(())
-    }
-}
-
-/// Public facing sum operation.
-/// Handles optional axes argument.
-/// If axes is None, sums over all axes.
-pub(crate) fn sum_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
-    let all_axes: Vec<usize>; // Variable pour stocker les axes si nécessaire
-    
-    let axes_slice: &[usize] = match axes {
-        Some(ax) => ax, // Utilise les axes fournis
-        None => {
-            // Si None, génère les axes 0..rank
-            let rank = tensor.shape().len(); // Utilise shape().len() pour obtenir le rang
-            all_axes = (0..rank).collect(); // Stocke dans `all_axes`
-            &all_axes // Passe une référence au vecteur détenu
-        }
-    };
-    
-    // Appelle sum_axes avec le slice d'axes déterminé
-    sum_axes(tensor, axes_slice, keep_dims)
-}
+#[path = "sum_test.rs"]
+mod tests;

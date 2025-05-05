@@ -7,6 +7,7 @@ use super::utils; // Use super::utils
 
 use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
+ // For test signatures
 
 // --- Backward Operation Structure ---
 #[derive(Debug)]
@@ -95,19 +96,37 @@ pub fn permute_op(input: &Tensor, dims: &[usize]) -> Result<Tensor, NeuraRustErr
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::{Tensor, NeuraRustError};
+    use crate::tensor::Tensor;
+    use crate::error::NeuraRustError;
+    // Use utils::testing
+    use crate::utils::testing::check_tensor_near;
     use crate::autograd::grad_check::{check_grad, GradCheckError};
+    // Import tensor creation functions if needed, or use Tensor::new directly
     use crate::tensor::create;
+    use std::error::Error;
 
     #[test]
-    fn test_permute_basic() -> Result<(), NeuraRustError> {
-        println!("Skipping test_permute_basic until view ops/tensor methods are adapted.");
+    fn test_permute_basic() -> Result<(), Box<dyn Error>> {
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let permuted = t.permute(&[1, 0])?;
+        let expected_data = vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]; // Data after permute
+        assert_eq!(permuted.get_f32_data()?, expected_data);
         Ok(())
     }
 
     #[test]
-    fn test_permute_higher_dim() -> Result<(), NeuraRustError> {
-        println!("Skipping test_permute_higher_dim until view ops/tensor methods are adapted.");
+    fn test_permute_higher_dim() -> Result<(), Box<dyn Error>> {
+        let t_data = (0..24).map(|x| x as f32).collect::<Vec<_>>();
+        let t_shape = vec![2, 3, 4];
+        let t = Tensor::new(t_data, t_shape)?;
+        let permuted = t.permute(&[2, 0, 1])?;
+        let expected_data = vec![
+            0.0, 4.0,  8.0, 12.0, 16.0, 20.0,  // Dim 0, Slice 0
+            1.0, 5.0,  9.0, 13.0, 17.0, 21.0,  // Dim 0, Slice 1
+            2.0, 6.0, 10.0, 14.0, 18.0, 22.0,  // Dim 0, Slice 2
+            3.0, 7.0, 11.0, 15.0, 19.0, 23.0   // Dim 0, Slice 3
+        ];
+        check_tensor_near(&permuted, &vec![4, 2, 3], &expected_data, 1e-6);
         Ok(())
     }
 
@@ -143,7 +162,7 @@ mod tests {
     #[test]
     #[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
     fn test_permute_backward() -> Result<(), GradCheckError> {
-        let t = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         t.set_requires_grad(true)?;
         let axes = &[1, 0]; // Pass as slice
 
@@ -165,7 +184,7 @@ mod tests {
     fn test_permute_backward_higher_dim() -> Result<(), GradCheckError> {
         let t_data = (0..8).map(|x| x as f32).collect::<Vec<_>>();
         let t_shape = vec![2, 2, 2];
-        let t = Tensor::from_vec_f32(t_data, t_shape)?;
+        let t = Tensor::new(t_data, t_shape)?;
         t.set_requires_grad(true)?;
         
         let axes = &[1, 0, 2]; // Pass as slice

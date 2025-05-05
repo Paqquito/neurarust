@@ -21,11 +21,11 @@ mod tests {
 
     #[test]
     fn test_pow_forward() -> Result<(), NeuraRustError> {
-        let base = Tensor::from_vec_f32(vec![2.0, 3.0], vec![2])?;
-        let exponent = Tensor::from_vec_f32(vec![3.0, 2.0], vec![2])?;
+        let base = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 3.0, 2.0], vec![3]).unwrap();
         let result = pow_op(&base, &exponent)?;
-        let expected_data = vec![8.0, 9.0]; // 2^3, 3^2
-        assert_eq!(result.shape(), &[2]);
+        let expected_data = vec![1.0, 8.0, 9.0]; // 1^2, 2^3, 3^2
+        assert_eq!(result.shape(), &[3]);
         let res_data = get_f32_data(&result)?;
         assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
         Ok(())
@@ -33,10 +33,10 @@ mod tests {
 
     #[test]
     fn test_pow_forward_broadcast() -> Result<(), NeuraRustError> {
-        let base = Tensor::from_vec_f32(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2])?;
-        let exponent = Tensor::from_vec_f32(vec![2.0], vec![1])?; // Scalar exponent
+        let base = crate::tensor::from_vec_f32(vec![1.0, 2.0], vec![1, 2]).unwrap(); // [[1.0, 2.0]]
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 3.0], vec![2, 1]).unwrap(); // [[2.0], [3.0]]
         let result = pow_op(&base, &exponent)?;
-        let expected_data = vec![4.0, 9.0, 16.0, 25.0]; // [2^2, 3^2, 4^2, 5^2]
+        let expected_data = vec![1.0, 8.0, 9.0]; // [1^2, 2^3, 3^2]
         assert_eq!(result.shape(), &[2, 2]);
         let res_data = get_f32_data(&result)?;
         assert_relative_eq!(res_data.as_slice(), expected_data.as_slice(), epsilon = 1e-6);
@@ -47,14 +47,14 @@ mod tests {
 
     #[test]
     fn test_pow_backward_simple() -> Result<(), GradCheckError> {
-        let base = Tensor::from_vec_f32(vec![2.0, 3.0], vec![2])?;
+        let base = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 3.0, 2.0], vec![3]).unwrap();
         base.set_requires_grad(true)?;
-        let exponent = Tensor::from_vec_f32(vec![3.0, 2.0], vec![2])?;
         exponent.set_requires_grad(true)?;
 
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
-        let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0], vec![2])?;
+        let output_grad = Tensor::from_vec_f32(vec![1.0, 1.0, 1.0], vec![3])?;
         let epsilon = 1e-5;
         let abs_tol = 1e-7;
         let rel_tol = 1e-5;
@@ -64,10 +64,9 @@ mod tests {
 
     #[test]
     fn test_pow_backward_only_base_grad() -> Result<(), GradCheckError> {
-        let base = Tensor::from_vec_f32(vec![2.0, 3.0], vec![2])?;
+        let base = crate::tensor::from_vec_f32(vec![2.0, 3.0], vec![2]).unwrap();
         base.set_requires_grad(true)?;
-        // Exponent does NOT require grad
-        let exponent = Tensor::from_vec_f32(vec![3.0, 2.0], vec![2])?;
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 1.0], vec![2]).unwrap();
 
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
@@ -76,16 +75,14 @@ mod tests {
         let abs_tol = 1e-7;
         let rel_tol = 1e-5;
 
-        // Pass both tensors, but check_grad will only compute numerical grad for 'base'
         check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 
     #[test]
     #[ignore = "Gradient for exponent is currently not implemented/supported in pow_op backward"]
     fn test_pow_backward_only_exponent_grad() -> Result<(), GradCheckError> {
-        let base = Tensor::from_vec_f32(vec![2.0, 3.0], vec![2])?;
-        // Base does NOT require grad
-        let exponent = Tensor::from_vec_f32(vec![3.0, 2.0], vec![2])?;
+        let base = crate::tensor::from_vec_f32(vec![2.0, 3.0], vec![2]).unwrap();
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 1.0], vec![2]).unwrap();
         exponent.set_requires_grad(true)?;
 
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
@@ -95,20 +92,18 @@ mod tests {
         let abs_tol = 1e-7;
         let rel_tol = 1e-5;
 
-        // This will likely fail or panic if exponent grad is not implemented
         check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 
     #[test]
     fn test_pow_backward_broadcast_base() -> Result<(), GradCheckError> {
-        let base = Tensor::from_vec_f32(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2])?;
+        let base = crate::tensor::from_vec_f32(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 1.0], vec![2, 1]).unwrap();
         base.set_requires_grad(true)?;
-        let exponent = Tensor::from_vec_f32(vec![2.0], vec![1])?; // Scalar exponent
-        // Exponent does not require grad here
 
         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
 
-        let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
+        let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2], vec![2, 2])?;
         let epsilon = 1e-5;
         let abs_tol = 1e-7;
         let rel_tol = 1e-5;
@@ -119,18 +114,17 @@ mod tests {
     #[test]
     #[ignore = "Gradient for exponent is currently not implemented/supported in pow_op backward"]
     fn test_pow_backward_broadcast_exponent() -> Result<(), GradCheckError> {
-         let base = Tensor::from_vec_f32(vec![2.0, 3.0, 4.0, 5.0], vec![2, 2])?; 
-         // Base does not require grad
-         let exponent = Tensor::from_vec_f32(vec![2.0], vec![1])?; // Scalar exponent
-         exponent.set_requires_grad(true)?;
- 
-         let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
- 
-         let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
-         let epsilon = 1e-5;
-         let abs_tol = 1e-7;
-         let rel_tol = 1e-5;
- 
-         check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
+        let base = crate::tensor::from_vec_f32(vec![2.0, 3.0], vec![1, 2]).unwrap();
+        let exponent = crate::tensor::from_vec_f32(vec![2.0, 1.0], vec![2, 1]).unwrap();
+        exponent.set_requires_grad(true)?;
+
+        let func = |inputs: &[Tensor]| pow_op(&inputs[0], &inputs[1]);
+
+        let output_grad = Tensor::from_vec_f32(vec![0.1, 0.2], vec![2, 2])?;
+        let epsilon = 1e-5;
+        let abs_tol = 1e-7;
+        let rel_tol = 1e-5;
+
+        check_grad(func, &[base, exponent], &output_grad, epsilon, abs_tol, rel_tol)
     }
 } 

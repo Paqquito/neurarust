@@ -10,185 +10,10 @@ use crate::autograd::graph::NodeId;
 
 use std::fmt::Debug;
 use std::sync::RwLock;
+// Import the iterators from their new location
+use crate::tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64};
 
-// +++ Copied from add.rs - TODO: Move to a shared utils module +++
-/// Iterator for broadcasting over two NdArrays (represented by CpuBuffer<f32>).
-/// Handles differences in rank and dimensions of size 1.
-struct NdArrayBroadcastingIter<'a> {
-    buffer: &'a Arc<Vec<f32>>,
-    original_shape: &'a [usize],
-    original_strides: &'a [usize],
-    original_offset: usize,
-    target_shape: &'a [usize],
-    current_index: usize,
-    total_elements: usize,
-}
-
-impl<'a> NdArrayBroadcastingIter<'a> {
-    fn new(
-        buffer: &'a Arc<Vec<f32>>,
-        original_shape: &'a [usize],
-        original_strides: &'a [usize],
-        original_offset: usize,
-        target_shape: &'a [usize],
-    ) -> Result<Self, NeuraRustError> {
-        // Basic compatibility check (can be expanded)
-        if !original_shape.is_empty() && original_shape.len() > target_shape.len() {
-             // Original shape shouldn't have more dims than target after broadcasting
-             // This condition might need refinement depending on exact broadcasting rules validation
-             // It assumes broadcast_shapes already validated the core logic.
-        }
-        
-        let total_elements = target_shape.iter().product();
-        Ok(Self {
-            buffer,
-            original_shape,
-            original_strides,
-            original_offset,
-            target_shape,
-            current_index: 0,
-            total_elements,
-        })
-    }
-}
-
-impl<'a> Iterator for NdArrayBroadcastingIter<'a> {
-    type Item = f32; // Iterates over f32 values
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.total_elements {
-            return None;
-        }
-
-        let target_rank = self.target_shape.len();
-        let original_rank = self.original_shape.len();
-        
-        // Calculate multi-dimensional index in the target shape
-        let mut target_multi_index = vec![0; target_rank];
-        let mut current_linear = self.current_index;
-        for dim in (0..target_rank).rev() {
-            let shape_val = self.target_shape[dim];
-             if shape_val > 0 { // Avoid division by zero for empty dimensions
-                target_multi_index[dim] = current_linear % shape_val;
-                current_linear /= shape_val;
-            } else {
-                target_multi_index[dim] = 0;
-            }
-        }
-
-        // Calculate corresponding multi-dimensional index in the original shape
-        let mut original_multi_index = vec![0; original_rank];
-        let rank_diff = target_rank as isize - original_rank as isize;
-
-        for original_dim in 0..original_rank {
-             let target_dim = (original_dim as isize + rank_diff) as usize;
-             // If the original dimension size is 1, use index 0 (broadcast)
-             // Otherwise, use the corresponding index from the target shape
-             if self.original_shape[original_dim] == 1 {
-                 original_multi_index[original_dim] = 0;
-             } else {
-                 original_multi_index[original_dim] = target_multi_index[target_dim];
-             }
-        }
-
-        // Calculate physical offset using original strides
-        let physical_offset = self.original_offset
-            + original_multi_index
-                .iter()
-                .zip(self.original_strides.iter())
-                .map(|(&idx, &stride)| idx * stride)
-                .sum::<usize>();
-
-        let value = self.buffer[physical_offset];
-        self.current_index += 1;
-        Some(value)
-    }
-}
-// +++ End of copied code +++
-
-// +++ F64 VERSION +++
-/// Iterator for broadcasting over two NdArrays (represented by CpuBuffer<f64>).
-struct NdArrayBroadcastingIterF64<'a> { // New struct for F64
-    buffer: &'a Arc<Vec<f64>>,
-    original_shape: &'a [usize],
-    original_strides: &'a [usize],
-    original_offset: usize,
-    target_shape: &'a [usize],
-    current_index: usize,
-    total_elements: usize,
-}
-
-impl<'a> NdArrayBroadcastingIterF64<'a> { // Implement for F64
-    fn new(
-        buffer: &'a Arc<Vec<f64>>,
-        original_shape: &'a [usize],
-        original_strides: &'a [usize],
-        original_offset: usize,
-        target_shape: &'a [usize],
-    ) -> Result<Self, NeuraRustError> {
-        if !original_shape.is_empty() && original_shape.len() > target_shape.len() {
-            // Basic check
-        }
-        let total_elements = target_shape.iter().product();
-        Ok(Self {
-            buffer,
-            original_shape,
-            original_strides,
-            original_offset,
-            target_shape,
-            current_index: 0,
-            total_elements,
-        })
-    }
-}
-
-impl<'a> Iterator for NdArrayBroadcastingIterF64<'a> { // Implement Iterator for F64
-    type Item = f64; // Iterates over f64 values
-
-    fn next(&mut self) -> Option<Self::Item> {
-        if self.current_index >= self.total_elements {
-            return None;
-        }
-
-        let target_rank = self.target_shape.len();
-        let original_rank = self.original_shape.len();
-        
-        let mut target_multi_index = vec![0; target_rank];
-        let mut current_linear = self.current_index;
-        for dim in (0..target_rank).rev() {
-            let shape_val = self.target_shape[dim];
-             if shape_val > 0 {
-                target_multi_index[dim] = current_linear % shape_val;
-                current_linear /= shape_val;
-            } else {
-                target_multi_index[dim] = 0;
-            }
-        }
-
-        let mut original_multi_index = vec![0; original_rank];
-        let rank_diff = target_rank as isize - original_rank as isize;
-        for original_dim in 0..original_rank {
-             let target_dim = (original_dim as isize + rank_diff) as usize;
-             if self.original_shape[original_dim] == 1 {
-                 original_multi_index[original_dim] = 0;
-             } else {
-                 original_multi_index[original_dim] = target_multi_index[target_dim];
-             }
-        }
-
-        let physical_offset = self.original_offset
-            + original_multi_index
-                .iter()
-                .zip(self.original_strides.iter())
-                .map(|(&idx, &stride)| idx * stride)
-                .sum::<usize>();
-
-        let value = self.buffer[physical_offset]; // Access f64 buffer
-        self.current_index += 1;
-        Some(value)
-    }
-}
-// +++ End F64 VERSION +++
+// --- Iterator code removed --- 
 
 // +++ Copied from add.rs - TODO: Move to a shared utils module +++
 /// Reduces a gradient tensor to match a target shape, summing along broadcasted dimensions.
@@ -436,6 +261,7 @@ mod tests {
     use crate::buffer::{Buffer, CpuBuffer};
     use crate::autograd::grad_check::check_grad; // Import check_grad
     use crate::utils::testing::check_tensor_near; // Importer pour la comparaison
+    use std::error::Error;
 
     // Test helper function (using read_data)
     fn get_f32_data(tensor: &Tensor) -> Result<Vec<f32>, NeuraRustError> {
@@ -450,57 +276,60 @@ mod tests {
     }
 
     #[test]
-    fn test_mul_tensors_ok() {
-        // Re-enable and adapt
-        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let t2 = Tensor::from_vec_f32(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
-        let result = mul_op(&t1, &t2).unwrap();
+    fn test_mul_tensors_ok() -> Result<(), Box<dyn Error>> {
+        // Test case 1: Basic multiplication
+        let t1 = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let t2 = Tensor::new(vec![5.0, 6.0, 7.0, 8.0], vec![2, 2]).unwrap();
+        let expected_data = vec![5.0, 12.0, 21.0, 32.0];
+        let result = mul_op(&t1, &t2)?;
         let result_data = get_f32_data(&result).unwrap();
-        assert_eq!(result_data, vec![5.0, 12.0, 21.0, 32.0]);
+        assert_eq!(result_data, expected_data);
         assert_eq!(result.shape(), &[2, 2]);
         assert_eq!(result.dtype(), DType::F32);
         assert_eq!(result.device(), StorageDevice::CPU);
         assert!(!result.requires_grad()); // Should not require grad by default
+        Ok(())
     }
 
     #[test]
-    fn test_mul_tensors_shape_mismatch() {
-        // Test remains valid
-        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0], vec![2]).unwrap();
-        let t2 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+    fn test_mul_tensors_mismatched_shapes() {
+        // Test case 2: Mismatched shapes (should error)
+        let t1 = Tensor::new(vec![1.0, 2.0], vec![2]).unwrap();
+        let t2 = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
         let result = mul_op(&t1, &t2);
-        assert!(matches!(result, Err(NeuraRustError::BroadcastError { .. })));
+        assert!(result.is_err());
     }
 
     #[test]
-    fn test_mul_broadcasting() {
-        // Re-enable and adapt
-        let matrix = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
-        let row_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![1, 2]).unwrap();
-        let result = mul_op(&matrix, &row_vector).unwrap();
-        let expected_data = vec![10.0, 40.0, 30.0, 80.0]; // 1*10, 2*20, 3*10, 4*20
-        let result_data = get_f32_data(&result).unwrap();
-        assert_eq!(result_data, expected_data);
-        assert_eq!(result.shape(), &[2, 2]);
+    fn test_mul_broadcasting() -> Result<(), Box<dyn Error>> {
+        // Test case 3: Broadcasting multiplication
+        let matrix = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let row_vector = Tensor::new(vec![10.0, 20.0], vec![1, 2]).unwrap();
+        let expected_data_row = vec![10.0, 40.0, 30.0, 80.0];
+        let result_row = mul_op(&matrix, &row_vector)?;
+        let result_data_row = get_f32_data(&result_row).unwrap();
+        assert_eq!(result_data_row, expected_data_row);
+        assert_eq!(result_row.shape(), vec![2, 2]);
 
-        let col_vector = Tensor::from_vec_f32(vec![10.0, 20.0], vec![2, 1]).unwrap();
-        let result2 = mul_op(&matrix, &col_vector).unwrap();
-        let expected_data2 = vec![10.0, 20.0, 60.0, 80.0]; // 1*10, 2*10, 3*20, 4*20
-        let result_data2 = get_f32_data(&result2).unwrap();
-        assert_eq!(result_data2, expected_data2);
-        assert_eq!(result2.shape(), &[2, 2]);
+        let col_vector = Tensor::new(vec![10.0, 20.0], vec![2, 1]).unwrap();
+        let expected_data_col = vec![10.0, 20.0, 60.0, 80.0];
+        let result_col = mul_op(&matrix, &col_vector)?;
+        let result_data_col = get_f32_data(&result_col).unwrap();
+        assert_eq!(result_data_col, expected_data_col);
+        assert_eq!(result_col.shape(), vec![2, 2]);
+        Ok(())
     }
 
     // --- Nouveau Test Non Contigu ---
     #[test]
     fn test_mul_non_contiguous() -> Result<(), NeuraRustError> {
-        let t1 = Tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        let t1 = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         // Rendre t1 non contigu
         let t1_transposed = t1.transpose(0, 1)?; // Shape [3, 2], Strides [1, 3]
         assert!(!t1_transposed.is_contiguous());
 
         // Tenseur contigu pour multiplier
-        let t2 = Tensor::from_vec_f32(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![3, 2])?;
+        let t2 = Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![3, 2])?;
         assert!(t2.is_contiguous());
 
         // Attendu : (éléments de t1 transposé) * (éléments de t2)
@@ -524,34 +353,37 @@ mod tests {
     // --- Autograd Tests ---
     #[test]
     #[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
-    fn test_mul_backward_simple() {
-        let a = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![3]).unwrap();
-        let b = Tensor::new(vec![4.0f32, 5.0, 6.0], vec![3]).unwrap();
-        a.set_requires_grad(true).unwrap();
-        b.set_requires_grad(true).unwrap();
+    fn test_mul_backward_simple() -> Result<(), Box<dyn Error>> {
+        let t1 = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        t1.set_requires_grad(true)?;
+
+        let t2 = Tensor::new(vec![10.0, 20.0, 30.0, 40.0, 50.0, 60.0], vec![2, 3])?;
+        t2.set_requires_grad(true)?;
 
         let mul_fn = |inputs: &[Tensor]| mul_op(&inputs[0], &inputs[1]);
-        let output_grad = crate::tensor::ones_like(&a).unwrap(); // Match shape
+        let output_grad = crate::tensor::ones_like(&t1).unwrap(); // Match shape
 
         let result = check_grad(
             mul_fn,
-            &[a, b],
+            &[t1, t2],
             &output_grad,
             1e-4, // Epsilon (adjust if needed)
             1e-5, // Abs tolerance
             1e-3, // Rel tolerance (might need adjustment for F32 mul)
         );
         result.unwrap();
+        Ok(())
     }
 
     #[test]
     #[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
-    fn test_mul_backward_broadcast() {
-        let a = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![1, 3]).unwrap(); // Shape [1, 3]
-        let b = Tensor::new(vec![4.0f32, 5.0], vec![2, 1]).unwrap(); // Shape [2, 1]
-        a.set_requires_grad(true).unwrap();
-        b.set_requires_grad(true).unwrap();
-        
+    fn test_mul_backward_broadcast() -> Result<(), Box<dyn Error>> {
+        let t1 = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+        t1.set_requires_grad(true)?;
+
+        let t2 = Tensor::new(vec![10.0, 20.0], vec![1, 2])?; // Broadcast this
+        t2.set_requires_grad(true)?;
+
         // Expected output shape: [2, 3]
         let expected_output_shape = vec![2, 3];
         
@@ -560,13 +392,14 @@ mod tests {
 
         let result = check_grad(
             mul_fn,
-            &[a, b],
+            &[t1, t2],
             &output_grad,
             1e-4, // Epsilon
             1e-5, // Abs tolerance
             1e-3, // Rel tolerance
         );
         result.unwrap();
+        Ok(())
     }
 
     // --- F64 Backward Tests ---

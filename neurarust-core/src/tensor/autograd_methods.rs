@@ -293,4 +293,16 @@ impl Tensor {
             data: Arc::new(RwLock::new(new_td)),
         }
     }
+
+    /// Clears the gradient tensor associated with this tensor.
+    pub fn clear_grad(&self) {
+        // Acquire write lock and set grad to None
+        if let Ok(mut guard) = self.data.write() {
+             guard.grad = None;
+        } else {
+             // Handle poisoned lock - potentially log an error or panic
+             // depending on desired robustness.
+             eprintln!("Warning: Failed to acquire write lock for clear_grad, lock might be poisoned.");
+        }
+    }
 }
