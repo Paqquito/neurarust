@@ -40,7 +40,8 @@ mod tests {
         let result_a = ln_op(&a)?;
         let data_a = get_f32_data(&result_a)?;
         assert!(data_a[0].is_finite()); // ln(1) is 0
-        assert!(data_a[1].is_nan());    // ln(0) should produce NaN
+        assert!(data_a[1].is_infinite(), "ln(0.0) should be infinite");
+        assert!(data_a[1].is_sign_negative(), "ln(0.0) should be negative infinity");
 
         let b = crate::tensor::from_vec_f32(vec![-1.0], vec![1])?; // Negative input
         let result_b = ln_op(&b)?;
