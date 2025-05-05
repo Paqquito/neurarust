@@ -99,81 +99,15 @@ pub fn relu_op(input: &Tensor) -> Result<Tensor, NeuraRustError> {
     Ok(output_tensor)
 }
 
+// --- Tests --- 
+// Link the external test file
+#[cfg(test)]
+#[path = "relu_test.rs"]
+mod tests;
+
+/* --- REMOVED internal tests module --- 
 #[cfg(test)]
 mod tests {
-    use super::*;
-
-    fn get_f32_data(tensor: &Tensor) -> Vec<f32> {
-        let guard = tensor.read_data();
-        assert_eq!(guard.dtype, DType::F32);
-        assert_eq!(guard.device, StorageDevice::CPU);
-        let buffer_arc = guard.buffer().try_get_cpu_f32().unwrap().clone();
-        buffer_arc.to_vec()
-    }
-
-    fn assert_tensor_eq(actual: &Tensor, expected_data: &[f32], expected_shape: &[usize]) {
-        assert_eq!(actual.shape(), expected_shape, "Shape mismatch");
-        let actual_data = get_f32_data(actual);
-        assert_eq!(actual_data.as_slice(), expected_data, "Data mismatch");
-    }
-
-    #[test]
-    fn test_relu_forward() -> Result<(), NeuraRustError> {
-        let input = Tensor::new(vec![-1.0, 0.0, 1.0, 2.0], vec![2, 2])?;
-        let output = relu_op(&input)?;
-        let expected_data = vec![0.0, 0.0, 1.0, 2.0];
-        assert_tensor_eq(&output, &expected_data, &[2, 2]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_relu_backward() -> Result<(), NeuraRustError> {
-        let input = Tensor::new(vec![-1.0, 0.0, 1.0, 2.0], vec![2, 2])?;
-        let _ = input.set_requires_grad(true);
-
-        let output = relu_op(&input)?;
-        assert!(output.requires_grad());
-        assert!(output.grad_fn().is_some());
-
-        let grad_output = Tensor::new(vec![0.1, 0.2, 0.3, 0.4], vec![2, 2])?;
-
-        let grad_fn = output.grad_fn().unwrap();
-        let grad_inputs = grad_fn.backward(&grad_output)?;
-
-        assert_eq!(grad_inputs.len(), 1);
-        let grad_input = &grad_inputs[0];
-        let expected_grad_input = vec![0.0, 0.0, 0.3, 0.4];
-        assert_tensor_eq(grad_input, &expected_grad_input, &[2, 2]);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_relu_forward_zeros() -> Result<(), NeuraRustError> {
-        let input = Tensor::new(vec![0.0, 0.0, 0.0], vec![3])?;
-        let output = relu_op(&input)?;
-        assert_tensor_eq(&output, &[0.0, 0.0, 0.0], &[3]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_relu_forward_positive() -> Result<(), NeuraRustError> {
-        let input = Tensor::new(vec![1.0, 10.0, 0.1], vec![3])?;
-        let output = relu_op(&input)?;
-        assert_tensor_eq(&output, &[1.0, 10.0, 0.1], &[3]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_relu_backward_mixed() -> Result<(), NeuraRustError> {
-        let input = Tensor::new(vec![-2.0, 3.0, 0.0, -5.0, 6.0], vec![5])?;
-        let _ = input.set_requires_grad(true);
-        let output = relu_op(&input)?;
-        let grad_output = Tensor::new(vec![1.0, 1.0, 1.0, 1.0, 1.0], vec![5])?;
-        let grad_fn = output.grad_fn().unwrap();
-        let grad_inputs = grad_fn.backward(&grad_output)?;
-        assert_eq!(grad_inputs.len(), 1);
-        assert_tensor_eq(&grad_inputs[0], &[0.0, 1.0, 0.0, 0.0, 1.0], &[5]);
-        Ok(())
-    }
-} 
+    // ... (contenu de l'ancien module de tests) ...
+}
+*/ 
