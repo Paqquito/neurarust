@@ -85,7 +85,6 @@ impl Tensor {
     /// assert!(!sliced.is_contiguous()); // Slicing often creates non-contiguous views
     /// ```
     pub fn slice(&self, ranges: &[crate::ops::view::SliceArg]) -> Result<Self, NeuraRustError> {
-        // Reactivate the call to the underlying slice_op function
         crate::ops::view::slice_op(self, ranges)
     }
 
@@ -155,11 +154,14 @@ impl Tensor {
     /// Creates a view of the tensor with a different shape, possibly changing the number of dimensions.
     ///
     /// The total number of elements must remain the same.
-    /// This operation attempts to reuse the existing data buffer without copying.
-    /// It can only succeed without copying if the tensor is contiguous or if the new shape
-    /// can be achieved by manipulating strides compatibly with the existing layout.
-    /// If a copy is required (e.g., reshaping a non-contiguous tensor into an incompatible shape),
-    /// the underlying `reshape_op` might handle it by implicitly calling `contiguous()` first (TBC).
+    /// This operation attempts to create a view without copying data, which is only possible
+    /// if the tensor is already **contiguous**.
+    ///
+    /// If the tensor is not contiguous (e.g., after a `transpose` or `slice`), calling
+    /// this method will likely result in an error from the underlying `reshape_op`.
+    /// To reshape a non-contiguous tensor, you should first call `.contiguous()` to get
+    /// a tensor with a contiguous memory layout, and then call `.reshape()` on the result:
+    /// `tensor.contiguous()?.reshape(new_shape)`.
     ///
     /// This method delegates the operation (including autograd handling) to
     /// [`ops::view::reshape_op`](../ops/view/fn.reshape_op.html).
@@ -168,33 +170,33 @@ impl Tensor {
     /// * `new_shape`: The desired new shape as a `Vec<usize>`.
     ///
     /// # Returns
-    /// A `Result` containing the reshaped `Tensor`, or a `NeuraRustError` if the reshape is invalid
-    /// (e.g., number of elements differs, incompatible layout).
+    /// A `Result` containing the reshaped `Tensor` view, or a `NeuraRustError` if the reshape is invalid
+    /// (e.g., number of elements differs, tensor is not contiguous).
     ///
     /// # Example
     /// ```
     /// use neurarust_core::tensor::Tensor;
     /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+    /// assert!(t.is_contiguous());
     ///
+    /// // Reshape a contiguous tensor (creates a view)
     /// let t_reshaped = t.reshape(vec![3, 2]).unwrap();
     /// assert_eq!(t_reshaped.shape(), vec![3, 2]);
-    /// // Reshaping a contiguous tensor usually results in a contiguous view
-    /// assert!(t_reshaped.is_contiguous());
-    /// assert_eq!(t_reshaped.get_f32_data().unwrap(), vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0]);
+    /// assert!(t_reshaped.is_contiguous()); // Reshape of contiguous is contiguous
     ///
-    /// let t_flattened = t.reshape(vec![6]).unwrap();
-    /// assert_eq!(t_flattened.shape(), vec![6]);
-    ///
-    /// // Reshaping a non-contiguous tensor might require a copy internally (handled by op)
+    /// // Attempt to reshape a non-contiguous tensor directly (likely fails)
     /// let transposed = t.transpose(0, 1).unwrap(); // shape [3, 2], non-contiguous
-    /// // We need to make it contiguous before reshaping if the op doesn't handle it implicitly
-    /// let reshaped_from_transposed = transposed.contiguous().unwrap().reshape(vec![6]); // Attempt to flatten
-    /// assert!(reshaped_from_transposed.is_ok());
-    /// let reshaped_tensor = reshaped_from_transposed.unwrap();
-    /// // The result should be contiguous now because we called contiguous()
-    /// assert!(reshaped_tensor.is_contiguous());
-    /// // Check data order after transpose + contiguous + reshape
-    /// assert_eq!(reshaped_tensor.get_f32_data().unwrap(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
+    /// assert!(!transposed.is_contiguous());
+    /// let direct_reshape_result = transposed.reshape(vec![6]);
+    /// // This fails because reshape_op requires contiguous input
+    /// assert!(direct_reshape_result.is_err());
+    ///
+    /// // Correct way to reshape a non-contiguous tensor:
+    /// let reshaped_copied = transposed.contiguous().unwrap().reshape(vec![6]).unwrap();
+    /// assert_eq!(reshaped_copied.shape(), vec![6]);
+    /// assert!(reshaped_copied.is_contiguous()); // Result is contiguous after copy
+    /// // Data order reflects the transpose before flattening
+    /// assert_eq!(reshaped_copied.get_f32_data().unwrap(), vec![1.0, 4.0, 2.0, 5.0, 3.0, 6.0]);
     /// ```
     pub fn reshape(&self, new_shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         crate::ops::view::reshape_op(self, new_shape)

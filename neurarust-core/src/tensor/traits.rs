@@ -237,20 +237,22 @@ impl PartialEq for Tensor {
 /// when `PartialEq` returns true.
 impl Eq for Tensor {}
 
-// Note: No <T> generic parameter needed anymore for Tensor
+/// Provides a hash implementation for `Tensor`.
+///
+/// **Important:** The hash is based solely on the memory address of the underlying shared
+/// `TensorData` (`Arc<RwLock<TensorData>>`). This means:
+/// - Clones of the same tensor will have the same hash.
+/// - Two tensors with identical content but allocated separately will have **different** hashes.
+///
+/// This implementation is suitable for using `Tensor` in hash-based collections
+/// (like `HashMap` or `HashSet`) where identity semantics (checking if it's the exact
+/// same underlying data instance) are desired, often used internally in the autograd graph.
+/// It does **not** reflect the logical content of the tensor.
 impl Hash for Tensor {
-    /// Hashes the `Tensor` based on the memory address of its underlying shared data structure.
-    ///
-    /// This implementation ensures that two `Tensor` clones (pointing to the same
-    /// `Arc<RwLock<TensorData>>`) will produce the same hash value.
-    ///
-    /// **Note:** This hash function reflects *object identity*, not *value equality*.
-    /// Two logically equal but distinct tensors (e.g., created separately with the same data)
-    /// will likely have different hash values.
-    /// Use this for scenarios where you need to track specific tensor instances in hash-based
-    /// collections (like `HashMap` or `HashSet`).
+    /// Hashes the tensor based on the pointer address of its `TensorData`.
     fn hash<H: Hasher>(&self, state: &mut H) {
-        // Hash the address of the Arc's contained RwLock<TensorData>
+        // Hash the pointer address of the Arc's inner value.
+        // This provides identity hashing (based on the TensorData instance).
         Arc::as_ptr(&self.data).hash(state);
     }
 }

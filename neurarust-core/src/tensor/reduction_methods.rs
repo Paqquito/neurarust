@@ -98,5 +98,51 @@ impl Tensor {
         crate::ops::reduction::max::max_op(self, axes, keep_dims)
     }
 
-    // TODO: Add sum, min methods here similarly?
+    /// Computes the sum of the tensor elements over specified axes.
+    ///
+    /// If `axes` is `None`, the sum is computed over all elements, resulting in a scalar tensor.
+    /// If `axes` is `Some`, the sum is computed along the specified dimensions.
+    ///
+    /// The `keep_dims` argument controls whether the reduced dimensions are kept with size 1
+    /// or removed entirely.
+    ///
+    /// This method delegates the computation (including autograd handling) to
+    /// [`ops::reduction::sum::sum_op`](../ops/reduction/sum/fn.sum_op.html).
+    ///
+    /// # Arguments
+    /// * `axes`: An optional slice of `usize` specifying the axes along which to compute the sum.
+    /// * `keep_dims`: If `true`, the reduced axes are retained in the output shape with size 1.
+    ///                If `false`, the reduced axes are removed.
+    ///
+    /// # Returns
+    /// A `Result` containing the resulting `Tensor` with the sum values, or a `NeuraRustError`.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    ///
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+    /// // [[1., 2., 3.], [4., 5., 6.]]
+    ///
+    /// // Sum over all elements
+    /// let s_all = t.sum(None, false).unwrap();
+    /// assert_eq!(s_all.shape(), vec![]); // Scalar shape
+    /// assert_eq!(s_all.item_f32().unwrap(), 21.0); // 1+..+6
+    ///
+    /// // Sum along axis 0 (collapse rows)
+    /// let s_axis0 = t.sum(Some(&[0]), false).unwrap();
+    /// assert_eq!(s_axis0.shape(), vec![3]);
+    /// assert_eq!(s_axis0.get_f32_data().unwrap(), vec![5.0, 7.0, 9.0]); // [1+4, 2+5, 3+6]
+    ///
+    /// // Sum along axis 1 (collapse columns), keeping dimension
+    /// let s_axis1_keep = t.sum(Some(&[1]), true).unwrap();
+    /// assert_eq!(s_axis1_keep.shape(), vec![2, 1]);
+    /// assert_eq!(s_axis1_keep.get_f32_data().unwrap(), vec![6.0, 15.0]); // [1+2+3, 4+5+6]
+    /// ```
+    pub fn sum(&self, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
+        // Call the sum_op function from the ops module
+        crate::ops::reduction::sum::sum_op(self, axes, keep_dims)
+    }
+
+    // TODO: Add min method here similarly?
 }

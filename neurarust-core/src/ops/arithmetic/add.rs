@@ -18,9 +18,10 @@ use std::fmt::Debug;
 
 /// Backward pass structure for the element-wise addition operation.
 ///
-/// Stores references to the input tensors (`a_node`, `b_node`) and their original shapes
-/// to handle gradient reduction correctly during backpropagation, especially when
-/// broadcasting was involved in the forward pass.
+/// Stores references to the input tensor nodes (`a_node`, `b_node`), their original
+/// shapes (`a_shape`, `b_shape`), and flags indicating if they require gradients.
+/// The original shapes are crucial for reducing the output gradient back to the
+/// correct input shapes if broadcasting occurred during the forward pass.
 #[derive(Debug)]
 struct AddBackward {
     /// Reference counted pointer to the first input tensor's data (`a`).
@@ -41,18 +42,20 @@ struct AddBackward {
 impl BackwardOp for AddBackward {
     /// Computes gradients for the addition operation \( z = a + b \).
     ///
-    /// The local gradients are \( \frac{dz}{da} = 1 \) and \( \frac{dz}{db} = 1 \).
-    /// Using the chain rule, \( \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot 1 \)
-    /// and \( \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot 1 \).
+    /// The gradient \( \frac{dL}{dz} \) received (`grad_output`) is passed back to both
+    /// inputs `a` and `b` because the local derivatives \( \frac{dz}{da} = 1 \) and
+    /// \( \frac{dz}{db} = 1 \).
     ///
-    /// Therefore, the gradient flowing from the output (`grad_output`, representing \( \frac{dL}{dz} \))
-    /// is passed back to both inputs.
+    /// If broadcasting occurred, `grad_output` is reduced to the original shapes of `a` and `b`
+    /// using [`reduce_gradient_to_shape`] before being returned.
     ///
-    /// **Broadcasting Handling:** If the forward operation involved broadcasting (i.e., `a` and `b`
-    /// had different shapes), the `grad_output` (which has the broadcasted shape) needs to be
-    /// reduced back to the original shapes of `a` and `b` respectively before being assigned
-    /// as their gradients. This reduction is typically done by summing the gradient along the
-    /// broadcasted dimensions, which is handled by the [`reduce_gradient_to_shape`] helper function.
+    /// # Arguments
+    /// * `grad_output`: The gradient tensor flowing back, corresponding to the output `z`.
+    ///
+    /// # Returns
+    /// A `Result` containing a `Vec` of gradient tensors corresponding to the inputs
+    /// `a` and `b` (in that order) that required gradients. If an input did not require
+    /// gradients, its corresponding gradient is not computed or returned.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // TODO: Implement gradient reduction for broadcasting
         // let grad_a = reduce_gradient_to_shape(grad_output, &self.a_shape)?;
@@ -83,26 +86,20 @@ impl BackwardOp for AddBackward {
     }
 }
 
-/// Reduces a gradient tensor to match a target shape, typically the shape of an input
-/// tensor before broadcasting occurred in the forward pass.
+/// Reduces a gradient tensor (potentially broadcasted) to match a target shape.
 ///
-/// When broadcasting is used in a forward operation (e.g., adding a `[3, 1]` tensor to a `[3, 5]` tensor),
-/// the output gradient will have the broadcasted shape (e.g., `[3, 5]`). To compute the gradient
-/// with respect to the original input (e.g., `[3, 1]`), we need to sum the output gradient
-/// along the dimensions that were expanded during broadcasting.
-///
-/// This function identifies these broadcasted dimensions by comparing the `grad` shape
-/// with the `target_shape` and performs a sum reduction along those axes.
-/// It also handles cases where dimensions were added (e.g., broadcasting a `[3]` vector to `[5, 3]`).
+/// This function is crucial for the backward pass of operations involving broadcasting.
+/// It sums the `grad` tensor along dimensions that were either newly added or expanded
+/// (from size 1) during the forward pass broadcast to match the `target_shape`.
 ///
 /// # Arguments
-/// * `grad`: The gradient tensor (having the broadcasted shape).
-/// * `target_shape`: The original shape of the input tensor to which the gradient should be reduced.
+/// * `grad` - The gradient tensor, having the shape resulting from the broadcast.
+/// * `target_shape` - The original shape of the input tensor before broadcasting.
 ///
 /// # Returns
-/// * `Ok(Tensor)`: A new tensor containing the gradient reduced to the `target_shape`.
-/// * `Err(NeuraRustError)`: If the shapes are fundamentally incompatible for reduction or if an
-///                        internal error occurs during sum or reshape operations.
+/// A `Result` containing a new `Tensor` with the gradient correctly summed and reshaped
+/// to match the `target_shape`, or a `NeuraRustError` if shapes are incompatible
+/// or reduction fails.
 fn reduce_gradient_to_shape(
     grad: &Tensor,
     target_shape: &[usize],

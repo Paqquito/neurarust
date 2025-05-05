@@ -17,8 +17,9 @@ use num_traits::Zero;
 
 /// Backward pass structure for the element-wise division operation.
 ///
-/// Stores references to input tensors (`a_node`, `b_node`) and a clone of `b` (`b_tensor_clone`)
-/// needed for calculating gradients. Also stores flags indicating if inputs required gradients.
+/// Stores references to input tensor nodes (`a_node`, `b_node`), a clone of the
+/// denominator tensor (`b_tensor_clone`) needed for gradient calculation, and flags
+/// indicating if the inputs required gradients (`a_requires_grad`, `b_requires_grad`).
 #[derive(Debug)]
 struct DivBackward {
     /// Reference counted pointer to the numerator tensor's data (`a`).
@@ -37,15 +38,12 @@ struct DivBackward {
 impl BackwardOp for DivBackward {
     /// Computes gradients for the division operation \( z = a / b \).
     ///
-    /// Using the chain rule \( \frac{dL}{dx} = \frac{dL}{dz} \cdot \frac{dz}{dx} \), the gradients are:
-    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot \frac{1}{b} \\]
-    /// \\[ \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot \left( -\frac{a}{b^2} \right) \\]
-    ///
+    /// The gradients are:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{1}{b} \quad \text{and} \quad \frac{dL}{db} = \frac{dL}{dz} \cdot \left( -\frac{a}{b^2} \right) \\]
     /// Where \( \frac{dL}{dz} \) is `grad_output`.
     ///
-    /// **Broadcasting Handling:** Similar to addition, if broadcasting occurred, the computed gradients
-    /// (dL/da and dL/db) are reduced to the original shapes of `a` and `b` using the
-    /// [`reduce_to_shape`](../broadcast_utils/fn.reduce_to_shape.html) helper function.
+    /// If broadcasting occurred, the computed gradients are reduced to the original
+    /// input shapes using [`Tensor::reduce_to_shape`](../../tensor/broadcast_utils/struct.Tensor.html#method.reduce_to_shape).
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut grads = Vec::with_capacity(2);
 

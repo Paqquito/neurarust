@@ -12,6 +12,8 @@ use crate::types::DType;
 // --- Backward Operation Structure ---
 
 /// Backward pass structure for the element-wise negation operation.
+///
+/// Stores a reference to the input tensor node for graph linkage.
 #[derive(Debug)]
 struct NegBackward {
     /// Reference counted pointer to the input tensor's data for graph linkage.

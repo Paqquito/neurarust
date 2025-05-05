@@ -113,8 +113,9 @@ fn reduce_gradient_to_shape(
 /// Backward pass structure for the element-wise multiplication operation.
 ///
 /// Stores clones of the input tensors (`a`, `b`) needed for gradient calculation,
-/// references to their nodes (`a_node`, `b_node`) for graph linkage, and original shapes
-/// for gradient reduction if broadcasting occurred.
+/// references to their nodes (`a_node`, `b_node`) for graph linkage, original shapes
+/// (`a_shape`, `b_shape`) for gradient reduction, and flags indicating if inputs
+/// required gradients (`a_requires_grad`, `b_requires_grad`).
 #[derive(Debug)]
 struct MulBackward {
     /// Clone of the first input tensor (`a`).
@@ -139,15 +140,12 @@ struct MulBackward {
 impl BackwardOp for MulBackward {
     /// Computes gradients for the multiplication operation \( z = a \cdot b \).
     ///
-    /// Using the chain rule \( \frac{dL}{dx} = \frac{dL}{dz} \cdot \frac{dz}{dx} \), the gradients are:
-    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot b \\]
-    /// \\[ \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot a \\]
-    ///
+    /// The gradients are:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot b \quad \text{and} \quad \frac{dL}{db} = \frac{dL}{dz} \cdot a \\]
     /// Where \( \frac{dL}{dz} \) is `grad_output`.
     ///
-    /// **Broadcasting Handling:** If broadcasting occurred in the forward pass, the computed gradients
-    /// (dL/da and dL/db) are reduced to the original shapes of `a` and `b` using the
-    /// `reduce_gradient_to_shape` helper function.
+    /// If broadcasting occurred, the computed gradients are reduced to the original
+    /// input shapes using `reduce_gradient_to_shape`.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut result_grads = Vec::new();
 

@@ -14,7 +14,9 @@ use std::sync::RwLock;
 
 /// Backward pass structure for the element-wise subtraction operation.
 ///
-/// Stores references to input tensor nodes and flags indicating if they require gradients.
+/// Stores references to input tensor nodes (`a_node`, `b_node`) and flags
+/// indicating if they required gradients (`a_requires_grad`, `b_requires_grad`).
+/// Original shapes are implicitly handled by `Tensor::reduce_to_shape` in the backward pass.
 #[derive(Debug)]
 struct SubBackward {
     /// Reference counted pointer to the first input tensor's data (`a` in `a - b`).
@@ -31,14 +33,12 @@ struct SubBackward {
 impl BackwardOp for SubBackward {
     /// Computes gradients for the subtraction operation \( z = a - b \).
     ///
-    /// Using the chain rule \( \frac{dL}{dx} = \frac{dL}{dz} \cdot \frac{dz}{dx} \), the gradients are:
-    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot 1 = \frac{dL}{dz} \\]
-    /// \\[ \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot (-1) = - \frac{dL}{dz} \\]
-    ///
+    /// The gradients are:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \quad \text{and} \quad \frac{dL}{db} = - \frac{dL}{dz} \\]
     /// Where \( \frac{dL}{dz} \) is `grad_output`.
     ///
-    /// **Broadcasting Handling:** If broadcasting occurred, gradients are reduced back to the
-    /// original input shapes using [`Tensor::reduce_to_shape`](../../tensor/broadcast_utils/struct.Tensor.html#method.reduce_to_shape).
+    /// If broadcasting occurred, gradients are reduced back to the original input shapes
+    /// using [`Tensor::reduce_to_shape`](../../tensor/broadcast_utils/struct.Tensor.html#method.reduce_to_shape).
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut grads = Vec::with_capacity(2);
 
