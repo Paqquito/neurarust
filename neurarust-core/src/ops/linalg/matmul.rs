@@ -12,19 +12,34 @@ use std::sync::{Arc, RwLock};
 
 // --- MatmulBackward Definition ---
 
-/// Backward operation context for `matmul_op`.
+/// Backward pass structure for the 2D matrix multiplication operation (`matmul_op`).
+///
+/// Stores references to the input tensor nodes (`a_node`, `b_node`) and flags
+/// indicating if they require gradients, used for graph traversal and gradient computation.
 #[derive(Debug)]
 struct MatmulBackward {
-    // Store Arc<RwLock<TensorData>> for Send + Sync safety
+    /// Reference counted pointer to the first input tensor's data (`a` in `a @ b`).
     a_node: Arc<RwLock<TensorData>>,
+    /// Reference counted pointer to the second input tensor's data (`b` in `a @ b`).
     b_node: Arc<RwLock<TensorData>>,
+    /// Flag indicating if the first input (`a`) required gradients.
     a_requires_grad: bool,
+    /// Flag indicating if the second input (`b`) required gradients.
     b_requires_grad: bool,
 }
 
 // --- BackwardOp Implementation for MatmulBackward ---
 
 impl BackwardOp for MatmulBackward {
+    /// Computes gradients for the matrix multiplication operation \( Z = A \cdot B \).
+    ///
+    /// Using the chain rule \( \frac{dL}{dX} = \frac{dL}{dZ} \cdot \frac{dZ}{dX} \), the gradients are:
+    /// \\[ \frac{dL}{dA} = \frac{dL}{dZ} \cdot \frac{dZ}{dA} = \frac{dL}{dZ} \cdot B^T \\]
+    /// \\[ \frac{dL}{dB} = \frac{dL}{dZ} \cdot \frac{dZ}{dB} = A^T \cdot \frac{dL}{dZ} \\]
+    ///
+    /// Where \( \frac{dL}{dZ} \) is `grad_output`, and \( X^T \) denotes the transpose of matrix \( X \).
+    /// The matrix multiplications involved in the gradient computation are performed using `matmul_op`.
+    /// Input matrices are transposed and made contiguous before the multiplication for correctness and performance.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut input_grads: Vec<Tensor> = Vec::with_capacity(2);
 
@@ -56,6 +71,8 @@ impl BackwardOp for MatmulBackward {
         Ok(input_grads)
     }
 
+    /// Returns the identifiers of the input tensor nodes that required gradients.
+    /// The order corresponds to the inputs `a` and `b` of the forward `matmul_op`.
     fn inputs(&self) -> Vec<NodeId> {
         let mut ids = Vec::new();
         // Return the NodeId (raw pointer) for inputs that required grad
@@ -68,8 +85,25 @@ impl BackwardOp for MatmulBackward {
 
 // --- matmul_op Implementation (Public API with Autograd) ---
 
-/// Performs 2D matrix multiplication (A @ B).
-/// Currently only supports F32 tensors on CPU.
+/// Performs 2D matrix multiplication of two tensors (`a @ b`).
+///
+/// Computes the dot product between matrices `a` and `b`. The number of columns
+/// in `a` must match the number of rows in `b`.
+/// If `a` has shape `[m, k]` and `b` has shape `[k, n]`, the output will have shape `[m, n]`.
+///
+/// This operation supports automatic differentiation.
+/// Currently only implemented for 2D tensors (`RankMismatch` error otherwise) on the CPU
+/// with `DType::F32` or `DType::F64` (`UnsupportedOperation` or `DataTypeMismatch` error otherwise).
+///
+/// # Arguments
+/// * `a`: The first input `Tensor` (left matrix).
+/// * `b`: The second input `Tensor` (right matrix).
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing the matrix product, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` for dimension/shape mismatches, device/dtype mismatches, or internal errors.
 pub fn matmul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_requires_grad = a.requires_grad();
     let b_requires_grad = b.requires_grad();
@@ -108,7 +142,24 @@ pub fn matmul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
 
 // --- matmul_kernel (Private Calculation Core) ---
 
-/// Private kernel for matrix multiplication calculation. CPU implementation, generic over T.
+/// **(Internal)** Private kernel for CPU-based 2D matrix multiplication.
+///
+/// Performs the calculation \( C = A \cdot B \) using nested loops.
+/// This is a basic implementation and not optimized for performance (e.g., cache efficiency).
+/// It handles potential offsets and strides from the input tensor views.
+///
+/// # Type Constraints
+/// Requires the generic type `T` to implement traits necessary for multiplication and addition
+/// (`Copy`, `Default`, `AddAssign`, `Mul<Output = T>`) and `Debug`.
+///
+/// # Arguments
+/// * `m`, `k`, `n`: Dimensions of the multiplication (A: [m, k], B: [k, n], Output: [m, n]).
+/// * `a_buffer`, `b_buffer`: Slices containing the underlying data for A and B.
+/// * `a_strides`, `b_strides`: Strides for accessing elements in A and B.
+/// * `a_offset`, `b_offset`: Starting offsets within the data buffers.
+///
+/// # Returns
+/// A `Result` containing a `Vec<T>` with the computed output matrix data (row-major), or a `NeuraRustError` if an index is out of bounds.
 fn matmul_kernel<T>(
     m: usize,
     k: usize,
@@ -154,8 +205,18 @@ where
 
 // --- matmul_internal Implementation (Core Logic, No Autograd Setup) ---
 
-/// Internal implementation of 2D matrix multiplication without autograd setup.
-/// Handles F32 and F64 CPU tensors.
+/// **(Internal)** Internal implementation of 2D matrix multiplication without autograd setup.
+///
+/// This function performs checks (device, dtype, rank, shape compatibility) and then
+/// calls the appropriate `matmul_kernel` based on the `DType`.
+/// It assumes inputs are 2D tensors.
+///
+/// # Arguments
+/// * `a`: The first input `Tensor`.
+/// * `b`: The second input `Tensor`.
+///
+/// # Returns
+/// A `Result` containing the output `Tensor` or a `NeuraRustError` from checks or the kernel.
 fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();
