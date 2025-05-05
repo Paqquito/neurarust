@@ -128,10 +128,10 @@
             *   [✅] Add tests for shape correctness and basic distribution properties (e.g., range for `rand`).
             *   [✅] Add `rustdoc` for `rand` and `randn`.
         *   **Step 1.B.4: Implement Weight Initialization Helpers (`nn::init`)**
-            *   [ ] Create `src/nn/init.rs`.
-            *   [ ] Implement common initializers like `kaiming_uniform_`, `kaiming_normal_`, `xavier_uniform_`, `zeros_`, `ones_`. These should operate *in-place* on a given `Tensor`.
-            *   [ ] Add tests for each initializer (checking basic statistics or values).
-            *   [ ] Add `rustdoc` for the `nn::init` module and functions.
+            *   [✅] Create `src/nn/init.rs`.
+            *   [✅] Implement common initializers like `kaiming_uniform_`, `kaiming_normal_`, `xavier_uniform_`, `zeros_`, `ones_`. These should operate *in-place* on a given `Tensor`.
+            *   [✅] Add tests for each initializer (checking basic statistics or values).
+            *   [✅] Add `rustdoc` for the `nn::init` module and functions.
         *   **Step 1.B.5: Define `Parameter` Wrapper** *(Formerly Optional 1.B.1)*
             *   [ ] Define `struct Parameter(Tensor)`.
             *   [ ] Implement `new(Tensor)` setting `requires_grad = true`.
