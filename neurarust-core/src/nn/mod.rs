@@ -5,6 +5,7 @@ pub mod layers;
 pub mod module; // Trait Module
 pub mod parameter; // struct Parameter
 pub mod losses; // Declare losses module
+pub mod init; // <-- Add this line
 // pub mod containers; // Future: Sequential, ModuleList 
 
 // Re-export common items
