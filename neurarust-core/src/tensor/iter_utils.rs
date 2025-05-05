@@ -226,15 +226,15 @@ impl<'a> Iterator for NdArrayBroadcastingIterF64<'a> {
 // --- Single NdArray Iterator (Handles strides/offsets) ---
 
 pub struct NdArraySimpleIter<'a> {
-    buffer: &'a [f32],
-    shape: &'a [usize],
-    strides: &'a [usize],
-    offset: usize,
-    current_logical_index: Vec<usize>,
-    current_physical_offset: usize,
-    is_done: bool,
-    numel: usize,
-    counter: usize, // To limit iterations to numel
+    pub(crate) buffer: &'a [f32],
+    pub(crate) shape: &'a [usize],
+    pub(crate) strides: &'a [usize],
+    pub(crate) offset: usize,
+    pub(crate) current_logical_index: Vec<usize>,
+    pub(crate) current_physical_offset: usize,
+    pub(crate) is_done: bool,
+    pub(crate) numel: usize,
+    pub(crate) counter: usize, // To limit iterations to numel
 }
 
 impl<'a> NdArraySimpleIter<'a> {
@@ -309,15 +309,15 @@ impl<'a> Iterator for NdArraySimpleIter<'a> {
 
 // --- F64 Version ---
 pub struct NdArraySimpleIterF64<'a> {
-    buffer: &'a [f64],
-    shape: &'a [usize],
-    strides: &'a [usize],
-    offset: usize,
-    current_logical_index: Vec<usize>,
-    current_physical_offset: usize,
-    is_done: bool,
-    numel: usize,
-    counter: usize,
+    pub(crate) buffer: &'a [f64],
+    pub(crate) shape: &'a [usize],
+    pub(crate) strides: &'a [usize],
+    pub(crate) offset: usize,
+    pub(crate) current_logical_index: Vec<usize>,
+    pub(crate) current_physical_offset: usize,
+    pub(crate) is_done: bool,
+    pub(crate) numel: usize,
+    pub(crate) counter: usize,
 }
 
 impl<'a> NdArraySimpleIterF64<'a> {

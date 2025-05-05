@@ -354,11 +354,11 @@ fn test_view_creation_requires_grad() {
     // Contiguous (on non-contiguous that requires grad)
     let non_contig = tensor.transpose(0, 1).unwrap(); // Requires grad because tensor does
     assert!(non_contig.requires_grad());
-    let contig_view = non_contig.contiguous().unwrap(); // Contiguous makes a copy, grad status depends on op
-    // The contiguous op itself might not require grad / have a grad_fn by default
-    // unless explicitly implemented in autograd. Check current behavior:
-    assert!(!contig_view.requires_grad(), "Contiguous() view currently does NOT propagate requires_grad");
-    assert!(contig_view.grad_fn().is_none(), "Contiguous() view currently does NOT have grad_fn");
+    let contig_view = non_contig.contiguous().unwrap(); // Contiguous makes a copy
+
+    // Corriger les assertions : contiguous DOIT maintenant propager requires_grad et avoir un grad_fn
+    assert!(contig_view.requires_grad(), "Contiguous() view SHOULD propagate requires_grad");
+    assert!(contig_view.grad_fn().is_some(), "Contiguous() view SHOULD have grad_fn");
 }
 
 #[test]

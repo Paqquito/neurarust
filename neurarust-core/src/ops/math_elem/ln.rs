@@ -8,7 +8,7 @@ use crate::tensor_data::TensorData;
 use std::fmt::Debug;
 use std::sync::{Arc, RwLock};
 // Add imports for backward
-use crate::ops::arithmetic::{div_op};
+use crate::ops::arithmetic::div_op;
 
 // --- LnBackward Definition ---
 

@@ -1,48 +1,11 @@
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
-use crate::tensor_data::TensorData;
-use crate::buffer::{Buffer, CpuBuffer}; // Need Buffer types
 use crate::types::DType; // Need DType
-use std::fmt::Debug;
- // Keep Debug for recursive helper
- // Keep Arc
-
-// Helper function for recursive multidimensional iteration used by contiguous()
-// Made generic over numeric type T
-fn copy_non_contiguous_recursive<T>(
-    original_guard: &TensorData, // Keep non-generic TensorData ref
-    original_data_slice: &[T],  // Generic slice
-    new_buffer: &mut Vec<T>,    // Generic output buffer
-    current_indices: &mut Vec<usize>,
-    current_dim: usize,
-) -> Result<(), NeuraRustError>
-where
-    T: Copy + Debug, // Add required traits
-{
-    if current_dim == original_guard.shape.len() {
-        let original_offset = original_guard.get_offset(current_indices);
-        if original_offset >= original_data_slice.len() {
-            return Err(NeuraRustError::InternalError(format!(
-                "Contiguous copy error: Offset {} out of bounds for buffer len {}",
-                original_offset, original_data_slice.len()
-            )));
-        }
-        new_buffer.push(original_data_slice[original_offset]); // Works for any T: Copy
-    } else {
-        for i in 0..original_guard.shape[current_dim] {
-            current_indices[current_dim] = i;
-            copy_non_contiguous_recursive(
-                original_guard,
-                original_data_slice,
-                new_buffer,
-                current_indices,
-                current_dim + 1,
-            )?;
-        }
-    }
-    Ok(())
-}
+use crate::tensor::iter_utils::{NdArraySimpleIter, NdArraySimpleIterF64};
+use crate::ops::view::contiguous::ContiguousBackward; // Importer l'op Backward
+use crate::autograd::graph::NodeId; // Importer NodeId
+use std::sync::Arc;
 
 /// This `impl` block provides methods for creating views of a `Tensor` or manipulating its shape and layout.
 /// Many of these methods return new `Tensor` instances that share the underlying data
@@ -246,67 +209,81 @@ impl Tensor {
         if self.is_contiguous() {
             Ok(self.clone())
         } else {
-            let guard = self.data.read().map_err(|_| NeuraRustError::LockError{
-                lock_type: "read".to_string(),
-                reason: "Failed to lock for contiguous()".to_string()
-            })?;
-            let td_ref = &*guard;
+            let a_guard = self.read_data();
+            let requires_grad = a_guard.requires_grad;
+            let a_node_id: NodeId = Arc::as_ptr(&self.data);
+            let output_shape = self.shape();
+            let strides = self.strides();
+            let offset = a_guard.offset;
+            let numel = a_guard.numel();
+            let dtype = a_guard.dtype;
+            let device = a_guard.device;
 
-            let device = td_ref.device;
-            let shape = td_ref.shape.clone();
-            let numel = td_ref.numel();
-
-            // Dispatch based on dtype and device
-            match (td_ref.dtype, device) {
-                (DType::F32, StorageDevice::CPU) => {
-                    let mut new_buffer_vec = Vec::with_capacity(numel);
-                    match &*td_ref.buffer {
-                        Buffer::Cpu(CpuBuffer::F32(original_cpu_data_arc)) => {
-                            let original_f32_data: &[f32] = original_cpu_data_arc;
-                            let mut current_indices = vec![0; shape.len()];
-                            // Call generic recursive function
-                            copy_non_contiguous_recursive(
-                                td_ref,
-                                original_f32_data,
-                                &mut new_buffer_vec,
-                                &mut current_indices,
-                                0,
-                            )?;
-                        }
-                        _ => return Err(NeuraRustError::InternalError("Mismatched buffer type for F32 dtype in contiguous()".to_string()))
-                    }
-                    drop(guard);
-                    Tensor::new(new_buffer_vec, shape)
-                }
-                (DType::F64, StorageDevice::CPU) => {
-                    let mut new_buffer_vec: Vec<f64> = Vec::with_capacity(numel);
-                    match &*td_ref.buffer {
-                        Buffer::Cpu(CpuBuffer::F64(original_cpu_data_arc)) => {
-                            let original_f64_data: &[f64] = original_cpu_data_arc;
-                            let mut current_indices = vec![0; shape.len()];
-                            // Call generic recursive function for F64
-                            copy_non_contiguous_recursive(
-                                td_ref,
-                                original_f64_data,
-                                &mut new_buffer_vec,
-                                &mut current_indices,
-                                0,
-                            )?;
-                        }
-                        _ => return Err(NeuraRustError::InternalError("Mismatched buffer type for F64 dtype in contiguous()".to_string()))
-                    }
-                    drop(guard);
-                    // Call F64 constructor
-                    Tensor::new_f64(new_buffer_vec, shape)
-                }
-                 // TODO: Add cases for other DTypes (e.g., I64) later
-                 // (DType::I64, StorageDevice::CPU) => { ... }
-                (dtype, StorageDevice::GPU) => {
-                    Err(NeuraRustError::UnsupportedOperation(
-                        format!("GPU contiguous copy not yet implemented for dtype {:?}", dtype)
-                    ))
-                }
+            if device != StorageDevice::CPU {
+                 return Err(NeuraRustError::UnsupportedOperation(
+                    "contiguous() currently only supports CPU tensors.".to_string(),
+                ));
             }
+
+            let output_tensor = match dtype {
+                DType::F32 => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_f32()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = NdArraySimpleIter::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<f32> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                    if new_data.len() != numel {
+                         return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (F32): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new(new_data, output_shape)?
+                }
+                DType::F64 => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_f64()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = NdArraySimpleIterF64::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<f64> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                     if new_data.len() != numel {
+                         return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (F64): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new_f64(new_data, output_shape)?
+                }
+            };
+
+            if requires_grad {
+                let grad_fn = ContiguousBackward {
+                    a_node: a_node_id,
+                };
+                let mut output_guard = output_tensor.write_data();
+                output_guard.grad_fn = Some(Arc::new(grad_fn));
+                output_guard.requires_grad = true;
+            }
+
+            Ok(output_tensor)
         }
     }
 }

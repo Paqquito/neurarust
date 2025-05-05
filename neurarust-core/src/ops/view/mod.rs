@@ -35,7 +35,8 @@ pub mod slice;
 pub mod transpose;
 pub mod permute;
 pub mod reshape;
-pub mod expand; // Added expand op
+pub mod expand;
+pub mod contiguous;
 
 pub mod utils; // Declare the utils module
 
