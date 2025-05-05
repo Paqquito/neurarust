@@ -63,13 +63,13 @@
             *   [ ] Review code (especially in `ops` and `tensor/utils.rs`) for duplicated logic or patterns suitable for abstraction.
             *   [✅] Candidate 1: Broadcasting logic (e.g., `NdArrayBroadcastingIter` usage). Can it be centralized or simplified? -> Addressed for arithmetic ops via helper.
             *   [✅] Candidate 2: Gradient reduction logic (`reduce_gradient_to_shape`). Is it optimally placed and reusable? -> Addressed for arithmetic ops via helper.
-            *   [ ] Candidate 3: CPU Kernel patterns (e.g., loops iterating over buffers). Can generic helpers be created?
+            *   [✅] Candidate 3: CPU Kernel patterns (e.g., loops iterating over buffers). Can generic helpers be created? -> Addressed for unary ops (`apply_unary_op`) and contiguous copy (`NdArraySimpleIter`).
             *   [ ] Candidate 4: DType dispatch logic (`match tensor.dtype()`). Can macros or traits simplify this? (Maybe later phase)
         *   **Step 1.A.10: Refactoring Implementation (Iterative)**
             *   [✅] (If applicable) Implement refactoring for Candidate 1, ensuring tests pass. -> Done for arithmetic ops.
             *   [✅] (If applicable) Implement refactoring for Candidate 2, ensuring tests pass. -> Done for arithmetic ops.
-            *   [ ] (If applicable) Implement refactoring for Candidate 3, ensuring tests pass.
-            *   [✅] Document any new utility functions/modules created during refactoring. -> `apply_binary_op_broadcasted` documented.
+            *   [✅] (If applicable) Implement refactoring for Candidate 3, ensuring tests pass. -> Done for unary ops (`neg`, `ln`) and `contiguous`.
+            *   [✅] Document any new utility functions/modules created during refactoring. -> `apply_binary_op_broadcasted`, `apply_unary_op`, `ContiguousBackward` documented.
 
 *   **Sub-Phase 1.B: Foundational NN Primitives & Core Tensor API:**
     *   🎯 **Goal:** Implement essential tensor methods and the basic building blocks for neural networks.

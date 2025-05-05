@@ -22,6 +22,7 @@
 pub mod sum;
 pub mod mean;
 pub mod max;
+pub mod utils;
 
 // Re-export the adapted reduction operations using pub(crate)
 pub(crate) use sum::sum_op;

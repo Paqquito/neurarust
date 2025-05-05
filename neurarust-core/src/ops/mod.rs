@@ -29,7 +29,7 @@
 // pub mod traits;
 
 // Import necessary types for helper functions
-use crate::tensor::{Tensor};
+use crate::tensor::Tensor;
 use crate::tensor_data::TensorData; // Import direct
 use crate::{DType, StorageDevice}; // Utiliser les re-exports de la racine
 use crate::error::NeuraRustError;
