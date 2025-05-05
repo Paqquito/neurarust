@@ -1,13 +1,17 @@
-use crate::autograd::BackwardOp;
-use crate::error::NeuraRustError;
-use crate::tensor::Tensor;
-use crate::tensor_data::TensorData;
-use std::sync::Arc;
-use crate::autograd::graph::NodeId;
-
+use crate::{
+    autograd::{backward_op::BackwardOp, graph::NodeId},
+    error::NeuraRustError,
+    ops::traits::NeuraNumeric,
+    tensor::Tensor,
+    tensor_data::TensorData,
+};
 use std::fmt::Debug;
-use std::sync::RwLock;
-// Import the iterators from their new location
+use std::sync::{Arc, RwLock};
+
+/// Generic kernel for element-wise multiplication.
+fn mul_kernel<T: NeuraNumeric>(a: T, b: T) -> T {
+    a * b
+}
 
 // --- Backward Operation Structure ---
 
@@ -102,21 +106,21 @@ impl BackwardOp for MulBackward {
 /// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
 /// - An internal error occurs during computation or memory allocation.
 pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
-    // Clone tensors needed for backward *before* calling helper
     let a_clone = a.clone();
     let b_clone = b.clone();
 
-    // Appelle la fonction helper centralisée
-    super::apply_binary_op_broadcasted(
+    // Call the centralized helper
+    crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,
-        |va, vb| va * vb, // Opération pour F32
-        |va, vb| va * vb, // Opération pour F64
+        // Closure for F32, calling the generic kernel
+        |va, vb| mul_kernel::<f32>(va, vb),
+        // Closure for F64, calling the generic kernel
+        |va, vb| mul_kernel::<f64>(va, vb),
         // Closure captures and moves the clones
-        move |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| { 
-            // Note: a_node/b_node can be None if grad not required
+        move |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
             Arc::new(MulBackward {
-                a: a_clone, // Utilise les clones capturés
+                a: a_clone,
                 b: b_clone,
                 a_node: a_node_opt,
                 b_node: b_node_opt,
@@ -126,7 +130,7 @@ pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 b_requires_grad: b_req,
             })
         },
-        "mul_op", // Nom de l'opération pour les erreurs
+        "mul_op", // Operation name for errors
     )
 }
 
