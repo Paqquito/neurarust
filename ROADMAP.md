@@ -52,24 +52,24 @@
             *   [✅] Add docs for `graph.rs` (`NodeId`, `topological_sort`).
             *   [✅] Add docs for `grad_check.rs` (`GradCheckError`, `check_grad`, `calculate_loss`).
         *   **Step 1.A.7: `rustdoc` Documentation - Operations (`ops`)**
-            *   [ ] Add module-level docs for `ops/mod.rs` and `ops/traits.rs`.
-            *   [ ] Add docs for each op module (`arithmetic`, `linalg`, `nn`, `reduction`, `view`, `dtype`).
-            *   [ ] Add docs for public op functions (e.g., `add_op`, `matmul_op`, `relu_op`, `sum_op`, `reshape_op`, `cast_op`, etc.).
-            *   [ ] Add docs for `Backward` structs associated with each operation.
+            *   [✅] Add module-level docs for `ops/mod.rs` and `ops/traits.rs`.
+            *   [✅] Add docs for each op module (`arithmetic`, `linalg`, `nn`, `reduction`, `view`, `dtype`).
+            *   [✅] Add docs for public op functions (e.g., `add_op`, `matmul_op`, `relu_op`, `sum_op`, `reshape_op`, `cast_op`, etc.).
+            *   [✅] Add docs for `Backward` structs associated with each operation.
         *   **Step 1.A.8: Documentation Generation & Review**
-            *   [ ] Run `cargo doc --open --no-deps` to build and view the documentation locally.
-            *   [ ] Review generated docs for clarity, completeness, and correctness. Fix any issues.
+            *   [✅] Run `cargo doc --open --no-deps` to build and view the documentation locally.
+            *   [✅] Review generated docs for clarity, completeness, and correctness. Fix any issues.
         *   **Step 1.A.9: Refactoring Identification**
             *   [ ] Review code (especially in `ops` and `tensor/utils.rs`) for duplicated logic or patterns suitable for abstraction.
-            *   [ ] Candidate 1: Broadcasting logic (e.g., `NdArrayBroadcastingIter` usage). Can it be centralized or simplified?
-            *   [ ] Candidate 2: Gradient reduction logic (`reduce_gradient_to_shape`). Is it optimally placed and reusable?
+            *   [✅] Candidate 1: Broadcasting logic (e.g., `NdArrayBroadcastingIter` usage). Can it be centralized or simplified? -> Addressed for arithmetic ops via helper.
+            *   [✅] Candidate 2: Gradient reduction logic (`reduce_gradient_to_shape`). Is it optimally placed and reusable? -> Addressed for arithmetic ops via helper.
             *   [ ] Candidate 3: CPU Kernel patterns (e.g., loops iterating over buffers). Can generic helpers be created?
             *   [ ] Candidate 4: DType dispatch logic (`match tensor.dtype()`). Can macros or traits simplify this? (Maybe later phase)
         *   **Step 1.A.10: Refactoring Implementation (Iterative)**
-            *   [ ] (If applicable) Implement refactoring for Candidate 1, ensuring tests pass.
-            *   [ ] (If applicable) Implement refactoring for Candidate 2, ensuring tests pass.
+            *   [✅] (If applicable) Implement refactoring for Candidate 1, ensuring tests pass. -> Done for arithmetic ops.
+            *   [✅] (If applicable) Implement refactoring for Candidate 2, ensuring tests pass. -> Done for arithmetic ops.
             *   [ ] (If applicable) Implement refactoring for Candidate 3, ensuring tests pass.
-            *   [ ] Document any new utility functions/modules created during refactoring.
+            *   [✅] Document any new utility functions/modules created during refactoring. -> `apply_binary_op_broadcasted` documented.
 
 *   **Sub-Phase 1.B: Foundational NN Primitives & Core Tensor API:**
     *   🎯 **Goal:** Implement essential tensor methods and the basic building blocks for neural networks.
@@ -79,6 +79,11 @@
             *   [✅] Add tests verifying detachment and data sharing.
             *   [✅] Add `rustdoc` for `detach()`.
         *   **Step 1.B.2: Implement Scalar Extraction `Tensor::item()`**
+            *   [✅] Implement `item<T: Copy>()` method to extract a single scalar value from a 0-dimensional tensor (or tensor with 1 element). Should return `Result<T, NeuraRustError>`.
+            *   [✅] Add tests for correct extraction and error handling (non-scalar tensor).
+            *   [✅] Add `rustdoc` for `item()`.
+        *   **Step 1.B.3: Implement Basic Random Creation (`rand`, `randn`)**
+            *   [✅] Implement `rand(shape)` and `randn(shape)` creation functions (likely in `src/tensor/create.rs`). Use a simple RNG initially (e.g., `rand` crate). Specify `DType` (default F32).
             *   [ ] Implement `item<T: Copy>()` method to extract a single scalar value from a 0-dimensional tensor (or tensor with 1 element). Should return `Result<T, NeuraRustError>`.
             *   [ ] Add tests for correct extraction and error handling (non-scalar tensor).
             *   [ ] Add `rustdoc` for `item()`.

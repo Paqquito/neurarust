@@ -25,6 +25,8 @@ pub mod max;
 
 // Re-export the adapted reduction operations using pub(crate)
 pub(crate) use sum::sum_op;
+// pub(crate) use mean::mean_op;
+// pub(crate) use max::max_op;
 
 // Remove old/incorrect exports
 // pub use sum::sum_axes;

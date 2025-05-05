@@ -41,8 +41,30 @@ mod tests {
     fn test_div_by_zero() -> Result<(), NeuraRustError> {
         let a = Tensor::new(vec![1.0f32], vec![1])?;
         let b = Tensor::new(vec![0.0f32], vec![1])?;
-        let result = div_op(&a, &b);
-        assert!(matches!(result, Err(NeuraRustError::DivisionByZero)));
+        // L'opération doit maintenant réussir (Ok) car la division flottante ne panique pas
+        let result_tensor = div_op(&a, &b)?;
+
+        // Vérifier que la valeur résultante est infinie
+        let data = result_tensor.get_f32_data().expect("Failed to get data");
+        assert_eq!(data.len(), 1);
+        assert!(data[0].is_infinite(), "Result should be infinite");
+        assert!(data[0].is_sign_positive(), "Result should be positive infinity");
+
+        // Test avec -1.0 / 0.0
+        let a_neg = Tensor::new(vec![-1.0f32], vec![1])?;
+        let result_tensor_neg = div_op(&a_neg, &b)?;
+        let data_neg = result_tensor_neg.get_f32_data().expect("Failed to get data");
+        assert_eq!(data_neg.len(), 1);
+        assert!(data_neg[0].is_infinite(), "Result should be infinite");
+        assert!(data_neg[0].is_sign_negative(), "Result should be negative infinity");
+
+        // Test avec 0.0 / 0.0 (devrait être NaN)
+        let a_zero = Tensor::new(vec![0.0f32], vec![1])?;
+        let result_tensor_nan = div_op(&a_zero, &b)?;
+        let data_nan = result_tensor_nan.get_f32_data().expect("Failed to get data");
+        assert_eq!(data_nan.len(), 1);
+        assert!(data_nan[0].is_nan(), "Result should be NaN");
+
         Ok(())
     }
 
