@@ -15,23 +15,44 @@ use crate::tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIter
 use std::fmt::Debug;
 
 // --- Backward Operation Structure ---
+
+/// Backward pass structure for the element-wise addition operation.
+///
+/// Stores references to the input tensors (`a_node`, `b_node`) and their original shapes
+/// to handle gradient reduction correctly during backpropagation, especially when
+/// broadcasting was involved in the forward pass.
 #[derive(Debug)]
-struct AddBackward { // Removed <T>
-    // Store context needed for backward pass and graph traversal
+struct AddBackward {
+    /// Reference counted pointer to the first input tensor's data (`a`).
     a_node: Arc<RwLock<TensorData>>,
+    /// Reference counted pointer to the second input tensor's data (`b`).
     b_node: Arc<RwLock<TensorData>>,
+    /// Original shape of the first input tensor (`a`).
     a_shape: Vec<usize>,
+    /// Original shape of the second input tensor (`b`).
     b_shape: Vec<usize>,
-    a_requires_grad: bool, // To know which grads to compute/return
+    /// Flag indicating if the first input tensor (`a`) required gradients.
+    a_requires_grad: bool,
+    /// Flag indicating if the second input tensor (`b`) required gradients.
     b_requires_grad: bool,
 }
 
 // --- Backward Operation Implementation ---
-impl BackwardOp for AddBackward { // Remove <T>
-    /// Computes gradients for the addition operation z = a + b.
-    /// grad(a) = grad_output * dz/da = grad_output * 1 = grad_output
-    /// grad(b) = grad_output * dz/db = grad_output * 1 = grad_output
-    /// Need to handle broadcasting by reducing gradients back to original shapes.
+impl BackwardOp for AddBackward {
+    /// Computes gradients for the addition operation \( z = a + b \).
+    ///
+    /// The local gradients are \( \frac{dz}{da} = 1 \) and \( \frac{dz}{db} = 1 \).
+    /// Using the chain rule, \( \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot 1 \)
+    /// and \( \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot 1 \).
+    ///
+    /// Therefore, the gradient flowing from the output (`grad_output`, representing \( \frac{dL}{dz} \))
+    /// is passed back to both inputs.
+    ///
+    /// **Broadcasting Handling:** If the forward operation involved broadcasting (i.e., `a` and `b`
+    /// had different shapes), the `grad_output` (which has the broadcasted shape) needs to be
+    /// reduced back to the original shapes of `a` and `b` respectively before being assigned
+    /// as their gradients. This reduction is typically done by summing the gradient along the
+    /// broadcasted dimensions, which is handled by the [`reduce_gradient_to_shape`] helper function.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // TODO: Implement gradient reduction for broadcasting
         // let grad_a = reduce_gradient_to_shape(grad_output, &self.a_shape)?;
@@ -51,7 +72,9 @@ impl BackwardOp for AddBackward { // Remove <T>
         Ok(grads)
     }
 
-    fn inputs(&self) -> Vec<*const RwLock<TensorData>> { // Keep non-generic
+    /// Returns the identifiers of the input tensor nodes that required gradients.
+    /// The order corresponds to the inputs `a` and `b` of the forward `add_op`.
+    fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
         // Return IDs of inputs that required grad, in the order (a, b)
         let mut ids = Vec::new();
         if self.a_requires_grad { ids.push(Arc::as_ptr(&self.a_node)); }
@@ -60,9 +83,26 @@ impl BackwardOp for AddBackward { // Remove <T>
     }
 }
 
-/// Helper function to reduce a gradient tensor to match a target shape.
-/// This is used when backpropagating through broadcast operations.
-/// It sums the gradient along the broadcasted dimensions.
+/// Reduces a gradient tensor to match a target shape, typically the shape of an input
+/// tensor before broadcasting occurred in the forward pass.
+///
+/// When broadcasting is used in a forward operation (e.g., adding a `[3, 1]` tensor to a `[3, 5]` tensor),
+/// the output gradient will have the broadcasted shape (e.g., `[3, 5]`). To compute the gradient
+/// with respect to the original input (e.g., `[3, 1]`), we need to sum the output gradient
+/// along the dimensions that were expanded during broadcasting.
+///
+/// This function identifies these broadcasted dimensions by comparing the `grad` shape
+/// with the `target_shape` and performs a sum reduction along those axes.
+/// It also handles cases where dimensions were added (e.g., broadcasting a `[3]` vector to `[5, 3]`).
+///
+/// # Arguments
+/// * `grad`: The gradient tensor (having the broadcasted shape).
+/// * `target_shape`: The original shape of the input tensor to which the gradient should be reduced.
+///
+/// # Returns
+/// * `Ok(Tensor)`: A new tensor containing the gradient reduced to the `target_shape`.
+/// * `Err(NeuraRustError)`: If the shapes are fundamentally incompatible for reduction or if an
+///                        internal error occurs during sum or reshape operations.
 fn reduce_gradient_to_shape(
     grad: &Tensor,
     target_shape: &[usize],
@@ -124,7 +164,43 @@ fn reduce_gradient_to_shape(
 
 // --- Forward Operation ---
 
-/// Performs element-wise addition of two tensors, supporting broadcasting.
+/// Performs element-wise addition of two tensors (`a + b`), supporting broadcasting.
+///
+/// Computes the sum of two tensors, element by element. If the tensors have different
+/// but compatible shapes, broadcasting rules are applied (similar to NumPy/PyTorch)
+/// to make their shapes match before performing the addition.
+///
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `a`: The first input `Tensor`.
+/// * `b`: The second input `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing the element-wise sum, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` if:
+/// - Tensors are not on the CPU (`DeviceMismatch`).
+/// - Tensors have different `DType`s (`DataTypeMismatch`).
+/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
+/// - An internal error occurs during computation or memory allocation.
+///
+/// # Broadcasting Example
+/// ```text
+/// a (shape [3, 1]): [[1], [2], [3]]
+/// b (shape [  5]): [10, 20, 30, 40, 50]
+/// broadcast_shapes(a, b) -> [3, 5]
+/// a broadcasts to: [[1, 1, 1, 1, 1],
+///                  [2, 2, 2, 2, 2],
+///                  [3, 3, 3, 3, 3]]
+/// b broadcasts to: [[10, 20, 30, 40, 50],
+///                  [10, 20, 30, 40, 50],
+///                  [10, 20, 30, 40, 50]]
+/// result (shape [3, 5]): [[11, 21, 31, 41, 51],
+///                      [12, 22, 32, 42, 52],
+///                      [13, 23, 33, 43, 53]]
+/// ```
 pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     // Lock data for reading
     let a_guard = a.read_data();

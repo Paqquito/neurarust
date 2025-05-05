@@ -11,17 +11,34 @@ use std::fmt::Debug;
 use std::sync::RwLock;
 
 // --- Backward Operation Structure ---
+
+/// Backward pass structure for the element-wise subtraction operation.
+///
+/// Stores references to input tensor nodes and flags indicating if they require gradients.
 #[derive(Debug)]
 struct SubBackward {
-    // Store Arcs directly for thread safety and graph linkage
+    /// Reference counted pointer to the first input tensor's data (`a` in `a - b`).
     a_node: Arc<RwLock<TensorData>>,
+    /// Reference counted pointer to the second input tensor's data (`b` in `a - b`).
     b_node: Arc<RwLock<TensorData>>,
-    a_requires_grad: bool, // Store flags to return only necessary pointers in inputs()
+    /// Flag indicating if the first input (`a`) required gradients.
+    a_requires_grad: bool,
+    /// Flag indicating if the second input (`b`) required gradients.
     b_requires_grad: bool,
 }
 
 // --- Backward Operation Implementation ---
 impl BackwardOp for SubBackward {
+    /// Computes gradients for the subtraction operation \( z = a - b \).
+    ///
+    /// Using the chain rule \( \frac{dL}{dx} = \frac{dL}{dz} \cdot \frac{dz}{dx} \), the gradients are:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot 1 = \frac{dL}{dz} \\]
+    /// \\[ \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot (-1) = - \frac{dL}{dz} \\]
+    ///
+    /// Where \( \frac{dL}{dz} \) is `grad_output`.
+    ///
+    /// **Broadcasting Handling:** If broadcasting occurred, gradients are reduced back to the
+    /// original input shapes using [`Tensor::reduce_to_shape`](../../tensor/broadcast_utils/struct.Tensor.html#method.reduce_to_shape).
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut grads = Vec::with_capacity(2);
 
@@ -42,6 +59,8 @@ impl BackwardOp for SubBackward {
         Ok(grads)
     }
 
+    /// Returns the identifiers of the input tensor nodes that required gradients.
+    /// The order corresponds to the inputs `a` and `b` of the forward `sub_op`.
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
         // Return pointers only for inputs that required grad
         let mut ids = Vec::new();
@@ -52,6 +71,27 @@ impl BackwardOp for SubBackward {
 }
 
 // --- Forward Operation ---
+
+/// Performs element-wise subtraction of two tensors (`a - b`), supporting broadcasting.
+///
+/// Computes the difference between two tensors, element by element. If the tensors have different
+/// but compatible shapes, broadcasting rules are applied.
+///
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `a`: The first input `Tensor` (minuend).
+/// * `b`: The second input `Tensor` (subtrahend).
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing the element-wise difference, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` if:
+/// - Tensors are not on the CPU (`DeviceMismatch`).
+/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
+/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
+/// - An internal error occurs during computation or memory allocation.
 pub fn sub_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock tensor A data for reading".to_string()))?;
     let b_guard = b.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock tensor B data for reading".to_string()))?;

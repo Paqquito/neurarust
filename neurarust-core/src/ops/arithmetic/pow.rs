@@ -14,24 +14,45 @@ use std::sync::{Arc, RwLock};
 
 // --- PowBackward Definition ---
 
-/// Backward operation context for `pow_op`.
+/// Backward pass structure for the element-wise power operation (`base` ^ `exponent`).
+///
+/// Stores clones of the base, exponent, and output tensors, along with node references
+/// and requirement flags, needed for calculating gradients and managing the graph.
 #[derive(Debug)]
 struct PowBackward {
+    /// Reference counted pointer to the base tensor's data.
     base_node: Arc<RwLock<TensorData>>,
+    /// Reference counted pointer to the exponent tensor's data.
     exponent_node: Arc<RwLock<TensorData>>,
+    /// Clone of the base tensor.
     base_clone: Tensor,
+    /// Clone of the exponent tensor.
     exponent_clone: Tensor,
+    /// Clone of the output tensor (result of the forward pass, `z = base^exponent`).
     output_clone: Tensor,
+    /// Flag indicating if the base tensor required gradients.
     base_requires_grad: bool,
+    /// Flag indicating if the exponent tensor required gradients.
     exponent_requires_grad: bool,
 }
 
 // --- BackwardOp Implementation for PowBackward ---
 
 impl BackwardOp for PowBackward {
-    /// Computes gradient for the power operation z = base^exponent.
-    /// grad(base) = grad_output * exponent * base^(exponent - 1)
-    /// grad(exponent) = grad_output * z * ln(base)
+    /// Computes gradients for the power operation \( z = a^b \) (base `a`, exponent `b`).
+    ///
+    /// Using the chain rule \( \frac{dL}{dx} = \frac{dL}{dz} \cdot \frac{dz}{dx} \), the gradients are:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot (b \cdot a^{b-1}) \\]
+    /// \\[ \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot (a^b \cdot \ln(a)) = \frac{dL}{dz} \cdot (z \cdot \ln(a)) \\]
+    ///
+    /// Where \( \frac{dL}{dz} \) is `grad_output`.
+    ///
+    /// **Broadcasting Handling:** If broadcasting occurred, gradients are reduced back to the
+    /// original input shapes using [`Tensor::reduce_to_shape`](../../tensor/broadcast_utils/struct.Tensor.html#method.reduce_to_shape).
+    ///
+    /// **Numerical Stability:** The gradient w.r.t. the exponent involves \( \ln(a) \).
+    /// If the base \( a \) contains non-positive values, this can result in `NaN` or infinite gradients.
+    /// The forward `pow_op` might restrict inputs in the future, but currently relies on `ln_op` propagating `NaN`.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut grads = Vec::with_capacity(2);
 
@@ -84,6 +105,8 @@ impl BackwardOp for PowBackward {
         Ok(grads)
     }
 
+    /// Returns the identifiers of the input tensor nodes that required gradients.
+    /// The order corresponds to the inputs `base` and `exponent`.
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
         let mut ids = Vec::new();
         if self.base_requires_grad { ids.push(Arc::as_ptr(&self.base_node)); }
@@ -94,7 +117,24 @@ impl BackwardOp for PowBackward {
 
 // --- pow_kernel (Private Calculation Core) ---
 
-/// Private kernel for element-wise power calculation with broadcasting.
+/// **(Internal)** Private kernel for element-wise power calculation with broadcasting.
+///
+/// This function performs the core `base.powf(exponent)` calculation for each element,
+/// handling broadcasting logic manually by iterating through the output shape and calculating
+/// the corresponding physical indices in the potentially broadcasted input buffers.
+///
+/// # Type Constraints
+/// Requires the generic type `T` to implement `Float`, `Copy`, `Zero`, and `Debug`.
+///
+/// # Arguments
+/// * `output_shape`: The shape of the output tensor after broadcasting.
+/// * `base_data`, `exponent_data`: Slices containing the underlying data for base and exponent.
+/// * `base_shape`, `exponent_shape`: Original shapes of base and exponent tensors.
+/// * `base_strides`, `exponent_strides`: Strides of base and exponent tensors.
+/// * `base_offset`, `exponent_offset`: Starting offsets within the data buffers.
+///
+/// # Returns
+/// A `Result` containing a `Vec<T>` with the computed output data, or a `NeuraRustError` if an index is out of bounds.
 fn pow_kernel<T>(
     output_shape: &[usize],
     base_data: &[T],
@@ -160,8 +200,31 @@ where
 
 // --- pow_op Implementation (Public API + Autograd Setup) ---
 
-/// Computes element-wise power of `base` raised to `exponent`.
-/// Supports broadcasting.
+/// Computes `base` raised to the power of `exponent` element-wise (`base` ^ `exponent`).
+///
+/// Supports broadcasting between `base` and `exponent` if their shapes are compatible.
+///
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `base`: The base `Tensor`.
+/// * `exponent`: The exponent `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing `base` raised to the power of `exponent`,
+/// or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` if:
+/// - Tensors are not on the CPU (`DeviceMismatch`).
+/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
+/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
+/// - An internal error occurs during computation or memory allocation.
+///
+/// **Note on Domain:** Standard floating-point `powf` behavior applies. For example,
+/// a negative base raised to a non-integer exponent can result in `NaN`.
+/// The gradient calculation w.r.t the exponent also involves \( \ln(\text{base}) \),
+/// which is undefined for non-positive bases.
 pub fn pow_op(base: &Tensor, exponent: &Tensor) -> Result<Tensor, NeuraRustError> {
     let base_guard = base.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock base data".to_string()))?;
     let exponent_guard = exponent.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock exponent data".to_string()))?;

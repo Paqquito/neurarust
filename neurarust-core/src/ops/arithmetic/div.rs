@@ -14,26 +14,46 @@ use std::sync::{Arc, RwLock};
 use num_traits::Zero;
 
 // --- Backward Operation Structure ---
+
+/// Backward pass structure for the element-wise division operation.
+///
+/// Stores references to input tensors (`a_node`, `b_node`) and a clone of `b` (`b_tensor_clone`)
+/// needed for calculating gradients. Also stores flags indicating if inputs required gradients.
 #[derive(Debug)]
 struct DivBackward {
+    /// Reference counted pointer to the numerator tensor's data (`a`).
     a_node: Arc<RwLock<TensorData>>,
+    /// Reference counted pointer to the denominator tensor's data (`b`).
     b_node: Arc<RwLock<TensorData>>,
+    /// Clone of the denominator tensor (`b`), needed for gradient calculation.
     b_tensor_clone: Tensor,
+    /// Flag indicating if the numerator tensor (`a`) required gradients.
     a_requires_grad: bool,
+    /// Flag indicating if the denominator tensor (`b`) required gradients.
     b_requires_grad: bool,
 }
 
 // --- Backward Operation Implementation ---
 impl BackwardOp for DivBackward {
+    /// Computes gradients for the division operation \( z = a / b \).
+    ///
+    /// Using the chain rule \( \frac{dL}{dx} = \frac{dL}{dz} \cdot \frac{dz}{dx} \), the gradients are:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} = \frac{dL}{dz} \cdot \frac{1}{b} \\]
+    /// \\[ \frac{dL}{db} = \frac{dL}{dz} \cdot \frac{dz}{db} = \frac{dL}{dz} \cdot \left( -\frac{a}{b^2} \right) \\]
+    ///
+    /// Where \( \frac{dL}{dz} \) is `grad_output`.
+    ///
+    /// **Broadcasting Handling:** Similar to addition, if broadcasting occurred, the computed gradients
+    /// (dL/da and dL/db) are reduced to the original shapes of `a` and `b` using the
+    /// [`reduce_to_shape`](../broadcast_utils/fn.reduce_to_shape.html) helper function.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // For z = a / b:
-        // grad(a) = grad_output * dz/da = grad_output * (1 / b)
-        // grad(b) = grad_output * dz/db = grad_output * (-a / b^2)
         let mut grads = Vec::with_capacity(2);
 
         if self.a_requires_grad {
             let a_guard = self.a_node.read().map_err(|_| NeuraRustError::InternalError("Failed to lock A node in DivBackward".to_string()))?;
+            // grad(a) = grad_output / b
             let grad_a_unreduced = div_op(grad_output, &self.b_tensor_clone)?;
+            // Reduce gradient if broadcasting occurred using the Tensor method
             let grad_a = grad_a_unreduced.reduce_to_shape(&a_guard.shape)?;
             grads.push(grad_a);
         }
@@ -42,10 +62,12 @@ impl BackwardOp for DivBackward {
             let b_guard = self.b_node.read().map_err(|_| NeuraRustError::InternalError("Failed to lock B node in DivBackward".to_string()))?;
             let a_tensor = Tensor { data: self.a_node.clone() };
             
+            // grad(b) = grad_output * (-a / b^2)
             let b_squared = mul_op(&self.b_tensor_clone, &self.b_tensor_clone)?;
             let neg_a = neg_op(&a_tensor)?;
             let inner_term = div_op(&neg_a, &b_squared)?;
             let grad_b_unreduced = mul_op(grad_output, &inner_term)?;
+             // Reduce gradient if broadcasting occurred using the Tensor method
             let grad_b = grad_b_unreduced.reduce_to_shape(&b_guard.shape)?;
             grads.push(grad_b);
         }
@@ -53,6 +75,8 @@ impl BackwardOp for DivBackward {
         Ok(grads)
     }
 
+    /// Returns the identifiers of the input tensor nodes that required gradients.
+    /// The order corresponds to the inputs `a` (numerator) and `b` (denominator).
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
         let mut ids = Vec::new();
         if self.a_requires_grad { ids.push(Arc::as_ptr(&self.a_node)); }
@@ -62,6 +86,28 @@ impl BackwardOp for DivBackward {
 }
 
 // --- Forward Operation ---
+
+/// Performs element-wise division of two tensors (`a / b`), supporting broadcasting.
+///
+/// Computes the division of `a` by `b`, element by element. If the tensors have different
+/// but compatible shapes, broadcasting rules are applied.
+///
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `a`: The numerator `Tensor`.
+/// * `b`: The denominator `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing the element-wise division, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` if:
+/// - Tensors are not on the CPU (`DeviceMismatch`).
+/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
+/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
+/// - Division by zero occurs (`DivisionByZero`).
+/// - An internal error occurs during computation or memory allocation.
 pub fn div_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock tensor A data for reading".to_string()))?;
     let b_guard = b.data.read().map_err(|_| NeuraRustError::InternalError("Failed to lock tensor B data for reading".to_string()))?;

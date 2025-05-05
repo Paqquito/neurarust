@@ -11,27 +11,31 @@ use crate::types::DType;
 
 // --- Backward Operation Structure ---
 
-/// Backward operation for the negation function.
+/// Backward pass structure for the element-wise negation operation.
 #[derive(Debug)]
 struct NegBackward {
-    // Store the input tensor ID for the graph traversal
+    /// Reference counted pointer to the input tensor's data for graph linkage.
     input_node: Arc<RwLock<TensorData>>,
 }
 
 // --- Backward Operation Implementation ---
 
 impl BackwardOp for NegBackward {
-    /// Computes gradient for the negation operation z = -a.
-    /// grad(a) = grad_output * (-1) = -neg_output
+    /// Computes the gradient for the negation operation \( z = -a \).
+    ///
+    /// Using the chain rule \( \frac{dL}{da} = \frac{dL}{dz} \cdot \frac{dz}{da} \),
+    /// where \( \frac{dz}{da} = -1 \), the gradient is:
+    /// \\[ \frac{dL}{da} = \frac{dL}{dz} \cdot (-1) = - \frac{dL}{dz} \\]
+    ///
+    /// This method simply negates the incoming gradient (`grad_output`).
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         // grad_a = -grad_output
-        // Use the adapted neg_op which preserves DType
+        // Use the neg_op itself for the calculation, it handles autograd context correctly.
         let grad_a = neg_op(grad_output)?;
         Ok(vec![grad_a])
     }
 
-    // inputs() method is no longer needed with the simplified Variable approach for now.
-    // If needed later for graph construction, it would return pointers/IDs of input TensorData.
+    /// Returns the identifier of the input tensor node.
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
         // Return the pointer to the stored input node
         vec![Arc::as_ptr(&self.input_node)]
@@ -40,8 +44,24 @@ impl BackwardOp for NegBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise negation on a tensor.
-/// Handles F32 and F64 tensors on CPU.
+/// Performs element-wise negation (`-input`) on a tensor.
+///
+/// Computes the negative of each element in the input tensor.
+/// Supports `DType::F32` and `DType::F64` tensors on the CPU.
+///
+/// This operation supports automatic differentiation.
+///
+/// # Arguments
+/// * `input`: The input `Tensor`.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` with the negated values, or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError` if:
+/// - The tensor is not on the CPU (`DeviceMismatch`).
+/// - The tensor's `DType` is not F32 or F64 (`UnsupportedOperation`).
+/// - An internal error occurs.
 pub fn neg_op(input: &Tensor) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),

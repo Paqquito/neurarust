@@ -1,3 +1,12 @@
+//!
+//! # Element-wise Arithmetic Operations
+//!
+//! This module provides functions for performing basic element-wise arithmetic
+//! operations on tensors, such as addition, subtraction, multiplication, division,
+//! negation, and exponentiation.
+//!
+//! These operations typically support broadcasting and automatic differentiation.
+
 // Export foundational arithmetic operations directly
 pub mod add;
 pub mod div;
