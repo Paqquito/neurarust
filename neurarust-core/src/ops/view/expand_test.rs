@@ -2,6 +2,7 @@
 use crate::ops::view::expand::expand_op; // Import the op function
 use crate::tensor::{self, Tensor}; // Import tensor for creation funcs
 use crate::error::NeuraRustError;
+#[allow(unused_imports)] // Allow unused as check_grad is only in ignored tests
 use crate::autograd::grad_check::{check_grad, GradCheckError};
  // If needed for manual checks
 
