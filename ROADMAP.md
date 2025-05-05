@@ -101,11 +101,11 @@
                         *   [ ] Refine: Modify the trait or pattern.
                         *   [ ] Revert/Postpone: If the abstraction proves too complex or doesn't yield benefits now.
                 *   **Step 1.A.9.4.6: Apply Generic Kernel Pattern Iteratively (If PoC Successful)**
-                    *   [ ] Gradually refactor other arithmetic op kernels (`sub`, `mul`, `div`, `pow`, `ln`, etc.) using the established pattern.
-                    *   [ ] Refactor reduction kernels (`sum_kernel`, `mean_kernel`, `max_kernel`).
-                    *   [ ] Refactor comparison kernels (`equal_op`).
+                    *   [✅] Gradually refactor other arithmetic op kernels (`sub`, `mul`, `div`, `pow`, `ln`, etc.) using the established pattern.
+                    *   [✅] Refactor reduction kernels (`sum_kernel`, `mean_kernel`, `max_kernel`).
+                    *   [✅] Refactor comparison kernels (`equal_op`).
                     *   [ ] Refactor other relevant kernels as identified.
-                    *   [ ] Ensure tests pass after each refactoring step.
+                    *   [✅] Ensure tests pass after each refactoring step.
         *   **Step 1.A.10: Refactoring Implementation (Iterative)**
             *   [✅] (If applicable) Implement refactoring for Candidate 1, ensuring tests pass. -> Done for arithmetic ops.
             *   [✅] (If applicable) Implement refactoring for Candidate 2, ensuring tests pass. -> Done for arithmetic ops.

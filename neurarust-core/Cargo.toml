@@ -10,7 +10,7 @@ thiserror = "1.0"
 log = "0.4"
 num-traits = "0.2"
 # Add approx for float comparisons in tests (and grad check)
-approx = "0.5" # <-- AJOUTER CETTE LIGNE
+approx = "0.5"
 rand = "0.8" # For random tensor creation
 rand_distr = "0.4" # For specific random distributions (randn)
 
