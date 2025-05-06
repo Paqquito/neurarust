@@ -201,8 +201,8 @@
             *   [✅] Implement `Tensor::sub_`, similar to `add_`.
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.3: Implement `mul_`**
-            *   [ ] Implement `Tensor::mul_`, similar to `add_`.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Implement `Tensor::mul_`, similar to `add_`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.4: Implement `div_`**
             *   [ ] Implement `Tensor::div_`, similar to `add_`.
             *   [ ] Add tests and `rustdoc`.

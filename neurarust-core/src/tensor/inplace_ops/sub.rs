@@ -4,7 +4,7 @@ use crate::{
     // device::StorageDevice, // Not directly used here, check if tensor.device() is needed or handled by Tensor methods
     types::DType,
     tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64},
-    tensor::utils::{broadcast_shapes},
+    tensor::utils::broadcast_shapes,
 };
 use std::sync::Arc;
 use std::ops::{Deref, DerefMut};

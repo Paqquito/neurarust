@@ -1,2 +1,6 @@
+#[cfg(test)]
 pub mod add_test;
-pub mod sub_test; 
+#[cfg(test)]
+pub mod sub_test;
+#[cfg(test)]
+pub mod mul_test; 

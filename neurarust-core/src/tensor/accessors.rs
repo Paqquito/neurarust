@@ -280,6 +280,83 @@ impl Tensor {
         }
     }
 
+    /// Accesses a single element at the specified indices as `f64`.
+    ///
+    /// Performs bounds checking for each dimension.
+    /// If the tensor's `DType` is `F32`, the value is converted to `f64`.
+    ///
+    /// # Arguments
+    /// * `indices`: A slice representing the coordinates of the element to access.
+    ///   The length of the slice must match the rank of the tensor.
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if:
+    /// - The number of indices does not match the tensor's rank (`RankMismatch`).
+    /// - Any index is out of bounds for its corresponding dimension (`IndexOutOfBounds`).
+    /// - The tensor's data type is neither `DType::F32` nor `DType::F64` (`DataTypeMismatch`).
+    /// - The tensor is stored on the `GPU` (`DeviceMismatch`).
+    /// - An internal error occurs during offset calculation.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// let t_f64 = Tensor::new_f64(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3]).unwrap();
+    /// assert_eq!(t_f64.at_f64(&[0, 1]).unwrap(), 2.0);
+    /// assert_eq!(t_f64.at_f64(&[1, 2]).unwrap(), 6.0);
+    ///
+    /// let t_f32 = Tensor::new(vec![1.5f32, 2.5f32], vec![2]).unwrap();
+    /// assert!((t_f32.at_f64(&[0]).unwrap() - 1.5).abs() < 1e-9);
+    /// ```
+    pub fn at_f64(&self, indices: &[usize]) -> Result<f64, NeuraRustError> {
+        let guard = self.read_data();
+        let rank = guard.shape.len();
+
+        if indices.len() != rank {
+            return Err(NeuraRustError::RankMismatch {
+                expected: rank,
+                actual: indices.len(),
+            });
+        }
+
+        for (dim, &index) in indices.iter().enumerate() {
+            if index >= guard.shape[dim] {
+                return Err(NeuraRustError::IndexOutOfBounds {
+                    index: indices.to_vec(),
+                    shape: guard.shape.clone(),
+                });
+            }
+        }
+
+        let mut physical_offset = guard.offset;
+        for (dim, &index) in indices.iter().enumerate() {
+            physical_offset += index * guard.strides[dim];
+        }
+
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::F64(arc_vec)) => {
+                let data: &Vec<f64> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::InternalError(
+                        format!("Calculated physical offset {} is out of buffer bounds {} in at_f64 for F64 tensor", physical_offset, data.len())
+                    ));
+                }
+                Ok(data[physical_offset])
+            }
+            Buffer::Cpu(CpuBuffer::F32(arc_vec)) => {
+                let data: &Vec<f32> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::InternalError(
+                        format!("Calculated physical offset {} is out of buffer bounds {} in at_f64 for F32 tensor", physical_offset, data.len())
+                    ));
+                }
+                Ok(data[physical_offset] as f64) // Convert F32 to F64
+            }
+            Buffer::Gpu { .. } => {
+                Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "at_f64() - GPU not yet supported".to_string() })
+            }
+        }
+    }
+
     /// Acquires a read lock on the tensor's internal [`TensorData`](../tensor_data/struct.TensorData.html).
     ///
     /// This returns a read guard, allowing immutable access to the fields of `TensorData`
