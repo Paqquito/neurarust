@@ -81,6 +81,64 @@ impl Buffer {
         }
     }
     
+    /// Attempts to get a mutable reference to the underlying `Vec<f32>`.
+    ///
+    /// This operation requires exclusive access to the buffer. It will fail if the buffer
+    /// is shared (i.e., referenced by multiple tensors/views).
+    ///
+    /// Returns `Ok(&mut Vec<f32>)` if the buffer is `Cpu(F32)` and not shared.
+    /// Returns `Err(NeuraRustError)` otherwise (shared buffer, wrong device, wrong dtype).
+    pub fn try_get_cpu_f32_mut(&mut self) -> Result<&mut Vec<f32>, NeuraRustError> {
+        let op_name = "try_get_cpu_f32_mut";
+        match self {
+            Buffer::Cpu(CpuBuffer::F32(data_arc)) => {
+                match Arc::get_mut(data_arc) {
+                    Some(vec_mut) => Ok(vec_mut),
+                    None => Err(NeuraRustError::BufferSharedError { operation: op_name.to_string() })
+                }
+            }
+            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::F64,
+                operation: op_name.to_string(),
+            }),
+            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: *device,
+                operation: op_name.to_string(),
+            }),
+        }
+    }
+
+    /// Attempts to get a mutable reference to the underlying `Vec<f64>`.
+    ///
+    /// This operation requires exclusive access to the buffer. It will fail if the buffer
+    /// is shared (i.e., referenced by multiple tensors/views).
+    ///
+    /// Returns `Ok(&mut Vec<f64>)` if the buffer is `Cpu(F64)` and not shared.
+    /// Returns `Err(NeuraRustError)` otherwise (shared buffer, wrong device, wrong dtype).
+    pub fn try_get_cpu_f64_mut(&mut self) -> Result<&mut Vec<f64>, NeuraRustError> {
+        let op_name = "try_get_cpu_f64_mut";
+        match self {
+            Buffer::Cpu(CpuBuffer::F64(data_arc)) => {
+                 match Arc::get_mut(data_arc) {
+                    Some(vec_mut) => Ok(vec_mut),
+                    None => Err(NeuraRustError::BufferSharedError { operation: op_name.to_string() })
+                 }
+            }
+            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::F32,
+                operation: op_name.to_string(),
+            }),
+             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: *device,
+                operation: op_name.to_string(),
+            }),
+        }
+    }
+
     // TODO: Add similar try_get methods for other DTypes (I64, Bool, etc.) when added.
 }
 

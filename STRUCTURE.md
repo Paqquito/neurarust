@@ -3,6 +3,8 @@
 ├── Cargo.toml
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
+├── examples
+│   └── basic_mlp_cpu.rs
 ├── Goals copy.md
 ├── Goals.md
 ├── LICENSE
@@ -124,4 +126,4 @@
 ├── ROADMAP.md
 └── STRUCTURE.md
 
-21 directories, 104 files
+22 directories, 105 files

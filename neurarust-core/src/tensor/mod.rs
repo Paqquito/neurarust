@@ -22,6 +22,7 @@ mod traits; // Keep traits module declared
 mod accessors; // Ensure accessors module is declared
 mod reduction_methods; // Declare the new module
 mod view_methods; // Declare view methods
+mod inplace_arithmetic_methods; // Added inplace_arithmetic_methods module
 
 pub mod create; // Make the create module public
 

@@ -191,12 +191,12 @@
     *   🎯 **Goal:** Implement essential in-place arithmetic operations for performance and memory efficiency, critical for PyTorch parity.
     *   **Detailed Steps:**
         *   **Step 1.D.1: Implement `add_`**
-            *   [ ] Implement `Tensor::add_(&mut self, other: &Tensor)`.
-            *   [ ] Handle broadcasting.
-            *   [ ] Modify buffer directly.
-            *   [ ] **Autograd Check:** Add runtime check (e.g., `NeuraRustError::InplaceModificationError`) for leaf tensors requiring grad or nodes needed for backward.
-            *   [ ] Add tests (correctness, broadcasting, autograd error).
-            *   [ ] Add `rustdoc`.
+            *   [✅] Implement `Tensor::add_(&mut self, other: &Tensor)`.
+            *   [✅] Handle broadcasting.
+            *   [✅] Modify buffer directly.
+            *   [✅] **Autograd Check:** Add runtime check (e.g., `NeuraRustError::InplaceModificationError`) for leaf tensors requiring grad or nodes needed for backward.
+            *   [✅] Add tests (correctness, broadcasting, autograd error).
+            *   [✅] Add `rustdoc`.
         *   **Step 1.D.2: Implement `sub_`**
             *   [ ] Implement `Tensor::sub_`, similar to `add_`.
             *   [ ] Add tests and `rustdoc`.

@@ -220,5 +220,27 @@ pub enum NeuraRustError {
         operation: String,
     },
 
+    /// Error indicating an attempt to perform an in-place operation that is not allowed,
+    /// typically because the tensor requires gradients.
+    #[error("In-place modification error during {operation}: {reason}")]
+    InplaceModificationError {
+        operation: String,
+        reason: String,
+    },
+
+    /// Error indicating that an operation is attempted on an unsupported or unavailable device.
+    #[error("Operation {operation} unsupported or unavailable on device {device:?}")]
+    UnsupportedDevice {
+        device: StorageDevice,
+        operation: String,
+    },
+
+    /// Error indicating an operation (like in-place modification) cannot be performed
+    /// because the underlying data buffer is shared by multiple tensors (views).
+    #[error("Operation {operation} failed because the buffer is shared (e.g., by views).")]
+    BufferSharedError {
+        operation: String,
+    },
+
     // Add more specific errors as needed
 }
