@@ -159,10 +159,22 @@ where
              a_req_grad_clone,
              b_req_grad_clone,
          );
+         println!("[APPLY_BINARY_OP] Built backward_op_arc: Ptr={:?}", Arc::as_ptr(&backward_op_arc));
 
         let mut output_guard = output_tensor.write_data();
         output_guard.requires_grad = true;
         output_guard.grad_fn = Some(backward_op_arc);
+        // Log pour vérifier immédiatement après écriture
+        if let Some(stored_arc) = &output_guard.grad_fn {
+             println!("[APPLY_BINARY_OP] Immediately after store: Stored grad_fn_arc Ptr={:?}", Arc::as_ptr(stored_arc));
+        } else {
+             println!("[APPLY_BINARY_OP] Immediately after store: Stored grad_fn is None (ERROR)");
+        }
+        drop(output_guard); // Relâcher le verrou pour lire l'ID
+
+        // Log l'ID du tenseur créé
+        let output_node_id = Arc::as_ptr(&output_tensor.data);
+        println!("[APPLY_BINARY_OP] Output tensor node_id: {:?}", output_node_id);
     }
 
     Ok(output_tensor)

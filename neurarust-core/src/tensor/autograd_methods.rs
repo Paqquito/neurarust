@@ -1,13 +1,17 @@
+use crate::autograd::backward_op::BackwardOp;
 use crate::autograd::graph::{topological_sort, NodeId};
-use crate::autograd::BackwardOp;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
+use crate::types::DType;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
-use crate::types::DType;
+
+// #[cfg(test)]
+// use crate::backend::cpu::CpuStorage; // Commented out as its path or existence is unclear
 
 /// This `impl` block provides methods related to automatic differentiation (autograd).
+/// It includes the core backward pass logic for gradient computation.
 impl Tensor {
     /// Checks if this tensor requires gradient computation.
     ///
@@ -191,12 +195,8 @@ impl Tensor {
     /// - An error occurs during the `backward` call of an operation node in the graph.
     /// - A shape mismatch occurs during gradient accumulation.
     pub fn backward(&self, gradient: Option<Tensor>) -> Result<(), NeuraRustError> {
-        if !self.requires_grad() {
-            return Ok(());
-        }
-
         let grad_init = match gradient {
-            Some(g) => {
+            Some(ref g) => {
                 let self_shape = self.shape();
                 let g_shape = g.shape();
                 if g_shape != self_shape {
@@ -213,7 +213,7 @@ impl Tensor {
                         self_device, g_device
                     )));
                 }
-                g
+                g.clone()
             }
             None => {
                 let s_shape = self.shape();
@@ -237,42 +237,102 @@ impl Tensor {
             }
         };
 
-        let node_id_type_alias: NodeId = Arc::as_ptr(&self.data);
+        let start_node_id = Arc::as_ptr(&self.data);
+        println!("[BACKWARD_FN] Tensor.backward() called for start_node_id: {:?}, is_leaf: {}, with initial gradient: {:?}", start_node_id, self.grad_fn().is_none(), gradient.as_ref().map(|g| (g.shape(), g.dtype())));
+        // Log initial grad_fn pointer of the starting tensor
+        // Removed initial read log as it's less relevant now
+
+        if !self.requires_grad() {
+            println!("[BACKWARD_FN] Tensor does not require grad. Skipping backward pass.");
+            return Ok(());
+        }
+
         let mut grad_map: HashMap<NodeId, Tensor> = HashMap::new();
-        grad_map.insert(node_id_type_alias, grad_init);
+        grad_map.insert(start_node_id, grad_init.clone());
 
-        let sorted_nodes = topological_sort(node_id_type_alias)?;
+        let mut sorted_nodes = topological_sort(start_node_id)?;
+        println!("[BACKWARD_FN] Topological sort completed. Node count: {}", sorted_nodes.len());
 
+        // --- Key Correction for V5: Reverse the sorted nodes for backward pass ---
+        sorted_nodes.reverse();
+        println!("[BACKWARD_FN] Reversed sorted_nodes for backward pass.");
+
+        // --- Refactored Backward Loop V4 --- 
         for node_id in sorted_nodes {
-            if let Some(accumulated_grad) = grad_map.remove(&node_id) {
-                let tensor_data_ref = unsafe { &*node_id };
-                let guard = tensor_data_ref.read().map_err(|_| {
-                    NeuraRustError::BackwardError("Failed to lock during backward".to_string())
-                })?;
+            println!("[BACKWARD_FN_V4] Processing node_id: {:?}", node_id);
 
-                if let Some(op) = guard.grad_fn.as_ref() {
-                     let grad_fn_clone = Arc::clone(op);
-                     let requires_grad_check = guard.requires_grad;
-                     drop(guard);
+            // Retrieve the gradient accumulated for this node so far from the map.
+            // Use get() as we might need it for both accumulation and propagation.
+            let grad_for_node_option = grad_map.get(&node_id).cloned(); // Clone Option<Tensor>
 
-                     if requires_grad_check {
-                        let input_grads = grad_fn_clone.backward(&accumulated_grad)?;
-                        let input_ids = grad_fn_clone.inputs();
+            // Access TensorData to check properties
+            let tensor_data_ref = unsafe { &*node_id };
+            let guard = tensor_data_ref.read().map_err(|_| {
+                NeuraRustError::BackwardError("Failed to lock node during backward V4".to_string())
+            })?;
+            let requires_grad = guard.requires_grad;
+            // let is_leaf = guard.grad_fn.is_none(); // is_leaf check removed from accumulation
+            let grad_fn_option = guard.grad_fn.clone(); // Clone Option<Arc<...>>
+            println!("[BACKWARD_FN_V4] Node {:?}: requires_grad={}", node_id, requires_grad);
+            drop(guard); // Release read lock
 
-                        if input_grads.len() != input_ids.len() {
-                            return Err(NeuraRustError::BackwardError(format!(
-                                "BackwardOp mismatch: {} grads vs {} inputs (op: {:?})",
-                                input_grads.len(), input_ids.len(), grad_fn_clone
-                            )));
-                        }
-
-                        for (input_node_id, grad_to_add) in input_ids.into_iter().zip(input_grads) {
-                             Self::accumulate_grad_static(input_node_id, grad_to_add)?;
-                        }
-                     }
+            // --- Accumulate gradient into .grad field if requires_grad AND gradient exists --- 
+            if requires_grad {
+                if let Some(current_grad) = grad_for_node_option.as_ref() { // Borrow the option
+                    println!("[BACKWARD_FN_V4] Node {:?} requires grad. Accumulating received grad (shape {:?}) into .grad field.", node_id, current_grad.shape());
+                    Self::accumulate_grad_static(node_id, current_grad.clone())?; // Pass clone
+                } else {
+                     println!("[BACKWARD_FN_V4] Node {:?} requires grad but received no grad via map for accumulation.", node_id);
                 }
             }
+
+            // --- Propagate gradient via grad_fn if it exists AND gradient exists --- 
+            if let Some(grad_fn) = grad_fn_option {
+                if let Some(gradient_to_propagate) = grad_for_node_option { // Take ownership of the Option's value
+                     println!("[BACKWARD_FN_V4] Node {:?} has grad_fn. Propagating using accumulated grad (shape {:?})", node_id, gradient_to_propagate.shape());
+                     let op_debug_name = "Op";
+                     let input_ids = grad_fn.inputs();
+
+                     println!("[BACKWARD_FN_V4] Node {:?} ({}) - Calling grad_fn.backward()", node_id, op_debug_name);
+                     let input_grads = grad_fn.backward(&gradient_to_propagate)?;
+                     println!("[BACKWARD_FN_V4] Node {:?} ({}) - grad_fn.backward() returned {} grads.", node_id, op_debug_name, input_grads.len());
+
+                     if input_grads.len() != input_ids.len() {
+                         return Err(NeuraRustError::BackwardError(format!(
+                             "BackwardOp mismatch: {} grads vs {} inputs (op: {:?})",
+                             input_grads.len(), input_ids.len(), grad_fn
+                         )));
+                     }
+
+                     // Accumulate the calculated gradients into the grad_map for parent nodes
+                     for (parent_node_id, grad_for_parent) in input_ids.into_iter().zip(input_grads) {
+                         println!("[BACKWARD_FN_V4]   -> Accumulating grad (shape {:?}) into grad_map for parent: {:?}", grad_for_parent.shape(), parent_node_id);
+                         if parent_node_id.is_null() {
+                              eprintln!("Warning: grad_fn returned null parent_node_id. Skipping.");
+                              continue;
+                         }
+                         // Corrected Logic for grad_map accumulation
+                         if let Some(existing_grad) = grad_map.get_mut(&parent_node_id) {
+                             println!("[BACKWARD_FN_V4]     Parent {:?} already in map, adding gradients.", parent_node_id);
+                             match crate::ops::arithmetic::add_op(existing_grad, &grad_for_parent) {
+                                 Ok(sum_grad) => { *existing_grad = sum_grad; },
+                                 Err(e) => return Err(NeuraRustError::BackwardError(format!("Failed to add gradients in grad_map for node {:?}: {}", parent_node_id, e))),
+                             }
+                         } else {
+                             println!("[BACKWARD_FN_V4]     Parent {:?} not in map, inserting clone.", parent_node_id);
+                             grad_map.insert(parent_node_id, grad_for_parent.clone());
+                         }
+                     }
+                } else {
+                     // Node has grad_fn but no accumulated gradient reached it.
+                     println!("[BACKWARD_FN_V4] Node {:?} has grad_fn but no accumulated gradient to propagate.", node_id);
+                }
+            }
+            // Remove the node's gradient from map after processing? Optional for memory, maybe not needed.
+            // grad_map.remove(&node_id);
         }
+
+        println!("[BACKWARD_FN] Backward pass V4 completed.");
         Ok(())
     }
 
@@ -283,35 +343,46 @@ impl Tensor {
         tensor_data_ptr: *const RwLock<TensorData>,
         grad_to_add: Tensor,
     ) -> Result<(), NeuraRustError> {
-        // Safety: The pointer must be valid and point to a live TensorData's RwLock.
-        // This is ensured by the topological sort and the way nodes are handled in `backward`.
+        // This function handles adding a gradient to the .grad field
+        // It should accumulate ONLY IF the tensor requires grad.
+        // The leaf check was incorrect previously.
+        println!("[ACC_GRAD_STATIC] Called for tensor_data_ptr: {:?}, grad_to_add shape: {:?}, dtype: {:?}", tensor_data_ptr, grad_to_add.shape(), grad_to_add.dtype());
+
         let tensor_data_ref = unsafe { &*tensor_data_ptr };
         let mut guard = tensor_data_ref.write().map_err(|_| NeuraRustError::LockError {
             lock_type: "write".to_string(),
             reason: "Failed to lock TensorData (static) for acc_grad".to_string(),
         })?;
+        println!("[ACC_GRAD_STATIC] Ptr {:?}: Current requires_grad={}, is_leaf={}, existing_grad.is_some()={}", tensor_data_ptr, guard.requires_grad, guard.grad_fn.is_none(), guard.grad.is_some());
 
-        // Only accumulate if it requires grad and is a leaf
-        if !guard.requires_grad || guard.grad_fn.is_some() {
+        // Only accumulate if it requires grad.
+        if !guard.requires_grad { // Removed the is_leaf check here originally, putting it back was wrong.
+            println!("[ACC_GRAD_STATIC] Ptr {:?}: Skipping accumulation (requires_grad: {}).", tensor_data_ptr, guard.requires_grad);
             return Ok(());
         }
 
+        // Safety check removed: accumulate_grad_static can be called on non-leaves by the backward loop
+        // if guard.grad_fn.is_some() {
+        //     eprintln!("ERROR: accumulate_grad_static called on non-leaf node {:?}", tensor_data_ptr);
+        //     return Err(NeuraRustError::InternalError("accumulate_grad_static called on non-leaf node".to_string()));
+        // }
+
         let self_device = guard.device;
         let self_dtype = guard.dtype;
-        let self_shape = guard.shape.clone(); // Clone shape before potentially taking grad
+        let self_shape = guard.shape.clone();
 
         let grad_to_add_device = grad_to_add.device();
         if self_device != grad_to_add_device {
             return Err(NeuraRustError::DeviceMismatch {
                 expected: self_device,
                 actual: grad_to_add_device,
-                operation: "accumulate_grad_static".to_string(),
+                operation: "accumulate_grad_static".to_string(), // Reverted name
             });
         }
         let grad_to_add_dtype = grad_to_add.dtype();
         if self_dtype != grad_to_add_dtype {
              return Err(NeuraRustError::UnsupportedOperation(format!(
-                 "acc_grad static dtype mismatch: self={:?}, grad={:?}",
+                 "acc_grad static dtype mismatch: self={:?}, grad={:?}", // Reverted name
                  self_dtype, grad_to_add_dtype
              )));
         }
@@ -321,6 +392,7 @@ impl Tensor {
                 let existing_shape = existing_grad.shape();
                 let grad_to_add_shape = grad_to_add.shape();
                 if existing_shape != grad_to_add_shape {
+                    println!("[ACC_GRAD_STATIC] Ptr {:?}: ERROR - Shape mismatch adding grad. Expected: {:?}, Got: {:?}", tensor_data_ptr, existing_shape, grad_to_add_shape); // Reverted name
                     return Err(NeuraRustError::GradientAccumulationShapeMismatch {
                         expected: existing_shape,
                         actual: grad_to_add_shape,
@@ -328,16 +400,19 @@ impl Tensor {
                 }
                 let sum_grad = crate::ops::arithmetic::add_op(&existing_grad, &grad_to_add)?;
                 guard.grad = Some(sum_grad);
+                println!("[ACC_GRAD_STATIC] Ptr {:?}: Successfully added to existing grad.", tensor_data_ptr); // Reverted name
             }
             None => {
                  let grad_to_add_shape = grad_to_add.shape();
                  if self_shape != grad_to_add_shape {
+                    println!("[ACC_GRAD_STATIC] Ptr {:?}: ERROR - Shape mismatch for new grad. Expected: {:?}, Got: {:?}", tensor_data_ptr, self_shape, grad_to_add_shape); // Reverted name
                      return Err(NeuraRustError::GradientAccumulationShapeMismatch {
                         expected: self_shape,
                         actual: grad_to_add_shape,
                     });
                  }
                 guard.grad = Some(grad_to_add);
+                println!("[ACC_GRAD_STATIC] Ptr {:?}: Successfully set new grad.", tensor_data_ptr); // Reverted name
             }
         }
         Ok(())

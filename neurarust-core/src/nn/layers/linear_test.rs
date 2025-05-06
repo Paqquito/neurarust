@@ -114,19 +114,20 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Grad check tests need verification/adaptation for non-generic Tensor ops"]
     fn test_linear_bias_grad_f32() -> Result<(), GradCheckError> {
         let linear = Linear::new(3, 2, true, DType::F32).unwrap();
         let input = from_vec_f32([1., 2., 3., 4., 5., 6.].to_vec(), vec![2, 3]).unwrap();
+        
+        let weights_detached = linear.weights.detach();
         
         let bias_param_ref = linear.bias.as_ref().unwrap();
         let bias_tensor_ref = &**bias_param_ref;
 
         let func = |params: &[Tensor]| -> Result<Tensor, NeuraRustError> {
-            let mut temp_linear = Linear::new(3, 2, true, DType::F32)?;
-            temp_linear.weights = linear.weights.clone();
-            temp_linear.bias = Some(Parameter::new(params[0].clone()));
-            let output = temp_linear.forward(&input)?;
+            let current_bias = &params[0];
+            let weights_transposed = crate::ops::view::transpose::transpose_op(&weights_detached, 0, 1)?;
+            let matmul_result = crate::ops::linalg::matmul::matmul_op(&input, &weights_transposed)?;
+            let output = crate::ops::arithmetic::add::add_op(&matmul_result, current_bias)?;
             linear_loss_fn(&output)
         };
         let default_output_grad = ones(&[]).map_err(GradCheckError::TensorError)?;

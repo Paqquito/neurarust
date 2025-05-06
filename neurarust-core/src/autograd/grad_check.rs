@@ -178,11 +178,15 @@ where
 {
     // --- Constants ---
     let two = 2.0f64;
+    println!("[GRAD_CHECK] Entering check_grad");
+    println!("[GRAD_CHECK] Epsilon: {}, Abs Tol: {}, Rel Tol: {}", epsilon, abs_tol, rel_tol);
+    println!("[GRAD_CHECK] Output_grad: shape={:?}, dtype={:?}, device={:?}", output_grad.shape(), output_grad.dtype(), output_grad.device());
 
     // --- Initial Checks ---
     let mut first_input_dtype: Option<DType> = None;
 
     for (i, input) in inputs.iter().enumerate() {
+        println!("[GRAD_CHECK] Input [{}]: shape={:?}, dtype={:?}, device={:?}, requires_grad={}, is_leaf={}", i, input.shape(), input.dtype(), input.device(), input.requires_grad(), input.read_data().grad_fn.is_none());
         let dtype = input.dtype();
         let device = input.device();
 
@@ -246,13 +250,18 @@ where
     let initial_inputs: Vec<Tensor> = inputs.iter().map(|t| t.clone()).collect();
 
     // Clear grads before forward/backward
-    for input in initial_inputs.iter() {
-        if input.requires_grad() {
-            input.clear_grad(); // Use helper method
+    for (idx, input_tensor) in initial_inputs.iter().enumerate() {
+        if input_tensor.requires_grad() {
+            println!("[GRAD_CHECK] Clearing grad for initial_input [{}] (before func call)", idx);
+            input_tensor.clear_grad(); // Use helper method
+            // Log grad state after clearing
+            println!("[GRAD_CHECK] Grad for initial_input [{}] after clear_grad: {:?}", idx, input_tensor.grad().is_some());
         }
     }
 
+    println!("[GRAD_CHECK] Calling func for initial forward pass...");
     let output = func(&initial_inputs).map_err(GradCheckError::ForwardPassError)?;
+    println!("[GRAD_CHECK] Initial forward pass successful. Output: shape={:?}, dtype={:?}, requires_grad={}", output.shape(), output.dtype(), output.requires_grad());
 
     // Check requires_grad propagation
     let any_input_requires_grad = inputs.iter().any(|t| t.requires_grad());
@@ -262,26 +271,48 @@ where
 
     // Perform backward pass to get analytical gradients
     if output.requires_grad() {
+        println!("[GRAD_CHECK] Output requires grad. Performing backward pass with output_grad: shape={:?}, dtype={:?}", output_grad.shape(), output_grad.dtype());
         output
             .backward(Some(output_grad.clone()))
             .map_err(GradCheckError::BackwardPassError)?;
-    } // else: no backward pass needed/possible
+        println!("[GRAD_CHECK] Backward pass completed.");
+    } else {
+        println!("[GRAD_CHECK] Output does not require grad. Skipping backward pass.");
+    }
 
     // Store analytical gradients (as Option<Tensor>)
+    println!("[GRAD_CHECK] Storing analytical gradients from initial_inputs:");
     let analytical_grads_opt: Vec<Option<Tensor>> = initial_inputs.iter()
-                                                               .map(|t| t.grad())
+                                                               .enumerate()
+                                                               .map(|(idx, t)| {
+                                                                    let grad_opt = t.grad();
+                                                                    println!("[GRAD_CHECK] initial_input [{}]: requires_grad={}, grad().is_some()={}", idx, t.requires_grad(), grad_opt.is_some());
+                                                                    if t.requires_grad() && grad_opt.is_none() {
+                                                                        println!("[GRAD_CHECK] WARNING: initial_input [{}] requires grad but grad is None AFTER backward pass!", idx);
+                                                                    }
+                                                                    grad_opt
+                                                                })
                                                                .collect();
 
     // --- 3. Iterate through Inputs ---
+    println!("[GRAD_CHECK] Starting iteration through inputs for numerical grad calculation...");
     for (i, original_input) in inputs.iter().enumerate() {
+        println!("[GRAD_CHECK] Processing input [{}] for numerical gradient.", i);
         if !original_input.requires_grad() {
+            println!("[GRAD_CHECK] Input [{}] does not require grad. Skipping.", i);
             continue; // Skip inputs that don't require grad
         }
+        println!("[GRAD_CHECK] Input [{}] requires grad. Original shape: {:?}, dtype: {:?}", i, original_input.shape(), original_input.dtype());
 
         // --- 4. Get Analytical Gradient Data (as f64) ---
+        println!("[GRAD_CHECK] Accessing analytical_grads_opt[{}] for input [{}]", i, i);
         let analytical_grad_tensor = match analytical_grads_opt[i].as_ref() {
-            Some(grad) => grad,
+            Some(grad) => {
+                println!("[GRAD_CHECK] Analytical grad tensor found for input [{}]: shape={:?}, dtype={:?}", i, grad.shape(), grad.dtype());
+                grad
+            }
             None => {
+                 println!("[GRAD_CHECK] ERROR: MissingAnalyticalGrad for input_index: {}", i);
                  return Err(GradCheckError::MissingAnalyticalGrad{ input_index: i });
             }
         };
@@ -316,6 +347,8 @@ where
             // --- 5.2 Calculate Loss for f(x + eps) ---
             let loss_plus = {
                 let mut inputs_plus = inputs.iter().map(|t| t.clone()).collect::<Vec<_>>();
+                // println!("[GRAD_CHECK] Input [{}], Elem [{}]: Calculating loss_plus. Original element value: {:?}", i, elem_idx, original_input.at_f64(&current_logical_indices));
+                println!("[GRAD_CHECK] Input [{}], Elem [{}]: Calculating loss_plus by perturbing element at physical_offset {}", i, elem_idx, physical_offset);
 
                 // --- 5.2.1 Create perturbed buffer (+) ---
                 // Corrected logic: Match on dereferenced Arc<Buffer>, clone inner Vec, perturb, create new Arc<Buffer>
@@ -350,12 +383,16 @@ where
 
                 // --- 5.2.3 Run forward pass (+) ---
                 let output_plus = func(&inputs_plus).map_err(GradCheckError::ForwardPassError)?;
+                println!("[GRAD_CHECK] Input [{}], Elem [{}]: Forward pass for loss_plus successful. Output_plus shape: {:?}", i, elem_idx, output_plus.shape());
                 calculate_loss(&output_plus, output_grad)?
             };
+            println!("[GRAD_CHECK] Input [{}], Elem [{}]: loss_plus = {}", i, elem_idx, loss_plus);
 
             // --- 5.3 Calculate Loss for f(x - eps) ---
             let loss_minus = {
                 let mut inputs_minus = inputs.iter().map(|t| t.clone()).collect::<Vec<_>>();
+                // println!("[GRAD_CHECK] Input [{}], Elem [{}]: Calculating loss_minus. Original element value: {:?}", i, elem_idx, original_input.at_f64(&current_logical_indices));
+                println!("[GRAD_CHECK] Input [{}], Elem [{}]: Calculating loss_minus by perturbing element at physical_offset {}", i, elem_idx, physical_offset);
 
                 // --- 5.3.1 Create perturbed buffer (-) ---
                 // Corrected logic: Match on dereferenced Arc<Buffer>, clone inner Vec, perturb, create new Arc<Buffer>
@@ -390,14 +427,18 @@ where
 
                 // --- 5.3.3 Run forward pass (-) ---
                 let output_minus = func(&inputs_minus).map_err(GradCheckError::ForwardPassError)?;
+                println!("[GRAD_CHECK] Input [{}], Elem [{}]: Forward pass for loss_minus successful. Output_minus shape: {:?}", i, elem_idx, output_minus.shape());
                 calculate_loss(&output_minus, output_grad)?
             };
+            println!("[GRAD_CHECK] Input [{}], Elem [{}]: loss_minus = {}", i, elem_idx, loss_minus);
             
             // --- 5.4 Calculate Numerical Gradient ---
             let numerical_grad = (loss_plus - loss_minus) / (two * epsilon);
+            println!("[GRAD_CHECK] Input [{}], Elem [{}]: Numerical grad = {:.6e}", i, elem_idx, numerical_grad);
 
             // --- 5.5 Get Analytical Gradient --- 
              let analytical_grad = analytical_grad_data[elem_idx]; // Utiliser l'index logique
+             println!("[GRAD_CHECK] Input [{}], Elem [{}]: Numerical grad = {:.6e}, Analytical grad = {:.6e}", i, elem_idx, numerical_grad, analytical_grad);
 
             // --- 5.6 Check for NaN/Infinite Gradients ---
             if !numerical_grad.is_finite() {
@@ -459,8 +500,10 @@ where
 /// * `Err(GradCheckError)`: If an error occurs during the element-wise multiplication or sum operations,
 ///                        or during data conversion/access.
 fn calculate_loss(tensor: &Tensor, output_grad: &Tensor) -> Result<f64, GradCheckError> {
+    println!("[GRAD_CHECK_LOSS] Calculating loss. Tensor shape: {:?}, Output_grad shape: {:?}", tensor.shape(), output_grad.shape());
     // Ensure shapes match or are broadcastable (though they should match here)
     if tensor.shape() != output_grad.shape() {
+        println!("[GRAD_CHECK_LOSS] Shape mismatch in calculate_loss!");
         return Err(NeuraRustError::ShapeMismatch {
             operation: "calculate_loss (grad_check)".to_string(),
             expected: format!("{:?}", output_grad.shape()),
@@ -473,7 +516,10 @@ fn calculate_loss(tensor: &Tensor, output_grad: &Tensor) -> Result<f64, GradChec
 
     // Sum all elements to get a scalar
     let sum_tensor = sum_op(&product, None, false)?; // Sum over all axes
+    println!("[GRAD_CHECK_LOSS] Product sum (scalar tensor): shape={:?}, dtype={:?}", sum_tensor.shape(), sum_tensor.dtype());
 
     // Extract the scalar value as f64
-    sum_tensor.item_f64().map_err(|e| e.into()) // Convert NeuraRustError to GradCheckError
+    let loss_value = sum_tensor.item_f64().map_err(|e| e.into()); // Convert NeuraRustError to GradCheckError
+    println!("[GRAD_CHECK_LOSS] Calculated loss value: {:?}", loss_value);
+    loss_value
 }

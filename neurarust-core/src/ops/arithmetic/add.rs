@@ -59,15 +59,20 @@ impl BackwardOp for AddBackward {
     /// gradients, its corresponding gradient is not computed or returned.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut grads = Vec::with_capacity(2);
+        println!("[ADD_BACKWARD] backward called. grad_output shape: {:?}, dtype: {:?}", grad_output.shape(), grad_output.dtype());
+        println!("[ADD_BACKWARD] a_requires_grad: {}, a_shape: {:?}, b_requires_grad: {}, b_shape: {:?}", self.a_requires_grad, self.a_shape, self.b_requires_grad, self.b_shape);
 
         if self.a_requires_grad {
             let grad_a = grad_output.reduce_to_shape(&self.a_shape)?;
+            println!("[ADD_BACKWARD] Calculated grad_a shape: {:?}, dtype: {:?}", grad_a.shape(), grad_a.dtype());
             grads.push(grad_a);
         }
         if self.b_requires_grad {
             let grad_b = grad_output.reduce_to_shape(&self.b_shape)?;
+            println!("[ADD_BACKWARD] Calculated grad_b shape: {:?}, dtype: {:?}", grad_b.shape(), grad_b.dtype());
             grads.push(grad_b);
         }
+        println!("[ADD_BACKWARD] Returning grads. Count: {}", grads.len());
         Ok(grads)
     }
 
@@ -76,8 +81,18 @@ impl BackwardOp for AddBackward {
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
         // Return IDs of inputs that required grad, in the order (a, b)
         let mut ids = Vec::new();
-        if self.a_requires_grad { ids.push(Arc::as_ptr(&self.a_node)); }
-        if self.b_requires_grad { ids.push(Arc::as_ptr(&self.b_node)); }
+        println!("[ADD_BACKWARD] inputs() called.");
+        if self.a_requires_grad { 
+            let ptr_a = Arc::as_ptr(&self.a_node);
+            println!("[ADD_BACKWARD] Adding a_node to inputs. Ptr: {:?}", ptr_a);
+            ids.push(ptr_a);
+        }
+        if self.b_requires_grad { 
+            let ptr_b = Arc::as_ptr(&self.b_node);
+            println!("[ADD_BACKWARD] Adding b_node to inputs. Ptr: {:?}", ptr_b);
+            ids.push(ptr_b);
+        }
+        println!("[ADD_BACKWARD] Returning input pointers. Count: {}", ids.len());
         ids
     }
 }
