@@ -138,7 +138,8 @@
             *   [✅] Implement `Deref`/`DerefMut`.
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.B.6: Define Basic `Module` Trait** *(Formerly 1.B.2)*
-            *   [ ] Define `trait Module` with `forward` and potentially `parameters`.
+            *   [✅] Define `trait Module` with `forward` and potentially `parameters`.
+            *   [✅] Add `rustdoc`.
         *   **Step 1.B.7: Implement `nn::Linear` Layer** *(Formerly 1.B.3)*
             *   [ ] Create `src/nn/layers/linear.rs`.
             *   [ ] Define `Linear` struct (`weight: Parameter`, `bias: Option<Parameter>`).
