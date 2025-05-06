@@ -212,8 +212,21 @@
             *   [✅] Handle potential issues (e.g., negative base with non-integer exponent, 0^0).
             *   [✅] Add tests for correctness, edge cases, and autograd error (as it's in-place).
             *   [✅] Add `rustdoc`.
-        *   **Step 1.D.6: Refactor Training Loop Example (Optional but Recommended)**
-            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`, potentially `p.pow_(2.0)` if applicable).
+        *   **Step 1.D.6: Implement `add_scalar_`**
+            *   [✅] Implement `Tensor::add_scalar_(&mut self, scalar: S)` where `S` is `f32` or `f64` (matching tensor's `DType`).
+            *   [✅] Add tests and `rustdoc`.
+        *   **Step 1.D.7: Implement `sub_scalar_`**
+            *   [ ] Implement `Tensor::sub_scalar_(&mut self, scalar: S)`.
+            *   [ ] Add tests and `rustdoc`.
+        *   **Step 1.D.8: Implement `mul_scalar_`**
+            *   [ ] Implement `Tensor::mul_scalar_(&mut self, scalar: S)`.
+            *   [ ] Add tests and `rustdoc`.
+        *   **Step 1.D.9: Implement `div_scalar_`**
+            *   [ ] Implement `Tensor::div_scalar_(&mut self, scalar: S)`.
+            *   [ ] Handle division by zero scalar.
+            *   [ ] Add tests and `rustdoc`.
+        *   **Step 1.D.10: Refactor Training Loop Example (Optional but Recommended)**
+            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`, potentially `p.pow_f32(2.0)` or `p.add_scalar_(value)` if applicable).
 
 *   **Phase 1 Notes:**
     *   *Other DTypes (`I64`, `I32`, `Bool`, etc.), full mixed-type operation support, and other creation functions (`arange`, `linspace`, `eye`) are deferred to later phases (e.g., Phase 2 or 4) to keep Phase 1 focused.*

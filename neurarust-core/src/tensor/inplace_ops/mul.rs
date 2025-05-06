@@ -141,14 +141,12 @@ pub fn perform_mul_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                     }
                 }
             }
-            _ => {
-                // This case should ideally not be reached if DType is restricted to F32/F64 for this op,
-                // or handled by a more generic kernel approach in the future.
-                return Err(NeuraRustError::UnsupportedOperation(format!(
-                    "In-place multiplication (mul_) not supported for dtype {:?}",
-                    self_dtype
-                )));
-            }
+            // _ => { // This arm is unreachable if DType only has F32 and F64 handled above
+            //     return Err(NeuraRustError::UnsupportedOperation(format!(
+            //         "In-place multiplication (mul_) not supported for dtype {:?}",
+            //         self_dtype
+            //     )));
+            // }
         }
     } // self_tensor_data_guard is dropped here
     Ok(())

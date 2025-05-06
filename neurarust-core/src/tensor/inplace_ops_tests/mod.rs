@@ -8,3 +8,5 @@ pub mod mul_test;
 pub mod div_test; 
 #[cfg(test)]
 pub mod pow_test; 
+#[cfg(test)]
+pub mod add_scalar_test; 

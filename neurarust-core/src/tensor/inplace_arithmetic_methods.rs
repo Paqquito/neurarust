@@ -243,6 +243,72 @@ impl Tensor {
     pub fn pow_f64(&mut self, exponent: f64) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::pow::perform_pow_inplace_f64(self, exponent)
     }
+
+    /// Adds a scalar to each element of this tensor, in-place.
+    ///
+    /// `self += scalar` (element-wise)
+    ///
+    /// This operation modifies the tensor's data directly.
+    /// The tensor must be of DType `F32`.
+    ///
+    /// # Arguments
+    ///
+    /// * `scalar`: The `f32` scalar to add.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the operation is successful.
+    /// * `Err(NeuraRustError)` if:
+    ///     * The tensor's DType is not `F32`.
+    ///     * `self` requires gradient computation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use neurarust_core::{Tensor, NeuraRustError, DType};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// # let mut a = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![3])?;
+    /// # a.add_scalar_f32(10.0f32)?;
+    /// # assert_eq!(a.get_f32_data().unwrap(), &[11.0, 12.0, 13.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn add_scalar_f32(&mut self, scalar: f32) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::add_scalar::perform_add_scalar_inplace_f32(self, scalar)
+    }
+
+    /// Adds a scalar to each element of this tensor, in-place.
+    ///
+    /// `self += scalar` (element-wise)
+    ///
+    /// This operation modifies the tensor's data directly.
+    /// The tensor must be of DType `F64`.
+    ///
+    /// # Arguments
+    ///
+    /// * `scalar`: The `f64` scalar to add.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the operation is successful.
+    /// * `Err(NeuraRustError)` if:
+    ///     * The tensor's DType is not `F64`.
+    ///     * `self` requires gradient computation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use neurarust_core::{Tensor, NeuraRustError, DType};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// # let mut a = Tensor::new_f64(vec![1.0, 2.0, 3.0], vec![3])?;
+    /// # a.add_scalar_f64(10.0)?;
+    /// # assert_eq!(a.get_f64_data().unwrap(), &[11.0, 12.0, 13.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn add_scalar_f64(&mut self, scalar: f64) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::add_scalar::perform_add_scalar_inplace_f64(self, scalar)
+    }
 }
 
 // The test module declaration previously here is now removed,

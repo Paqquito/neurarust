@@ -132,12 +132,6 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                 }
             }
         }
-        _ => {
-            return Err(NeuraRustError::UnsupportedOperation(format!(
-                "In-place subtraction not supported for dtype {:?}",
-                self_dtype
-            )));
-        }
     }
     Ok(())
 } 
