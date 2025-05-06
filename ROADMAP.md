@@ -148,11 +148,11 @@
             *   [✅] Add tests (constructor, forward, shape, autograd via `check_grad`).
             *   [✅] Add `rustdoc`.
         *   **Step 1.B.8: Implement `nn::MSELoss` Function** *(Formerly 1.B.4)*
-            *   [ ] Create `src/nn/losses/mse.rs`.
-            *   [ ] Define `MSELoss` struct/function with reduction options.
-            *   [ ] Implement `forward` using existing ops.
-            *   [ ] Add tests (forward correctness for reductions, shape, autograd via `check_grad`).
-            *   [ ] Add `rustdoc`.
+            *   [✅] Create `src/nn/losses/mse.rs`.
+            *   [✅] Define `MSELoss` struct/function with reduction options.
+            *   [✅] Implement `forward` using existing ops.
+            *   [✅] Add tests (forward correctness for reductions, shape, autograd via `check_grad`).
+            *   [✅] Add `rustdoc`.
 
 *   **Sub-Phase 1.C: Basic Training Loop Example:**
     *   🎯 **Goal:** Create a runnable example demonstrating a minimal end-to-end training process.
