@@ -23,6 +23,7 @@ mod accessors; // Ensure accessors module is declared
 mod reduction_methods; // Declare the new module
 mod view_methods; // Declare view methods
 mod inplace_arithmetic_methods; // Added inplace_arithmetic_methods module
+pub mod inplace_ops; // Declare the new module for inplace operations logic
 
 pub mod create; // Make the create module public
 
@@ -141,3 +142,7 @@ impl Tensor {
     
     // Trait implementations (`Clone`, `Debug`, etc.) might be in `src/tensor/traits.rs` or other files.
 }
+
+// Add the new test module
+#[cfg(test)]
+mod inplace_ops_tests;

@@ -198,8 +198,8 @@
             *   [✅] Add tests (correctness, broadcasting, autograd error).
             *   [✅] Add `rustdoc`.
         *   **Step 1.D.2: Implement `sub_`**
-            *   [ ] Implement `Tensor::sub_`, similar to `add_`.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Implement `Tensor::sub_`, similar to `add_`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.3: Implement `mul_`**
             *   [ ] Implement `Tensor::mul_`, similar to `add_`.
             *   [ ] Add tests and `rustdoc`.
