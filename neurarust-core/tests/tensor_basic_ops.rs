@@ -1,4 +1,6 @@
 use neurarust_core::Tensor;
+use neurarust_core::NeuraRustError;
+use neurarust_core::ops::view::slice::SliceArg;
 
 // Include the common helper module
 mod common;
@@ -44,11 +46,15 @@ fn test_get_element_via_data() { // Renamed test as .get() doesn't exist
 }
 
 #[test]
-#[ignore = "Skipping until an element access method (e.g., Tensor::at(&[...])) exists"] // .get() doesn't exist
+#[ignore = "Skipping until an element access method (e.g., Tensor::at(&[...])) exists OR slice_op with SliceArg::Index fully validates bounds and returns IndexOutOfBounds for Index variant."]
 fn test_get_element_out_of_bounds() {
     /*
-    let t = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
-    assert!(t.at(&[2, 0]).is_err()); // Replace .get with hypothetical .at
+    let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]); // f32 for create_test_tensor
+    // This test requires either a t.at() method or for slice_op with SliceArg::Index(i)
+    // to explicitly return IndexOutOfBounds if i is out of bounds for the dimension,
+    // rather than clamping/producing an empty or boundary slice.
+    // Current slice_op clamps or makes empty slices for SliceArg::Slice, and Index is unsupported in normalize_slice.
+    assert!(t.at(&[2, 0]).is_err()); 
     assert!(t.at(&[0, 2]).is_err());
     match t.at(&[0, 2]).err().unwrap() {
         NeuraRustError::IndexOutOfBounds { index, shape } => {
@@ -61,20 +67,37 @@ fn test_get_element_out_of_bounds() {
 }
 
 #[test]
-#[ignore = "Skipping until an element access method (e.g., Tensor::at(&[...])) exists"] // .get() doesn't exist
+// #[ignore = "Skipping until an element access method (e.g., Tensor::at(&[...])) exists"] // .get() doesn't exist -> Trying to reactivate
 fn test_get_element_wrong_ndim() {
-    /*
-    let t = create_test_tensor(vec![1, 2, 3, 4], vec![2, 2]);
-    assert!(t.at(&[0]).is_err()); // Replace .get with hypothetical .at
-    assert!(t.at(&[0, 0, 0]).is_err());
-    match t.at(&[0]).err().unwrap() {
-        NeuraRustError::DimensionMismatch { expected, actual } => {
-            assert_eq!(expected, 2);
-            assert_eq!(actual, 1);
+    let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]); // Uses f32 by default
+    
+    // Test with fewer slice arguments than tensor rank
+    let result1 = t.slice(&[SliceArg::Index(0)]);
+    assert!(result1.is_err(), "Expected error when slice args rank < tensor rank");
+    match result1.err().unwrap() {
+        // slice_op currently returns SliceError for rank mismatch of args
+        NeuraRustError::SliceError { message } => {
+            // Check if the message contains relevant info, or just that it's a SliceError
+            // println!("SliceError (fewer args): {}", message);
+            assert!(message.contains("Number of slice args (1) does not match tensor rank (2)"), "Incorrect SliceError message for fewer args: {}", message);
         }
-        e => panic!("Expected DimensionMismatch, got {:?}", e),
+        e => panic!("Expected SliceError for fewer args, got {:?}", e),
     }
-    */
+
+    // Test with more slice arguments than tensor rank
+    let result2 = t.slice(&[
+        SliceArg::Index(0),
+        SliceArg::Index(0),
+        SliceArg::Index(0),
+    ]);
+    assert!(result2.is_err(), "Expected error when slice args rank > tensor rank");
+    match result2.err().unwrap() {
+        NeuraRustError::SliceError { message } => {
+            // println!("SliceError (more args): {}", message);
+            assert!(message.contains("Number of slice args (3) does not match tensor rank (2)"), "Incorrect SliceError message for more args: {}", message);
+        }
+        e => panic!("Expected SliceError for more args, got {:?}", e),
+    }
 }
 
 // TODO: Add test for detach modifying shared data? (Maybe not needed if buffer sharing is confirmed) 

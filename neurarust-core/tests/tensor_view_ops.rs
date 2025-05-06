@@ -29,23 +29,47 @@ fn test_simple_slice() {
 }
 
 #[test]
-#[ignore = "Skipping test: Cannot easily verify shared data pointer due to private fields"]
-fn test_slice_shares_data() {
-    /* // Keep code commented for reference
+// #[ignore = "Skipping test: Cannot easily verify shared data pointer due to private fields"] // Removed ignore
+fn test_slice_shares_data() -> Result<(), NeuraRustError> { // Added Result return type
     let data = vec![1.0f32, 2.0, 3.0, 4.0];
     let shape = vec![2, 2];
-    let t = Tensor::new(data.clone(), shape.clone()).unwrap();
+    let t = Tensor::new(data.clone(), shape.clone())?;
 
     let ranges = vec![
-        SliceArg::new(0, 1),
-        SliceArg::new(0, 2),
+        SliceArg::Slice(0, 1, 1), // Slice [0:1,..] (première ligne)
+        SliceArg::Slice(0, 2, 1), // Slice [..,0:2] (toutes les colonnes)
     ];
-    let sliced_view = t.slice(&ranges).unwrap();
+    let sliced_view = t.slice(&ranges)?;
 
-    // Check Arc pointer equality for the underlying TensorData
-    // This requires accessing the private `data` field, hence ignored.
-    // assert!(Arc::ptr_eq(&t.data, &sliced_view.data), "Slice should point to the same TensorData Arc initially");
-    */
+    // Vérifier que les Arcs des buffers de données sont les mêmes
+    let t_data_guard = t.read_data();
+    let sliced_data_guard = sliced_view.read_data();
+
+    assert!(std::sync::Arc::ptr_eq(t_data_guard.buffer(), sliced_data_guard.buffer()), // Use .buffer() method
+            "Slice view should share the same underlying data buffer Arc.");
+
+    // Pour cette slice spécifique (0..1, 0..2) sur un tenseur commençant à offset 0,
+    // l'offset de la vue devrait aussi être 0 par rapport au buffer partagé.
+    // assert_eq!(t_data_guard.offset, 0, "Original tensor offset should be 0 for this test setup."); // Cannot access private offset
+    // assert_eq!(sliced_data_guard.offset, 0, "Sliced view offset should be 0 for this specific slice."); // Cannot access private offset
+
+    // Pour illustrer une slice avec un offset différent:
+    let ranges_offset = vec![
+        SliceArg::Slice(1, 2, 1), // Deuxième ligne
+        SliceArg::Slice(0, 2, 1), // Toutes les colonnes
+    ];
+    let sliced_view_offset = t.slice(&ranges_offset)?;
+    let sliced_offset_data_guard = sliced_view_offset.read_data();
+    assert!(std::sync::Arc::ptr_eq(t_data_guard.buffer(), sliced_offset_data_guard.buffer()), // Use .buffer() method
+            "Offset slice view should also share the same underlying data buffer Arc.");
+    // L'offset de cette vue devrait être t.strides()[0] * 1 (car on saute la première ligne)
+    // Strides pour [2,2] sont [2,1]. Donc offset = 2 * 1 = 2.
+    let _original_strides = t.strides(); // Use public strides() method - Prefix with _ as it's unused now
+    // assert_eq!(sliced_offset_data_guard.offset, original_strides[0] * 1, "Offset of the second slice is incorrect."); // Cannot access private offset
+
+    // We cannot verify offset directly, but sharing the buffer is the core of the test.
+
+    Ok(())
 }
 
 #[test]
@@ -311,17 +335,61 @@ fn test_contiguous_on_transpose() {
 }
 
 #[test]
-#[ignore = "Skipping test relying on direct element access via .get()"]
-fn test_view_ops_on_scalar_get() {
-     // let scalar_tensor = Tensor::new(vec![5.0f32], vec![]).unwrap();
-     // let view = scalar_tensor.transpose(0, 0); // Transpose on scalar is identity
-     // assert!(view.is_ok());
-     // Check value after making contiguous (though it should already be)
-     // let view_data = view.unwrap().contiguous().unwrap().get_f32_data().unwrap();
-     // assert_eq!(view_data[0], 5.0f32);
-}
+// #[ignore = "Skipping test relying on direct element access via .get()"] // Removed ignore
+fn test_view_ops_on_scalar_get() -> Result<(), NeuraRustError> { // Added Result return type
+    let scalar_f32 = Tensor::new(vec![42.0f32], vec![])?; // Shape [] for scalar
+    let scalar_f64 = Tensor::new_f64(vec![99.9f64], vec![])?;
 
-// ... (Ignore or adapt other tests using .get() or Tensor::scalar) ...
+    // Reshape (no-op for scalar)
+    let reshaped_f32 = scalar_f32.reshape(vec![])?;
+    assert_eq!(reshaped_f32.shape(), &[] as &[usize], "Reshaped f32 scalar shape mismatch");
+    assert_relative_eq!(reshaped_f32.item_f32()?, 42.0f32, epsilon=1e-9);
+    
+    let reshaped_f64 = scalar_f64.reshape(vec![])?;
+    assert_eq!(reshaped_f64.shape(), &[] as &[usize], "Reshaped f64 scalar shape mismatch");
+    assert_relative_eq!(reshaped_f64.item_f64()?, 99.9f64, epsilon=1e-9);
+
+    // Slice (no-op for scalar if ranges are empty for rank 0)
+    let sliced_f32 = scalar_f32.slice(&[])?;
+    assert_eq!(sliced_f32.shape(), &[] as &[usize], "Sliced f32 scalar shape mismatch");
+    assert_relative_eq!(sliced_f32.item_f32()?, 42.0f32, epsilon=1e-9);
+    
+    let sliced_f64 = scalar_f64.slice(&[])?;
+    assert_eq!(sliced_f64.shape(), &[] as &[usize], "Sliced f64 scalar shape mismatch");
+    assert_relative_eq!(sliced_f64.item_f64()?, 99.9f64, epsilon=1e-9);
+
+    // Transpose (should err for scalar as rank is 0)
+    let transpose_result_f32 = scalar_f32.transpose(0, 0);
+    assert!(transpose_result_f32.is_err(), "Transpose on f32 scalar should be an error");
+    match transpose_result_f32.err().unwrap() {
+        NeuraRustError::IndexOutOfBounds { index, shape } => {
+            assert_eq!(index, vec![0], "Transpose f32 error index mismatch"); // dim1 or dim2 is 0, rank is 0
+            assert_eq!(shape, vec![0], "Transpose f32 error shape (rank) mismatch");
+        }
+        e => panic!("Expected IndexOutOfBounds for f32 transpose, got {:?}", e),
+    }
+
+    let transpose_result_f64 = scalar_f64.transpose(0, 0);
+    assert!(transpose_result_f64.is_err(), "Transpose on f64 scalar should be an error");
+    match transpose_result_f64.err().unwrap() {
+        NeuraRustError::IndexOutOfBounds { index, shape } => {
+            assert_eq!(index, vec![0], "Transpose f64 error index mismatch");
+            assert_eq!(shape, vec![0], "Transpose f64 error shape (rank) mismatch");
+        }
+        e => panic!("Expected IndexOutOfBounds for f64 transpose, got {:?}", e),
+    }
+    
+    // Permute (no-op for scalar if axes are empty for rank 0)
+    let permuted_f32 = scalar_f32.permute(&[])?;
+    assert_eq!(permuted_f32.shape(), &[] as &[usize], "Permuted f32 scalar shape mismatch");
+    assert_relative_eq!(permuted_f32.item_f32()?, 42.0f32, epsilon=1e-9);
+
+    let permuted_f64 = scalar_f64.permute(&[])?;
+    assert_eq!(permuted_f64.shape(), &[] as &[usize], "Permuted f64 scalar shape mismatch");
+    assert_relative_eq!(permuted_f64.item_f64()?, 99.9f64, epsilon=1e-9);
+
+    Ok(())
+}
 
 #[test]
 fn test_view_creation_requires_grad() {

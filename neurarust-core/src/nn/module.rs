@@ -114,6 +114,14 @@ mod tests {
         fn parameters(&self) -> Vec<Parameter> {
             vec![self.param.clone()]
         }
+
+        fn to_device(&mut self, device: Device) -> Result<(), NeuraRustError> {
+            self.param.to_device(device)
+        }
+
+        fn to_dtype(&mut self, dtype: DType) -> Result<(), NeuraRustError> {
+            self.param.to_dtype(dtype)
+        }
     }
 
     #[test]
@@ -137,27 +145,33 @@ mod tests {
         Ok(())
     }
 
-    // TODO: Ajouter des tests pour to_device et to_dtype lorsque Parameter les supportera pleinement.
     #[test]
-    #[ignore] // Ignorer pour l'instant car les fonctions sont commentées
     fn test_module_to_device() -> Result<(), NeuraRustError> {
         let mut module = MockModule::new(DType::F32)?;
-        // En supposant que Device::Cpu est la valeur par défaut et qu'une autre est disponible.
-        // module.to_device(Device::Gpu)?; // Si GPU est activé et testable
-        // assert_eq!(module.parameters()[0].device(), Device::Gpu);
         module.to_device(Device::CPU)?;
-        // assert_eq!(module.parameters()[0].device(), Device::Cpu); // Décommenter lorsque param.to_device existe
+        assert_eq!(module.parameters()[0].device(), Device::CPU, "Parameter should be on CPU");
         Ok(())
     }
 
     #[test]
-    #[ignore] // Ignorer pour l'instant car les fonctions sont commentées
     fn test_module_to_dtype() -> Result<(), NeuraRustError> {
         let mut module = MockModule::new(DType::F32)?;
+        assert_eq!(module.parameters()[0].dtype(), DType::F32, "Initial DType should be F32");
+
         module.to_dtype(DType::F64)?;
-        // assert_eq!(module.parameters()[0].dtype(), DType::F64); // Décommenter lorsque param.to_dtype existe
+        assert_eq!(module.parameters()[0].dtype(), DType::F64, "DType should be F64 after conversion");
+        let params_f64 = module.parameters();
+        let data_f64 = params_f64[0].get_f64_data()?;
+        assert_eq!(data_f64, vec![0.0f64], "Data should be 0.0_f64 after conversion");
+
         module.to_dtype(DType::F32)?;
-        // assert_eq!(module.parameters()[0].dtype(), DType::F32); // Décommenter lorsque param.to_dtype existe
+        assert_eq!(module.parameters()[0].dtype(), DType::F32, "DType should be F32 after converting back");
+        let params_f32 = module.parameters();
+        let data_f32 = params_f32[0].get_f32_data()?;
+        assert_eq!(data_f32, vec![0.0f32], "Data should be 0.0_f32 after conversion back");
+
+        module.to_dtype(DType::F32)?;
+        assert_eq!(module.parameters()[0].dtype(), DType::F32, "DType should remain F32");
         Ok(())
     }
 } 
