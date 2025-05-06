@@ -266,6 +266,12 @@ where
 /// // Sum all elements
 /// let sum_all = sum_op(&t, None, false)?; // Shape [] (scalar)
 /// ```
+///
+/// // Example ignored as doc-test: illustrative purpose
+/// ```rust, ignore
+/// use neurarust_core::{Tensor, tensor, DType};
+/// use neurarust_core::ops::reduction::sum_op;
+///
 pub(crate) fn sum_op(
     t: &Tensor,
     axes: Option<&[usize]>,

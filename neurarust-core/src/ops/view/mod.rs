@@ -149,6 +149,15 @@ impl BackwardOp for ExpandBackward {
 /// let expanded_scalar = expand_op(&s, vec![2, 2])?;
 /// // expanded_scalar will have shape [2, 2] with all elements 5.
 /// ```
+/// assert_eq!(expanded.shape(), &[2, 3, 4]);
+/// assert_eq!(expanded.get_f32_data().unwrap(), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 3.0, 4.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 3.0, 4.0]);
+/// # Ok::<(), NeuraRustError>(())
+/// # }
+/// // Example ignored as doc-test: illustrative purpose
+/// ```rust, ignore
+/// use neurarust_core::{tensor::Tensor, error::NeuraRustError};
+/// use neurarust_core::ops::view::expand_op;
+///
 pub fn expand_op(tensor: &Tensor, target_shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let input_guard = tensor.read_data();
     let input_shape = &input_guard.shape;

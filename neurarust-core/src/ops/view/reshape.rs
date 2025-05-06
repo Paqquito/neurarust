@@ -46,6 +46,14 @@ use std::sync::{Arc, RwLock};
 /// // Correct approach for non-contiguous:
 /// // let reshaped_copied = non_contig.contiguous()?.reshape(vec![4, 3])?;
 /// ```
+/// assert_eq!(reshaped.get_f32_data().unwrap(), data);
+/// # Ok::<(), NeuraRustError>(())
+/// # }
+/// // Example ignored as doc-test: illustrative purpose
+/// ```rust, ignore
+/// use neurarust_core::{tensor::Tensor, error::NeuraRustError};
+/// use neurarust_core::ops::view::reshape_op;
+///
 pub(crate) fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),

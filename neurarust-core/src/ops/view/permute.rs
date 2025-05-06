@@ -96,6 +96,10 @@ impl BackwardOp for PermuteBackward {
 /// let permuted_view = permute_op(&t, &[2, 0, 1])?;
 /// // permuted_view will have shape [4, 2, 3]
 /// ```
+/// assert_eq!(permuted.get_f32_data().unwrap(), vec![0.0, 3.0, 1.0, 4.0, 2.0, 5.0]);
+/// # Ok::<(), NeuraRustError>(())
+/// # }
+/// // Example ignored as doc-test: illustrative purpose
 pub(crate) fn permute_op(input: &Tensor, dims: &[usize]) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),

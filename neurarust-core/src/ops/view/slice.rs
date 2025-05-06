@@ -238,6 +238,14 @@ impl BackwardOp for SliceBackward {
 /// let sliced_view_ellipsis = slice_op(&t, &slice_args_ellipsis)?;
 /// // sliced_view_ellipsis will have shape [5]
 /// ```
+/// assert_eq!(slice.get_f32_data().unwrap(), vec![6.0, 7.0, 10.0, 11.0]);
+/// # Ok::<(), NeuraRustError>(())
+/// # }
+/// // Example ignored as doc-test: illustrative purpose
+/// ```rust, ignore
+/// use neurarust_core::{tensor::Tensor, error::NeuraRustError, slice};
+/// use neurarust_core::ops::view::slice_op;
+///
 pub(crate) fn slice_op(
     input: &Tensor,
     ranges: &[SliceArg],

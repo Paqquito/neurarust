@@ -90,7 +90,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Grad check tests are complex to set up without clear helper function"]
     fn test_mse_grad_check_f32() -> Result<(), GradCheckError> {
         let input_data = vec![1.0, 2.0];
         let target_data = vec![1.5, 1.0];
