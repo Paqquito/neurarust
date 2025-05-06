@@ -6,3 +6,5 @@ pub mod sub_test;
 pub mod mul_test; 
 #[cfg(test)]
 pub mod div_test; 
+#[cfg(test)]
+pub mod pow_test; 

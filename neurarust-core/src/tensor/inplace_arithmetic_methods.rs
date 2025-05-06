@@ -160,6 +160,89 @@ impl Tensor {
     pub fn div_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::div::perform_div_inplace(self, other)
     }
+
+    /// Raises the elements of this tensor to the power of a scalar exponent, in-place.
+    ///
+    /// `self = self ^ exponent` (element-wise)
+    ///
+    /// This operation modifies the tensor's data directly.
+    /// The tensor must be of DType `F32`.
+    ///
+    /// # Arguments
+    ///
+    /// * `exponent`: The `f32` scalar exponent.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the operation is successful.
+    /// * `Err(NeuraRustError)` if:
+    ///     * The tensor's DType is not `F32`.
+    ///     * `self` requires gradient computation.
+    ///     * An arithmetic error occurs (e.g., negative base with a non-integer exponent).
+    ///
+    /// # Edge Cases
+    /// * `0.0^0.0` is treated as `1.0`.
+    /// * A negative base with a non-integer exponent will result in `ArithmeticError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use neurarust_core::{Tensor, NeuraRustError, DType};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// # let mut a = Tensor::new(vec![1.0f32, 2.0, -3.0, 4.0], vec![2, 2])?;
+    /// # a.pow_f32(2.0f32)?;
+    /// # assert_eq!(a.get_f32_data().unwrap(), &[1.0, 4.0, 9.0, 16.0]);
+    /// #
+    /// # let mut b = Tensor::new(vec![0.0f32, 4.0], vec![2])?;
+    /// # b.pow_f32(0.0f32)?;
+    /// # assert_eq!(b.get_f32_data().unwrap(), &[1.0, 1.0]); // 0^0 = 1, 4^0 = 1
+    /// #
+    /// # let mut c = Tensor::new(vec![-2.0f32], vec![1])?;
+    /// # assert!(matches!(c.pow_f32(0.5f32), Err(NeuraRustError::ArithmeticError(_))));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pow_f32(&mut self, exponent: f32) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::pow::perform_pow_inplace_f32(self, exponent)
+    }
+
+    /// Raises the elements of this tensor to the power of a scalar exponent, in-place.
+    ///
+    /// `self = self ^ exponent` (element-wise)
+    ///
+    /// This operation modifies the tensor's data directly.
+    /// The tensor must be of DType `F64`.
+    ///
+    /// # Arguments
+    ///
+    /// * `exponent`: The `f64` scalar exponent.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the operation is successful.
+    /// * `Err(NeuraRustError)` if:
+    ///     * The tensor's DType is not `F64`.
+    ///     * `self` requires gradient computation.
+    ///     * An arithmetic error occurs (e.g., negative base with a non-integer exponent).
+    ///
+    /// # Edge Cases
+    /// * `0.0^0.0` is treated as `1.0`.
+    /// * A negative base with a non-integer exponent will result in `ArithmeticError`.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use neurarust_core::{Tensor, NeuraRustError, DType};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// # let mut a = Tensor::new_f64(vec![1.0, 2.0, -3.0, 4.0], vec![2, 2])?;
+    /// # a.pow_f64(2.0)?;
+    /// # assert_eq!(a.get_f64_data().unwrap(), &[1.0, 4.0, 9.0, 16.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn pow_f64(&mut self, exponent: f64) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::pow::perform_pow_inplace_f64(self, exponent)
+    }
 }
 
 // The test module declaration previously here is now removed,

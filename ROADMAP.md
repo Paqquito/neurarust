@@ -206,8 +206,14 @@
         *   **Step 1.D.4: Implement `div_`**
             *   [✅] Implement `Tensor::div_`, similar to `mul_`, handle division by zero.
             *   [✅] Add tests and `rustdoc`.
-        *   **Step 1.D.5: Refactor Training Loop Example (Optional but Recommended)**
-            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`.
+        *   **Step 1.D.5: Implement `pow_` (Tensor to scalar power)**
+            *   [✅] Implement `Tensor::pow_(&mut self, exponent: exponent_type)` where `exponent_type` is `f32` or `f64`.
+            *   [✅] Consider `NeuraNumeric` for `exponent_type` or provide separate methods for `f32`/`f64` exponents.
+            *   [✅] Handle potential issues (e.g., negative base with non-integer exponent, 0^0).
+            *   [✅] Add tests for correctness, edge cases, and autograd error (as it's in-place).
+            *   [✅] Add `rustdoc`.
+        *   **Step 1.D.6: Refactor Training Loop Example (Optional but Recommended)**
+            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`, potentially `p.pow_(2.0)` if applicable).
 
 *   **Phase 1 Notes:**
     *   *Other DTypes (`I64`, `I32`, `Bool`, etc.), full mixed-type operation support, and other creation functions (`arange`, `linspace`, `eye`) are deferred to later phases (e.g., Phase 2 or 4) to keep Phase 1 focused.*
