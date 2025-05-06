@@ -10,6 +10,8 @@ use crate::types::{DType, NeuraNumeric};
 use std::fmt::Debug;
 use std::ops::{AddAssign, Mul, Neg};
 use std::iter::Sum;
+use crate::autograd::grad_check::{check_grad, GradCheckError};
+use crate::ops::reduction::sum_op;
 
 pub trait DefaultDType {
     fn default_dtype() -> DType;
@@ -194,6 +196,91 @@ mod tests {
         let params_no_bias = Module::<f32>::parameters(&linear_no_bias);
         assert_eq!(params_no_bias.len(), 1);
         assert_eq!(params_no_bias[0].shape(), &vec![3, 5]);
+        Ok(())
+    }
+
+    fn linear_loss_fn<T>(output: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>
+    where
+        T: NeuraNumeric + DefaultDType + Copy + Debug + Default + AddAssign + Mul<Output=T> + Neg<Output=T> + Sum + PartialEq + 'static,
+    {
+        sum_op(output, None, false)
+    }
+
+    #[test]
+    fn test_linear_weights_grad_f32() -> Result<(), GradCheckError<f32>> {
+        let mut linear = Linear::<f32>::new(3, 2, true).unwrap();
+        linear.weights.set_requires_grad(true);
+        if let Some(b) = linear.bias.as_mut() {
+            b.set_requires_grad(true);
+        }
+
+        let input = Tensor::<f32>::randn(vec![4, 3], DType::F32);
+
+        let func_for_weights = |weights_tensor: &Tensor<f32>| -> Result<Tensor<f32>, NeuraRustError> {
+            let transposed_weight = weights_tensor.transpose(1, 0)?;
+            let mut output = matmul(&input, &transposed_weight)?;
+
+            if let Some(bias_param) = &linear.bias {
+                let bias_tensor = &bias_param;
+                output = add_op(&output, bias_tensor)?;
+            }
+            linear_loss_fn(&output)
+        };
+        
+        check_grad(func_for_weights, &linear.weights, 1e-3, 1e-5)?;
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_linear_bias_grad_f32() -> Result<(), GradCheckError<f32>> {
+        let mut linear = Linear::<f32>::new(3, 2, true).unwrap();
+        linear.weights.set_requires_grad(true);
+        let bias_present = linear.bias.is_some();
+        assert!(bias_present, "Bias must be present for this test");
+
+        if let Some(b) = linear.bias.as_mut() {
+            b.set_requires_grad(true);
+        }
+        
+        let input = Tensor::<f32>::randn(vec![4, 3], DType::F32);
+
+        let func_for_bias = |bias_tensor_arg: &Tensor<f32>| -> Result<Tensor<f32>, NeuraRustError> {
+            let weight_tensor = &linear.weights;
+            let transposed_weight = weight_tensor.transpose(1, 0)?;
+            let mut output = matmul(&input, &transposed_weight)?;
+            
+            output = add_op(&output, bias_tensor_arg)?;
+            linear_loss_fn(&output)
+        };
+
+        if let Some(ref bias_param) = linear.bias {
+             check_grad(func_for_bias, bias_param, 1e-3, 1e-5)?;
+        } else {
+            panic!("Bias was expected for test_linear_bias_grad_f32");
+        }
+        Ok(())
+    }
+
+    #[test]
+    fn test_linear_input_grad_f32() -> Result<(), GradCheckError<f32>> {
+        let mut linear = Linear::<f32>::new(3, 2, true).unwrap();
+        let mut input = Tensor::<f32>::randn(vec![4, 3], DType::F32);
+        input.set_requires_grad(true);
+
+        let func_for_input = |current_input: &Tensor<f32>| -> Result<Tensor<f32>, NeuraRustError> {
+            let weight_tensor = &linear.weights;
+            let transposed_weight = weight_tensor.transpose(1, 0)?;
+            let mut output = matmul(current_input, &transposed_weight)?;
+
+            if let Some(bias_param) = &linear.bias {
+                output = add_op(&output, bias_param)?;
+            }
+            linear_loss_fn(&output)
+        };
+
+        check_grad(func_for_input, &input, 1e-3, 1e-5)?;
+
         Ok(())
     }
 }
