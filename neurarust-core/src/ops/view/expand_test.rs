@@ -86,7 +86,6 @@ fn test_expand_invalid_dim_size_case2() -> Result<(), NeuraRustError> {
 // --- AUTOGRAD TESTS --- 
 
 #[test]
-#[ignore = "Backward for expand involves sum/reshape, check_grad might be unstable"]
 fn test_expand_backward() -> Result<(), GradCheckError> {
     let t = Tensor::new(vec![1.0, 2.0, 3.0], vec![3])?; // F32
     t.set_requires_grad(true)?;
@@ -100,7 +99,6 @@ fn test_expand_backward() -> Result<(), GradCheckError> {
 }
 
 #[test]
-#[ignore = "Backward for expand involves sum/reshape, check_grad might be unstable"]
 fn test_expand_backward_add_dims() -> Result<(), GradCheckError> {
     let t = Tensor::new(vec![1.0, 2.0], vec![2])?; // F32
     t.set_requires_grad(true)?;
@@ -114,7 +112,6 @@ fn test_expand_backward_add_dims() -> Result<(), GradCheckError> {
 }
 
 #[test]
-#[ignore = "Backward for expand involves sum/reshape, check_grad might be unstable"]
 fn test_expand_backward_f64() -> Result<(), GradCheckError> { // Keep f64 test but ignore
     let t = Tensor::new_f64(vec![1.0, 2.0], vec![2])?;
     t.set_requires_grad(true)?;

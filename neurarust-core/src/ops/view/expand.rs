@@ -39,13 +39,17 @@ impl BackwardOp for ExpandBackward {
             }
         }
 
-        let grad_input_unreduced = if !axes_to_sum.is_empty() {
-            crate::ops::reduction::sum_op(grad_output, Some(&axes_to_sum), true)?
+        // 3. Perform summation
+        let grad_input = if !axes_to_sum.is_empty() {
+            // Use keep_dims=false to remove summed dimensions
+            crate::ops::reduction::sum_op(grad_output, Some(&axes_to_sum), false)? 
         } else {
+            // If no axes were summed, the gradient shape already matches original shape
             grad_output.clone()
         };
-
-        let grad_input = crate::ops::view::reshape_op(&grad_input_unreduced, self.original_shape.clone())?;
+        
+        // Verify the shape just in case (optional debug assert)
+        // assert_eq!(grad_input.shape(), self.original_shape, "Gradient shape mismatch after sum");
 
         Ok(vec![grad_input])
     }
