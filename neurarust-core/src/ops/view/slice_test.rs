@@ -132,7 +132,6 @@ mod tests {
     // --- AUTOGRAD TESTS (Placeholders, ignored) ---
 
     #[test]
-    #[ignore = "Slice backward implementation is complex and needs thorough verification."]
     fn test_slice_backward_f64() -> Result<(), GradCheckError> {
         let t_data = (0..12).map(|x| x as f64).collect();
         let t = Tensor::new_f64(t_data, vec![2, 2, 3])?;
@@ -154,7 +153,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Slice backward implementation is complex and needs thorough verification."]
     fn test_slice_backward_step_f64() -> Result<(), GradCheckError> {
         let t_data = (0..24).map(|x| x as f64).collect();
         let t = Tensor::new_f64(t_data, vec![4, 6])?;

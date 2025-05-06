@@ -169,42 +169,23 @@ impl BackwardOp for SliceBackward {
         }
         
         // Update the buffer in the guard with the potentially modified owned buffer
-        grad_input.write_data().buffer = Arc::new(grad_input_buffer_owned);
+        // We need grad_input as a Tensor, not just its buffer
+        // Let's reconstruct grad_input Tensor using the potentially updated buffer
+        let grad_input = Tensor { data: Arc::new(RwLock::new(TensorData::new_view(
+            Arc::new(grad_input_buffer_owned),
+            _input_device,
+            0,
+            self.original_shape.clone(),
+            crate::tensor::utils::calculate_strides(&self.original_shape),
+        ).map_err(|e| NeuraRustError::InternalError(format!("Failed to create grad_input tensor view: {}", e)))?)) };
+
         
         // Drop guards before accumulating gradient
         drop(grad_output_guard);
         drop(input_node_guard);
         
-        // Accumulate gradient into the input node
-        // let final_grad_input = grad_input; // We modify grad_input in place, so this is it
-
-        let input_node_read_guard = self.input_node.read().map_err(|_| NeuraRustError::LockError {
-            lock_type: "read".to_string(),
-            reason: "Failed to re-lock input node for read in SliceBackward grad accumulation".to_string(),
-        })?;
-        let mut existing_input_grad_opt = input_node_read_guard.grad.clone();
-        drop(input_node_read_guard);
-
-        match existing_input_grad_opt.as_mut() {
-            Some(existing_input_grad) => {
-                // Use add_op for potential broadcasting/type safety if needed, though shapes should match here
-                let accumulated_grad = crate::ops::arithmetic::add_op(existing_input_grad, &grad_input)?;
-                let mut input_node_write_guard = self.input_node.write().map_err(|_| NeuraRustError::LockError {
-                    lock_type: "write".to_string(),
-                    reason: "Failed to lock input node for write in SliceBackward grad update".to_string(),
-                })?;
-                input_node_write_guard.grad = Some(accumulated_grad);
-            }
-            None => {
-                let mut input_node_write_guard = self.input_node.write().map_err(|_| NeuraRustError::LockError {
-                    lock_type: "write".to_string(),
-                    reason: "Failed to lock input node for write in SliceBackward grad init".to_string(),
-                })?;
-                input_node_write_guard.grad = Some(grad_input);
-            }
-        }
-
-        Ok(vec![]) // BackwardOp returns empty vec, accumulation is done via input_node.grad
+        // Return the calculated gradient for the input
+        Ok(vec![grad_input])
     }
 
     fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
