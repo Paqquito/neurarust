@@ -83,7 +83,6 @@ fn test_relu_check_grad_basic() -> Result<(), GradCheckError> {
 }
 
 #[test]
-#[ignore = "ReLU grad check unstable near 0 due to derivative discontinuity"]
 fn test_relu_check_grad_all_positive() -> Result<(), GradCheckError> {
     let input = Tensor::new(vec![1.0, 2.0, 3.0], vec![3])?;
     input.set_requires_grad(true)?;
