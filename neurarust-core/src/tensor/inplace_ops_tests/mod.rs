@@ -10,3 +10,5 @@ pub mod div_test;
 pub mod pow_test; 
 #[cfg(test)]
 pub mod add_scalar_test; 
+#[cfg(test)]
+pub mod sub_scalar_test; 

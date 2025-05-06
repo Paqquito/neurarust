@@ -4,3 +4,4 @@ pub mod mul;
 pub mod div;
 pub mod pow;
 pub mod add_scalar; 
+pub mod sub_scalar; 

@@ -216,8 +216,8 @@
             *   [✅] Implement `Tensor::add_scalar_(&mut self, scalar: S)` where `S` is `f32` or `f64` (matching tensor's `DType`).
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.7: Implement `sub_scalar_`**
-            *   [ ] Implement `Tensor::sub_scalar_(&mut self, scalar: S)`.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Implement `Tensor::sub_scalar_(&mut self, scalar: S)`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.8: Implement `mul_scalar_`**
             *   [ ] Implement `Tensor::mul_scalar_(&mut self, scalar: S)`.
             *   [ ] Add tests and `rustdoc`.
