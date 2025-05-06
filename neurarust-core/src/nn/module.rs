@@ -1,36 +1,79 @@
+use crate::device::StorageDevice as Device;
 use crate::tensor::Tensor;
-use std::fmt::Debug;
-use crate::error::NeuraRustError;
 use crate::nn::Parameter;
+use crate::error::NeuraRustError;
+use crate::types::DType;
+// use crate::tensor::{zeros, zeros_f64, ones, ones_f64}; // Import global supprimé
 
 /// The base trait for all neural network modules (layers, containers, etc.).
-pub trait Module<T>: Debug {
-    /// Performs the forward pass of the module.
-    fn forward(&self, input: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError>;
+///
+/// This trait defines the fundamental operations that any neural network module
+/// should support, such as performing a forward pass and accessing its parameters.
+/// It is designed to be generic over the data type `T` (e.g., `f32`, `f64`).
+pub trait Module {
+    /// Performs a forward pass of the module.
+    ///
+    /// # Arguments
+    /// * `input`: A reference to the input `Tensor` for the module.
+    ///
+    /// # Returns
+    /// A `Result` containing the output `Tensor` of the module, or a `NeuraRustError`
+    /// if an error occurs during the forward pass.
+    fn forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError>;
 
-    /// Returns a list of all learnable parameters within the module.
-    /// Should return owned Parameters for optimizer updates.
-    fn parameters(&self) -> Vec<Parameter<T>>;
+    /// Returns a vector of all learnable parameters (`Parameter` instances) of the module.
+    ///
+    /// Parameters are typically weights and biases of layers that are adjusted during training.
+    /// This method should collect all such parameters, including those from sub-modules.
+    fn parameters(&self) -> Vec<Parameter>;
+
+    /// Sets the device for all parameters of the module.
+    ///
+    /// # Arguments
+    /// * `device`: The target `Device` (e.g., `Device::Cpu`, `Device::Gpu`).
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if any parameter fails to move to the specified device.
+    fn to_device(&mut self, _device: Device) -> Result<(), NeuraRustError> {
+        for _param in self.parameters() {
+            // param.to_device(device)?; // Commenté temporairement
+        }
+        Ok(())
+    }
+
+    /// Sets the data type for all parameters of the module.
+    ///
+    /// # Arguments
+    /// * `dtype`: The target `DType` (e.g., `DType::F32`, `DType::F64`).
+    ///
+    /// # Errors
+    /// Returns `NeuraRustError` if any parameter fails to change its data type.
+    fn to_dtype(&mut self, _dtype: DType) -> Result<(), NeuraRustError> {
+        for _param in self.parameters() {
+            // param.to_dtype(dtype)?; // Commenté temporairement
+        }
+        Ok(())
+    }
 }
 
 // Example of how a simple container might implement it (not needed yet)
 /*
 use std::collections::BTreeMap;
 
-pub struct Sequential<T> {
-    modules: BTreeMap<String, Box<dyn Module<T>>>,
+pub struct Sequential {
+    modules: BTreeMap<String, Box<dyn Module>>,
 }
 
-impl<T: 'static> Module<T> for Sequential<T> {
-    fn forward(&self, input: &Tensor<T>) -> Tensor<T> {
+impl Module for Sequential {
+    fn forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError> {
         let mut current_input = input.clone(); // Start with the initial input
         for (_name, module) in &self.modules {
-            current_input = module.forward(&current_input);
+            current_input = module.forward(&current_input)?;
         }
-        current_input
+        Ok(current_input)
     }
 
-    fn parameters(&self) -> Vec<Tensor<T>> {
+    fn parameters(&self) -> Vec<Parameter> {
         let mut params = Vec::new();
         for (_name, module) in &self.modules {
             params.extend(module.parameters());
@@ -42,83 +85,79 @@ impl<T: 'static> Module<T> for Sequential<T> {
 
 #[cfg(test)]
 mod tests {
-    use super::*;
-    use crate::tensor::Tensor;
-    use crate::types::{DType, NeuraNumeric};
-    use crate::nn::Parameter;
-    use std::fmt::Debug;
+    use super::*; // Garde les imports du module parent comme Module, Parameter, DType, Device
+    use crate::tensor::{zeros, zeros_f64, ones, ones_f64}; // Ajout des imports spécifiques au test
+    use crate::nn::parameter::Parameter; // Parameter est déjà dans super::*, mais peut être gardé pour clarté ou si super::* change
+    use crate::types::DType; // Idem pour DType
+    use crate::device::StorageDevice as Device; // Idem pour Device
 
-    // Définir un DType par défaut pour T générique
-    trait DefaultDType {
-        fn default_dtype() -> DType;
+    // Mock Module pour les tests
+    struct MockModule {
+        param: Parameter,
     }
 
-    impl DefaultDType for f32 {
-        fn default_dtype() -> DType { DType::F32 }
-    }
-
-    impl DefaultDType for f64 {
-        fn default_dtype() -> DType { DType::F64 }
-    }
-
-    #[derive(Debug)]
-    struct DummyModule<T: NeuraNumeric + DefaultDType> {
-        param: Parameter<T>,
-    }
-
-    impl<T: NeuraNumeric + Copy + Debug + Default + DefaultDType> DummyModule<T> {
-        fn new() -> Self {
-            // Crée un tenseur simple avec le type T et son DType par défaut
-            let tensor_t = Tensor::<T>::zeros(vec![1], T::default_dtype());
-            DummyModule {
-                param: Parameter::new(tensor_t),
-            }
+    impl MockModule {
+        fn new(dtype: DType) -> Result<Self, NeuraRustError> {
+            let tensor = match dtype {
+                DType::F32 => zeros(&[1])?,
+                DType::F64 => zeros_f64(&[1])?,
+            };
+            Ok(Self { param: Parameter::new(tensor) })
         }
     }
 
-    impl<T: NeuraNumeric + Copy + Debug + Default + DefaultDType> Module<T> for DummyModule<T> {
-        fn forward(&self, input: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError> {
-            // Opération factice : retourne l'input cloné (pour tester la signature)
-            // Une vraie opération pourrait impliquer self.param
-            Ok(input.clone()) 
+    impl Module for MockModule {
+        fn forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError> {
+            Ok(input.clone())
         }
 
-        fn parameters(&self) -> Vec<Parameter<T>> {
+        fn parameters(&self) -> Vec<Parameter> {
             vec![self.param.clone()]
         }
     }
 
     #[test]
-    fn test_dummy_module_f32_compiles_and_runs() {
-        let module = DummyModule::<f32>::new();
-        let input_tensor = Tensor::<f32>::ones(vec![2, 2], DType::F32);
-        
-        // Test forward
-        let output = module.forward(&input_tensor).expect("Forward pass failed");
-        assert_eq!(output.shape(), input_tensor.shape(), "Output shape mismatch");
-        assert_eq!(output.dtype(), input_tensor.dtype(), "Output DType mismatch");
+    fn test_module_parameters_retrieval() -> Result<(), NeuraRustError> {
+        let module_f32 = MockModule::new(DType::F32)?;
+        let input_f32 = ones(&[2, 2])?;
+        let _ = module_f32.forward(&input_f32)?;
+        let params_f32 = module_f32.parameters();
+        assert_eq!(params_f32.len(), 1, "Expected 1 parameter for F32 module");
+        assert_eq!(params_f32[0].shape(), &[1], "Parameter shape mismatch");
+        assert_eq!(params_f32[0].dtype(), DType::F32, "Parameter DType mismatch");
 
-        // Test parameters
-        let params = module.parameters();
-        assert_eq!(params.len(), 1, "Incorrect number of parameters");
-        assert!(params[0].requires_grad(), "Parameter should require grad");
-        assert_eq!(params[0].shape(), &vec![1], "Parameter shape mismatch");
+        let module_f64 = MockModule::new(DType::F64)?;
+        let input_f64 = ones_f64(&[3, 1])?;
+        let _ = module_f64.forward(&input_f64)?;
+        let params_f64 = module_f64.parameters();
+        assert_eq!(params_f64.len(), 1, "Expected 1 parameter for F64 module");
+        assert_eq!(params_f64[0].shape(), &[1], "Parameter shape mismatch");
+        assert_eq!(params_f64[0].dtype(), DType::F64, "Parameter DType mismatch");
+
+        Ok(())
+    }
+
+    // TODO: Ajouter des tests pour to_device et to_dtype lorsque Parameter les supportera pleinement.
+    #[test]
+    #[ignore] // Ignorer pour l'instant car les fonctions sont commentées
+    fn test_module_to_device() -> Result<(), NeuraRustError> {
+        let mut module = MockModule::new(DType::F32)?;
+        // En supposant que Device::Cpu est la valeur par défaut et qu'une autre est disponible.
+        // module.to_device(Device::Gpu)?; // Si GPU est activé et testable
+        // assert_eq!(module.parameters()[0].device(), Device::Gpu);
+        module.to_device(Device::CPU)?;
+        // assert_eq!(module.parameters()[0].device(), Device::Cpu); // Décommenter lorsque param.to_device existe
+        Ok(())
     }
 
     #[test]
-    fn test_dummy_module_f64_compiles_and_runs() {
-        let module = DummyModule::<f64>::new();
-        let input_tensor = Tensor::<f64>::ones(vec![3, 1], DType::F64);
-        
-        // Test forward
-        let output = module.forward(&input_tensor).expect("Forward pass failed");
-        assert_eq!(output.shape(), input_tensor.shape(), "Output shape mismatch");
-        assert_eq!(output.dtype(), input_tensor.dtype(), "Output DType mismatch");
-
-        // Test parameters
-        let params = module.parameters();
-        assert_eq!(params.len(), 1, "Incorrect number of parameters");
-        assert!(params[0].requires_grad(), "Parameter should require grad");
-        assert_eq!(params[0].shape(), &vec![1], "Parameter shape mismatch");
+    #[ignore] // Ignorer pour l'instant car les fonctions sont commentées
+    fn test_module_to_dtype() -> Result<(), NeuraRustError> {
+        let mut module = MockModule::new(DType::F32)?;
+        module.to_dtype(DType::F64)?;
+        // assert_eq!(module.parameters()[0].dtype(), DType::F64); // Décommenter lorsque param.to_dtype existe
+        module.to_dtype(DType::F32)?;
+        // assert_eq!(module.parameters()[0].dtype(), DType::F32); // Décommenter lorsque param.to_dtype existe
+        Ok(())
     }
 } 

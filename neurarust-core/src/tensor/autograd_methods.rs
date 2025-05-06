@@ -5,6 +5,7 @@ use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use std::collections::HashMap;
 use std::sync::{Arc, RwLock};
+use crate::types::DType;
 
 /// This `impl` block provides methods related to automatic differentiation (autograd).
 impl Tensor {
@@ -221,8 +222,12 @@ impl Tensor {
                 let is_empty = numel == 0;
 
                 if is_scalar_like {
-                    // TODO: Replace with Tensor::ones_like(self) or similar factory function
-                    todo!("Create scalar tensor with value 1.0 of correct dtype/device");
+                    let self_dtype = self.dtype();
+                    match self_dtype {
+                        DType::F32 => crate::tensor::create::full(&[], 1.0f32)?,
+                        DType::F64 => crate::tensor::create::full_f64(&[], 1.0f64)?,
+                        // TODO: Add other DType variants if necessary or return an error
+                    }
                 } else if is_empty {
                      // TODO: Replace with Tensor::zeros_like(self) or similar factory function
                      todo!("Create empty tensor with correct shape/dtype/device");

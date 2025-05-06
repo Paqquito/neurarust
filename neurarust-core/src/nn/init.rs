@@ -1,8 +1,13 @@
-use crate::ops::traits::NeuraNumeric;
-use std::sync::{Arc, RwLockWriteGuard};
-use crate::buffer::CpuBuffer;
-use crate::tensor::TensorData;
-use rand::{Rng, distributions::{Uniform, Distribution, StandardNormal}};
+// use crate::ops::traits::NeuraNumeric; // Supprimé
+use std::sync::Arc; // RwLock supprimé
+use crate::buffer::{CpuBuffer, Buffer};
+use rand::distributions::{Uniform, Distribution}; // Rng supprimé
+use rand_distr::StandardNormal;
+use crate::tensor::Tensor;
+use crate::error::NeuraRustError;
+use crate::types::DType;
+// use crate::device::StorageDevice; // Supprimé
+use crate::tensor_data::TensorData;
 
 // TODO: Implement initialization functions (kaiming_uniform_, etc.)
 
@@ -16,7 +21,7 @@ use rand::{Rng, distributions::{Uniform, Distribution, StandardNormal}};
 /// # Returns
 /// A `Result` indicating success or a `NeuraRustError`.
 pub fn zeros_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
-    fill_inplace(tensor, 0.0)
+    fill_with_scalar(tensor, 0.0f64)
 }
 
 /// Fills the input `Tensor` with the scalar value 1.
@@ -29,7 +34,7 @@ pub fn zeros_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
 /// # Returns
 /// A `Result` indicating success or a `NeuraRustError`.
 pub fn ones_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
-    fill_inplace(tensor, 1.0)
+    fill_with_scalar(tensor, 1.0f64)
 }
 
 /// Fills the input `Tensor` with values according to the Kaiming uniform initialization method.
@@ -43,21 +48,12 @@ pub fn ones_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
 /// A `Result` indicating success or a `NeuraRustError`.
 pub fn kaiming_uniform_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
     let fan_in = calculate_fan_in(tensor)?;
-    let bound = (6.0 / fan_in as f64).sqrt(); // Calculate bound as f64 for precision
-    
-    // Create distribution based on tensor dtype
-    match tensor.dtype() {
-        DType::F32 => {
-            let bound_f32 = bound as f32;
-            let dist = Uniform::new(-bound_f32, bound_f32);
-            fill_inplace_distribution(tensor, &dist)
-        }
-        DType::F64 => {
-            let dist = Uniform::new(-bound, bound); // Use f64 bound
-            fill_inplace_distribution(tensor, &dist)
-        }
-        // Add other dtypes later if needed
-    }
+    let gain: f64 = (2.0_f64).sqrt(); // gain = sqrt(2) for LeakyReLU with negative_slope=0
+    let std = gain / (fan_in as f64).sqrt();
+    // Clacul de bound basé sur l'uniforme U(-sqrt(3)*std, sqrt(3)*std)
+    let bound = (3.0_f64).sqrt() * std;
+    let dist = Uniform::new(-bound, bound); // Distribution Uniforme sur f64
+    fill_with_distribution(tensor, &dist) // fill_with_distribution doit gérer le DType
 }
 
 /// Fills the input `Tensor` with values according to the Kaiming normal initialization method.
@@ -71,10 +67,11 @@ pub fn kaiming_uniform_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
 /// A `Result` indicating success or a `NeuraRustError`.
 pub fn kaiming_normal_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
     let fan_in = calculate_fan_in(tensor)?;
-    let std = (2.0 / fan_in as f64).sqrt(); // Calculate std as f64 for precision
-
-    // Use StandardNormal distribution and scale the result
-    fill_inplace_distribution_scaled(tensor, &StandardNormal, std)
+    let gain: f64 = (2.0_f64).sqrt();
+    let std = gain / (fan_in as f64).sqrt();
+    let dist = StandardNormal; // Distribution Normal(0, 1)
+    // Remplir avec N(0, std^2) = std * N(0, 1)
+    fill_with_distribution_scaled(tensor, &dist, std)
 }
 
 /// Fills the input `Tensor` with values according to the Xavier (Glorot) uniform initialization method.
@@ -88,19 +85,11 @@ pub fn kaiming_normal_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
 /// A `Result` indicating success or a `NeuraRustError`.
 pub fn xavier_uniform_(tensor: &mut Tensor) -> Result<(), NeuraRustError> {
     let (fan_in, fan_out) = calculate_fan_in_and_fan_out(tensor)?;
-    let bound = (6.0 / (fan_in + fan_out) as f64).sqrt(); // Calculate bound as f64
-
-    match tensor.dtype() {
-        DType::F32 => {
-            let bound_f32 = bound as f32;
-            let dist = Uniform::new(-bound_f32, bound_f32);
-            fill_inplace_distribution(tensor, &dist)
-        }
-        DType::F64 => {
-            let dist = Uniform::new(-bound, bound);
-            fill_inplace_distribution(tensor, &dist)
-        }
-    }
+    let gain: f64 = 1.0; // gain = 1 for sigmoid, tanh, etc.
+    let std = gain * (2.0 / (fan_in + fan_out) as f64).sqrt();
+    let bound = (3.0_f64).sqrt() * std;
+    let dist = Uniform::new(-bound, bound);
+    fill_with_distribution(tensor, &dist)
 }
 
 // --- Helper for calculating fan_in/fan_out ---
@@ -110,11 +99,10 @@ fn calculate_fan_in(tensor: &Tensor) -> Result<usize, NeuraRustError> {
     let shape = tensor.shape();
     if shape.len() < 2 {
         return Err(NeuraRustError::UnsupportedOperation(
-            "Fan in/out calculation requires at least 2 dimensions".to_string(),
+            "Fan in calculation requires at least 2 dimensions".to_string(),
         ));
     }
-    // Assuming standard weight shape (e.g., [out_features, in_features, ...])
-    Ok(shape[1])
+    Ok(shape[1]) // Typical for Linear layers (out_features, in_features)
 }
 
 // --- Helper for calculating fan_in/fan_out ---
@@ -125,9 +113,8 @@ fn calculate_fan_in_and_fan_out(tensor: &Tensor) -> Result<(usize, usize), Neura
             "Fan in/out calculation requires at least 2 dimensions".to_string(),
         ));
     }
-    // Assuming standard weight shape [out_features, in_features, ...]
-    let fan_out = shape[0];
     let fan_in = shape[1];
+    let fan_out = shape[0];
     Ok((fan_in, fan_out))
 }
 
@@ -135,53 +122,50 @@ fn calculate_fan_in_and_fan_out(tensor: &Tensor) -> Result<(usize, usize), Neura
 
 /// Helper function to fill a tensor in-place with values from a distribution.
 /// Assumes the Distribution `D` generates values of the correct type `T` matching the tensor buffer.
-fn fill_inplace_distribution<D, T>(tensor: &mut Tensor, dist: &D) -> Result<(), NeuraRustError>
+fn fill_with_distribution<D>(tensor: &mut Tensor, dist: &D) -> Result<(), NeuraRustError>
 where
-    D: Distribution<T>,
-    T: NeuraNumeric + Copy, // Tensor element type
+    D: Distribution<f64>, 
 {
-    let mut guard = tensor.write_data();
-    if guard.requires_grad && guard.grad_fn.is_none() {
-        return Err(NeuraRustError::InplaceModificationError {
-            operation: "fill_inplace_distribution".to_string(),
-            reason: "Cannot fill_inplace on a leaf tensor that requires grad.".to_string(),
-        });
-    }
-    if guard.device != crate::device::StorageDevice::CPU {
+    if tensor.requires_grad() {
         return Err(NeuraRustError::UnsupportedOperation(
-            "In-place distribution fill currently only supports CPU tensors.".to_string(),
+            format!("In-place modification (fill_with_distribution) on a tensor that requires grad is not supported.")
         ));
     }
-
+    let dtype = tensor.dtype();
+    let shape = tensor.shape();
+    let numel = shape.iter().product();
     let mut rng = rand::thread_rng();
 
-    // Use the correct buffer based on T (which should match guard.dtype)
-    match guard.buffer {
-        CpuBuffer::F32(ref mut arc_vec) => {
-            // Ensure T is f32, otherwise this is a logic error
-             if let Some(vec) = Arc::get_mut(arc_vec) {
-                for elem in vec.iter_mut() {
-                     *elem = dist.sample(&mut rng); // D samples f32
-                }
-            } else {
-                 return Err(NeuraRustError::InternalError(
-                    "Failed to get mutable access to F32 buffer for in-place distribution fill.".to_string(),
-                 ));
+    // Créer le nouveau buffer CPU rempli
+    let new_cpu_buffer = match dtype {
+        DType::F32 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(dist.sample(&mut rng) as f32);
             }
+            CpuBuffer::F32(Arc::new(data_vec))
         }
-        CpuBuffer::F64(ref mut arc_vec) => {
-             // Ensure T is f64
-             if let Some(vec) = Arc::get_mut(arc_vec) {
-                for elem in vec.iter_mut() {
-                    *elem = dist.sample(&mut rng); // D samples f64
-                }
-            } else {
-                 return Err(NeuraRustError::InternalError(
-                    "Failed to get mutable access to F64 buffer for in-place distribution fill.".to_string(),
-                 ));
+        DType::F64 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(dist.sample(&mut rng));
             }
+            CpuBuffer::F64(Arc::new(data_vec))
         }
-    }
+    };
+
+    // Créer le nouveau Buffer (CPU seulement pour l'instant)
+    let new_buffer = Buffer::Cpu(new_cpu_buffer);
+
+    // Remplacer l'ancien buffer dans TensorData
+    let mut guard = tensor.write_data();
+    guard.buffer = Arc::new(new_buffer);
+    // TODO: Faut-il aussi mettre à jour offset/strides ? Probablement pas si shape reste identique.
+    // Strides devrait être recalculé si nécessaire, mais ici on garde la même shape.
+    // Offset devrait être 0 pour un buffer fraîchement créé.
+    guard.offset = 0;
+    guard.strides = TensorData::calculate_contiguous_strides(&shape); // Recalculer strides contigus
+
     Ok(())
 }
 
@@ -189,55 +173,48 @@ where
 
 /// Helper function to fill a tensor in-place with values from a distribution, scaled by a factor.
 /// Assumes the Distribution `D` generates values of type f64 or f32.
-fn fill_inplace_distribution_scaled<D, T>(tensor: &mut Tensor, dist: &D, scale: f64) -> Result<(), NeuraRustError>
+fn fill_with_distribution_scaled<D>(
+    tensor: &mut Tensor, 
+    dist: &D, 
+    scale: f64
+) -> Result<(), NeuraRustError>
 where
-    D: Distribution<T>,
-    T: NeuraNumeric + Copy, // Type generated by the distribution (f32 or f64)
+    D: Distribution<f64>,
 {
-    let mut guard = tensor.write_data();
-    if guard.requires_grad && guard.grad_fn.is_none() {
-        return Err(NeuraRustError::InplaceModificationError {
-            operation: "fill_inplace_distribution_scaled".to_string(),
-            reason: "Cannot fill_inplace on a leaf tensor that requires grad.".to_string(),
-        });
-    }
-    if guard.device != crate::device::StorageDevice::CPU {
+    if tensor.requires_grad() {
         return Err(NeuraRustError::UnsupportedOperation(
-            "In-place distribution fill currently only supports CPU tensors.".to_string(),
+            format!("In-place modification (fill_with_distribution_scaled) on a tensor that requires grad is not supported.")
         ));
     }
-
+    let dtype = tensor.dtype();
+    let shape = tensor.shape();
+    let numel = shape.iter().product();
     let mut rng = rand::thread_rng();
 
-    match guard.buffer {
-        CpuBuffer::F32(ref mut arc_vec) => {
-            let scale_f32 = scale as f32;
-            if let Some(vec) = Arc::get_mut(arc_vec) {
-                for elem in vec.iter_mut() {
-                    // Assuming D samples f32 directly for StandardNormal
-                    let sample: f32 = dist.sample(&mut rng);
-                    *elem = sample * scale_f32;
-                }
-            } else {
-                 return Err(NeuraRustError::InternalError(
-                    "Failed to get mutable access to F32 buffer for scaled in-place fill.".to_string(),
-                 ));
+    let new_cpu_buffer = match dtype {
+        DType::F32 => {
+            let _scale_f32 = scale as f32;
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push((dist.sample(&mut rng) * scale) as f32);
             }
+            CpuBuffer::F32(Arc::new(data_vec))
         }
-        CpuBuffer::F64(ref mut arc_vec) => {
-            if let Some(vec) = Arc::get_mut(arc_vec) {
-                for elem in vec.iter_mut() {
-                     // Assuming D samples f64 directly for StandardNormal
-                    let sample: f64 = dist.sample(&mut rng);
-                    *elem = sample * scale; // Use f64 scale
-                }
-            } else {
-                 return Err(NeuraRustError::InternalError(
-                    "Failed to get mutable access to F64 buffer for scaled in-place fill.".to_string(),
-                 ));
+        DType::F64 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(dist.sample(&mut rng) * scale);
             }
+            CpuBuffer::F64(Arc::new(data_vec))
         }
-    }
+    };
+
+    let new_buffer = Buffer::Cpu(new_cpu_buffer);
+    let mut guard = tensor.write_data();
+    guard.buffer = Arc::new(new_buffer);
+    guard.offset = 0;
+    guard.strides = TensorData::calculate_contiguous_strides(&shape);
+
     Ok(())
 }
 
@@ -245,62 +222,33 @@ where
 
 /// Helper function to fill a tensor in-place with a scalar value.
 /// Handles different data types.
-fn fill_inplace<T>(tensor: &mut Tensor, value: T) -> Result<(), NeuraRustError>
-where
-    T: NeuraNumeric + Copy, // Value must be numeric and copyable
-{
-    let mut guard = tensor.write_data(); // Get write lock
-
-    // Check for autograd safety: Cannot modify leaf tensor requiring grad in-place
-    if guard.requires_grad && guard.grad_fn.is_none() {
-        return Err(NeuraRustError::InplaceModificationError {
-            operation: "fill_inplace".to_string(),
-            reason: "Cannot fill_inplace on a leaf tensor that requires grad.".to_string(),
-        });
-    }
-
-    // TODO: Later, handle non-CPU devices.
-    if guard.device != crate::device::StorageDevice::CPU {
+fn fill_with_scalar(tensor: &mut Tensor, value: f64) -> Result<(), NeuraRustError> {
+    if tensor.requires_grad() {
         return Err(NeuraRustError::UnsupportedOperation(
-            "In-place fill currently only supports CPU tensors.".to_string(),
+            format!("In-place modification (fill_with_scalar) on a tensor that requires grad is not supported.")
         ));
     }
+    let dtype = tensor.dtype();
+    let shape = tensor.shape();
+    let numel = shape.iter().product();
 
-    // Match on DType and modify the buffer
-    match guard.buffer {
-        CpuBuffer::F32(ref mut arc_vec) => {
-            let val_f32 = value.to_f32().ok_or_else(|| NeuraRustError::DataTypeMismatch {
-                operation: "fill_inplace".to_string(),
-                expected: DType::F32,
-                actual: guard.dtype, // Should match T but good practice
-            })?;
-            if let Some(vec) = Arc::get_mut(arc_vec) {
-                vec.fill(val_f32);
-            } else {
-                // Handle case where Arc has multiple owners (should not happen if called correctly?)
-                // We might need to clone/reallocate if we can't get mutable access.
-                // For now, return an error or potentially clone.
-                 return Err(NeuraRustError::InternalError(
-                    "Failed to get mutable access to F32 buffer for in-place fill.".to_string(),
-                 ));
-            }
+    let new_cpu_buffer = match dtype {
+        DType::F32 => {
+            let value_f32 = value as f32;
+            let data_vec = vec![value_f32; numel];
+            CpuBuffer::F32(Arc::new(data_vec))
         }
-        CpuBuffer::F64(ref mut arc_vec) => {
-            let val_f64 = value.to_f64().ok_or_else(|| NeuraRustError::DataTypeMismatch {
-                operation: "fill_inplace".to_string(),
-                expected: DType::F64,
-                actual: guard.dtype,
-            })?;
-             if let Some(vec) = Arc::get_mut(arc_vec) {
-                vec.fill(val_f64);
-            } else {
-                 return Err(NeuraRustError::InternalError(
-                    "Failed to get mutable access to F64 buffer for in-place fill.".to_string(),
-                 ));
-            }
+        DType::F64 => {
+            let data_vec = vec![value; numel];
+            CpuBuffer::F64(Arc::new(data_vec))
         }
-        // Add other dtypes later
-    }
+    };
+    
+    let new_buffer = Buffer::Cpu(new_cpu_buffer);
+    let mut guard = tensor.write_data();
+    guard.buffer = Arc::new(new_buffer);
+    guard.offset = 0;
+    guard.strides = TensorData::calculate_contiguous_strides(&shape);
 
     Ok(())
 }

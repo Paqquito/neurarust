@@ -30,7 +30,7 @@ pub mod buffer;
 pub mod device;
 
 // Declare new top-level modules
-// pub mod nn; // REMOVED Phase 2 component
+pub mod nn;
 // pub mod optim; // REMOVED: Optimizers moved to neurarust-optim crate
 pub mod utils;
 

@@ -1,167 +1,199 @@
 // neurarust-core/src/nn/losses/mse.rs
 
 use crate::tensor::Tensor;
-use crate::ops;
+// crate::ops is likely not needed if operations are tensor methods
 use crate::autograd::BackwardOp;
 use crate::tensor_data::TensorData;
-use std::fmt::Debug;
-use std::ops::{Sub, Mul, AddAssign, Neg, Div, Add};
-use num_traits::{Zero, One, FromPrimitive};
-use std::iter::Sum;
-use std::marker::PhantomData;
-use std::rc::{Rc, Weak};
-use std::cell::RefCell;
-use std::collections::HashMap;
 use crate::error::NeuraRustError;
+use crate::types::DType; // Renommé depuis crate::DType pour la consistance, ou utiliser crate::DType directement
+// use crate::ops; // Supprimé
+// use std::str::FromStr; // Supprimé
+// use crate::autograd::{BackwardOp, NodeId, OpOutputs}; // Ligne supprimée
+
+use std::fmt::Debug;
+use std::sync::{Arc, RwLock, Weak};
+// Only Neg might be needed if .neg() is a trait method not inherent to Tensor
+// use std::ops::Neg; // Import std::ops::Neg supprimé/commenté
+
+// Importer les opérations nécessaires
+use crate::ops::arithmetic::{sub_op, mul_op, div_op}; // neg_op retiré
+// Ne pas importer mean_all/sum_all, utiliser les méthodes de Tensor
 
 /// Specifies the reduction to apply to the output:
 /// 'none' | 'mean' | 'sum'
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Reduction {
-    None, // Not yet implemented
     Mean,
     Sum,
+    // None, // TODO: Consider if 'None' (no reduction) is needed
 }
 
-impl Default for Reduction {
-    fn default() -> Self {
-        Reduction::Mean
+impl Reduction {
+    pub fn from_str(s: &str) -> Result<Self, NeuraRustError> {
+        match s.to_lowercase().as_str() {
+            "mean" => Ok(Reduction::Mean),
+            "sum" => Ok(Reduction::Sum),
+            // "none" => Ok(Reduction::None),
+            _ => Err(NeuraRustError::UnsupportedOperation(format!("Unsupported reduction type: {}", s))),
+        }
     }
 }
 
-/// Computes the mean squared error (squared L2 norm) between each element
-/// in the input `input` and target `target`.
+/// Computes the Mean Squared Error (MSE) loss between input and target tensors.
 ///
-/// Formula: loss(input, target) = mean or sum of (input_i - target_i)^2
-#[derive(Debug, Default, Clone)]
+/// The loss can be configured to compute the mean or sum of squared errors.
+///
+/// # Fields
+/// * `reduction`: Specifies the type of reduction to apply to the output: `Mean` or `Sum`.
+/// * `cached_input_shape`: Optionally stores the shape of the input tensor from the last forward pass.
+///                         Used for validation in the backward pass.
+/// * `cached_target_shape`: Optionally stores the shape of the target tensor from the last forward pass.
+///                          Used for validation in the backward pass.
+#[derive(Debug, Clone)]
 pub struct MSELoss {
     reduction: Reduction,
+    // We don't need to store shapes if TensorData holds them and we have pointers
+    // cached_input_shape: Option<Vec<usize>>,
+    // cached_target_shape: Option<Vec<usize>>,
 }
 
 impl MSELoss {
-    /// Creates a new MSELoss module.
-    pub fn new(reduction: Reduction) -> Self {
-        // TODO: Add support for Reduction::None
-        if reduction == Reduction::None {
-            unimplemented!("Reduction::None is not yet supported for MSELoss");
+    /// Creates a new `MSELoss` module.
+    ///
+    /// # Arguments
+    /// * `reduction`: The reduction method to apply (`Mean` or `Sum`).
+    ///
+    /// # Panics
+    /// Panics if an unsupported reduction type string is provided (should be an error).
+    //TODO: Change to Result later
+    pub fn new(reduction_str: &str) -> Self {
+        let reduction = Reduction::from_str(reduction_str)
+            .unwrap_or_else(|e| panic!("Failed to create MSELoss: {}", e)); // Or handle error appropriately
+        MSELoss {
+            reduction,
+            // cached_input_shape: None,
+            // cached_target_shape: None,
         }
-        MSELoss { reduction }
     }
 
-    /// Default MSELoss with mean reduction.
-    pub fn default() -> Self {
-        MSELoss { reduction: Reduction::Mean }
-    }
-
-    /// Calculates the Mean Squared Error loss.
-    /// Returns a Result wrapping a scalar Tensor (0-dim) or an error.
-    pub fn forward<T>(&mut self, input: &Tensor<T>, target: &Tensor<T>) -> Result<Tensor<T>, NeuraRustError> 
-    where 
-        T: Sub<Output = T> + Mul<Output = T> + Add<Output = T> + Div<Output = T> + Neg<Output=T> 
-         + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + PartialEq + FromPrimitive,
-    {
+    // Renommer en `calculate` ou garder `forward` comme méthode spécifique à la perte
+    pub fn calculate(&self, input: &Tensor, target: &Tensor) -> Result<Tensor, NeuraRustError> {
         if input.shape() != target.shape() {
-            return Err(NeuraRustError::IncompatibleShapes {
-                shape1: input.shape(),
-                shape2: target.shape(),
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: format!("{:?}", target.shape()),
+                actual: format!("{:?}", input.shape()),
+                operation: "MSELoss calculate".to_string(),
             });
         }
 
-        let diff = ops::arithmetic::sub_op(input, target)?;
+        // input.set_requires_grad(true); // Should be set by the user if input is a parameter or needs grad
 
-        let sq_diff = ops::arithmetic::mul_op(&diff, &diff)?;
-        
-        let sum_val = ops::reduction::sum::sum(&sq_diff)?;
+        let diff = sub_op(input, target)?;
+        let squared_diff = mul_op(&diff, &diff)?;
 
-        let n = input.numel();
-        let n_t = T::from_usize(n).ok_or_else(|| 
-            NeuraRustError::InternalError("Failed to convert numel to tensor type T".to_string())
-        )?;
-        let n_tensor = Tensor::scalar(n_t);
-        
-        let two = T::from_f64(2.0).expect("Cannot create 2.0 from f64 for type T");
-
-        let result = match self.reduction {
-            Reduction::Sum => sum_val,
-            Reduction::Mean => ops::arithmetic::div_op(&sum_val, &n_tensor)?,
-            Reduction::None => unreachable!(),
+        // Utiliser les méthodes mean/sum de Tensor pour la réduction globale
+        // Supposant que None pour axes signifie réduction globale
+        let loss_val_tensor = match self.reduction {
+            Reduction::Mean => squared_diff.mean(None, false)?,
+            Reduction::Sum => squared_diff.sum(None, false)?,
         };
 
+        // If either input or target requires grad, set up for backward pass
         if input.requires_grad() || target.requires_grad() {
             let grad_fn = MSEBackward {
-                input_ref: input.get_weak_ref(),
-                target_ref: target.get_weak_ref(),
-                num_elements: n,
-                reduction: self.reduction,
-                _phantom: PhantomData,
+                input: Arc::downgrade(&input.data),
+                target: Arc::downgrade(&target.data),
+                reduction: self.reduction.clone(),
             };
-            result.set_grad_fn(Some(Rc::new(grad_fn)));
+            loss_val_tensor.set_grad_fn(Some(Arc::new(grad_fn) as Arc<dyn BackwardOp>))?;
         }
-
-        Ok(result)
+        
+        Ok(loss_val_tensor)
     }
 }
 
-// --- Backward Operation ---
-
+// Placeholder for MSEBackward. This will be heavily modified.
 #[derive(Debug)]
-struct MSEBackward<T> {
-    input_ref: Weak<RefCell<TensorData<T>>>,
-    target_ref: Weak<RefCell<TensorData<T>>>,
-    num_elements: usize,
+struct MSEBackward {
+    input: Weak<RwLock<TensorData>>,
+    target: Weak<RwLock<TensorData>>,
     reduction: Reduction,
-    _phantom: PhantomData<T>,
 }
 
-impl<T> BackwardOp<T> for MSEBackward<T> 
-where 
-    T: Sub<Output = T> + Div<Output = T> + Mul<Output = T> + Neg<Output=T> 
-         + AddAssign + Copy + Clone + Debug + Default + Zero + One + Sum + 'static + PartialEq + FromPrimitive,
-{
-    fn backward(&self, upstream_grad: &Tensor<T>, gradients: &mut HashMap<*const RefCell<TensorData<T>>, Tensor<T>>) { 
-        if let (Some(input_rc), Some(target_rc)) = (self.input_ref.upgrade(), self.target_ref.upgrade()) {
-            let input_tensor = Tensor { data: input_rc.clone() };
-            let target_tensor = Tensor { data: target_rc.clone() };
-            let diff = ops::arithmetic::sub_op(&input_tensor, &target_tensor)
-                 .expect("Internal error: Failed subtraction in MSE backward");
-            let _two = T::from_f64(2.0).expect("Failed to create 2.0");
-            assert_eq!(upstream_grad.numel(), 1, "MSE Loss must be scalar for backward");
-            let upstream_scalar = upstream_grad.borrow_data_buffer()[0];
-            let factor = match self.reduction {
-                Reduction::Sum => T::from_f64(2.0).unwrap() * upstream_scalar,
-                Reduction::Mean => {
-                     let n_t = T::from_usize(self.num_elements).expect("Failed to create n");
-                     (T::from_f64(2.0).unwrap() * upstream_scalar) / n_t 
-                },
-                Reduction::None => unreachable!(),
-            };
-
-            let factor_tensor = Tensor::scalar(factor);
-                 
-            let final_local_grad_res = ops::arithmetic::mul_op(&factor_tensor, &diff);
-
-            if input_tensor.requires_grad() {
-                let final_local_grad = final_local_grad_res.as_ref()
-                    .expect("Internal error: Failed scalar multiplication in MSE backward");
-                crate::autograd::accumulate_gradient(gradients, &self.input_ref, final_local_grad.clone());
-            }
-            if target_tensor.requires_grad() {
-                 let final_local_grad = final_local_grad_res
-                      .expect("Internal error: Failed scalar multiplication (getting tensor for neg)");
-                 let final_local_grad_neg = ops::arithmetic::neg_op(&final_local_grad)
-                      .expect("Internal error: Failed negation for target grad");
-                crate::autograd::accumulate_gradient(gradients, &self.target_ref, final_local_grad_neg);
-            }
-        } else {
-             eprintln!("MSEBackward: Input or Target tensor weak reference expired.");
+impl BackwardOp for MSEBackward {
+    fn inputs(&self) -> Vec<*const RwLock<TensorData>> {
+        let mut parent_ptrs = Vec::with_capacity(2);
+        // It's critical that arcs are available. If not, graph is broken.
+        // Panicking here makes sense if the invariant (parents live longer than child's grad_fn) is broken.
+        match self.input.upgrade() {
+            Some(input_arc) => parent_ptrs.push(Arc::as_ptr(&input_arc) as *const RwLock<TensorData>),
+            None => panic!("MSEBackward: Input tensor weak reference expired during inputs() call. Graph integrity likely compromised."),
         }
+        match self.target.upgrade() {
+            Some(target_arc) => parent_ptrs.push(Arc::as_ptr(&target_arc) as *const RwLock<TensorData>),
+            None => panic!("MSEBackward: Target tensor weak reference expired during inputs() call. Graph integrity likely compromised."),
+        }
+        parent_ptrs
     }
 
-    fn inputs(&self) -> Vec<Weak<RefCell<TensorData<T>>>> {
-        vec![self.input_ref.clone(), self.target_ref.clone()]
+    fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        let input_arc = self.input.upgrade().ok_or_else(|| 
+            NeuraRustError::BackwardError("Input tensor weak reference expired for MSEBackward backward pass.".to_string())
+        )?;
+        let target_arc = self.target.upgrade().ok_or_else(|| 
+            NeuraRustError::BackwardError("Target tensor weak reference expired for MSEBackward backward pass.".to_string())
+        )?;
+
+        let input_tensor = Tensor { data: input_arc };
+        let target_tensor = Tensor { data: target_arc };
+
+        if !(grad_output.shape().is_empty() || grad_output.shape() == [1] || grad_output.numel() == 1) {
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: "scalar (shape [] or [1])".to_string(),
+                actual: format!("{:?}", grad_output.shape()),
+                operation: "MSEBackward: grad_output must be scalar".to_string(),
+            });
+        }
+
+        let diff = sub_op(&input_tensor, &target_tensor)?;
+
+        let dtype = diff.dtype();
+        
+        let two_scalar = match dtype {
+            DType::F32 => crate::tensor::create::full(&[], 2.0f32)?,
+            DType::F64 => crate::tensor::create::full_f64(&[], 2.0f64)?,
+        };
+        
+        let common_term = mul_op(&diff, &two_scalar)?;
+        let grad_input_unscaled = mul_op(grad_output, &common_term)?;
+
+        let final_grad_input = if self.reduction == Reduction::Mean {
+            let num_elements = input_tensor.numel();
+            if num_elements == 0 {
+                return Err(NeuraRustError::InternalError("MSEBackward: Number of elements is zero, cannot take mean.".to_string()));
+            }
+            let num_elements_scalar = match dtype {
+                DType::F32 => crate::tensor::create::full(&[], num_elements as f32)?,
+                DType::F64 => crate::tensor::create::full_f64(&[], num_elements as f64)?,
+            };
+            div_op(&grad_input_unscaled, &num_elements_scalar)?
+        } else { // Reduction::Sum
+            grad_input_unscaled
+        };
+
+        let minus_one_scalar = match dtype {
+            DType::F32 => crate::tensor::create::full(&[], -1.0f32)?,
+            DType::F64 => crate::tensor::create::full_f64(&[], -1.0f64)?,
+        };
+        let final_grad_target = mul_op(&final_grad_input, &minus_one_scalar)?;
+        // Ou si neg() existe : let final_grad_target = final_grad_input.neg()?;
+
+        Ok(vec![final_grad_input, final_grad_target])
     }
 }
 
+// Note: The original test module is removed from this file.
+// It is expected to be in mse_test.rs.
 #[cfg(test)]
 #[path = "mse_test.rs"]
 mod tests; 

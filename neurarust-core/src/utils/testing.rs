@@ -33,3 +33,35 @@ pub fn check_tensor_near(tensor: &Tensor, expected_shape: &[usize], expected_dat
         );
     }
 }
+
+/// Checks if two F64 tensors are approximately equal element-wise.
+pub fn check_tensor_near_f64(tensor: &Tensor, expected_shape: &[usize], expected_data: &[f64], tol: f64) {
+    assert_eq!(
+        tensor.shape(),
+        expected_shape,
+        "Shape mismatch: expected {:?}, got {:?}",
+        expected_shape,
+        tensor.shape()
+    );
+
+    let actual_data = tensor.get_f64_data().expect("Failed to get F64 data for comparison");
+
+    assert_eq!(
+        actual_data.len(),
+        expected_data.len(),
+        "Data length mismatch: expected {}, got {}",
+        expected_data.len(),
+        actual_data.len()
+    );
+
+    for (i, (a, b)) in actual_data.iter().zip(expected_data.iter()).enumerate() {
+        assert!(
+            AbsDiffEq::abs_diff_eq(a, b, tol),
+            "Data mismatch at index {}: expected {}, got {}. Difference: {}",
+            i,
+            b,
+            a,
+            (a - b).abs()
+        );
+    }
+}

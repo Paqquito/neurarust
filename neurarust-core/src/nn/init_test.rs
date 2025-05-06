@@ -1,18 +1,18 @@
 #[cfg(test)]
 mod tests {
     use crate::nn::init::{zeros_, ones_, kaiming_uniform_, kaiming_normal_, xavier_uniform_};
-    use crate::tensor::Tensor;
+    use crate::tensor::{zeros, ones, zeros_f64, ones_f64};
     use crate::DType;
 
     #[test]
     fn test_zeros_() {
-        let mut t = Tensor::ones(&[2, 3]).unwrap(); // Start with ones
+        let mut t = ones(&[2, 3]).unwrap();
         zeros_(&mut t).unwrap();
         assert_eq!(t.dtype(), DType::F32);
         let data = t.get_f32_data().unwrap();
         assert!(data.iter().all(|&x| x == 0.0));
 
-        let mut t_f64 = Tensor::ones_f64(&[1, 5]).unwrap();
+        let mut t_f64 = ones_f64(&[1, 5]).unwrap();
         zeros_(&mut t_f64).unwrap();
         assert_eq!(t_f64.dtype(), DType::F64);
         let data_f64 = t_f64.get_f64_data().unwrap();
@@ -21,13 +21,13 @@ mod tests {
 
     #[test]
     fn test_ones_() {
-        let mut t = Tensor::zeros(&[4]).unwrap(); // Start with zeros
+        let mut t = zeros(&[4]).unwrap();
         ones_(&mut t).unwrap();
         assert_eq!(t.dtype(), DType::F32);
         let data = t.get_f32_data().unwrap();
         assert!(data.iter().all(|&x| x == 1.0));
 
-        let mut t_f64 = Tensor::zeros_f64(&[2, 1, 2]).unwrap();
+        let mut t_f64 = zeros_f64(&[2, 1, 2]).unwrap();
         ones_(&mut t_f64).unwrap();
         assert_eq!(t_f64.dtype(), DType::F64);
         let data_f64 = t_f64.get_f64_data().unwrap();
@@ -37,7 +37,7 @@ mod tests {
     #[test]
     fn test_kaiming_uniform_() {
         // Standard case: Linear layer weights
-        let mut t_f32 = Tensor::zeros(&[10, 5]).unwrap(); // Shape [out, in]
+        let mut t_f32 = zeros(&[10, 5]).unwrap();
         kaiming_uniform_(&mut t_f32).unwrap();
         let fan_in = 5;
         let bound = (6.0 / fan_in as f64).sqrt() as f32;
@@ -47,7 +47,7 @@ mod tests {
         assert!(data_f32.iter().any(|&x| x != 0.0));
 
         // F64 case
-        let mut t_f64 = Tensor::zeros_f64(&[4, 8]).unwrap();
+        let mut t_f64 = zeros_f64(&[4, 8]).unwrap();
         kaiming_uniform_(&mut t_f64).unwrap();
         let fan_in_f64 = 8;
         let bound_f64 = (6.0 / fan_in_f64 as f64).sqrt();
@@ -56,7 +56,7 @@ mod tests {
         assert!(data_f64.iter().any(|&x| x != 0.0));
 
         // Error case: 1D tensor
-        let mut t_1d = Tensor::zeros(&[10]).unwrap();
+        let mut t_1d = zeros(&[10]).unwrap();
         let result = kaiming_uniform_(&mut t_1d);
         assert!(result.is_err());
     }
@@ -64,7 +64,7 @@ mod tests {
     #[test]
     fn test_kaiming_normal_() {
         // F32 case
-        let mut t_f32 = Tensor::zeros(&[200, 100]).unwrap(); // Larger shape for better stats
+        let mut t_f32 = zeros(&[200, 100]).unwrap();
         kaiming_normal_(&mut t_f32).unwrap();
         let fan_in = 100;
         let expected_std = (2.0 / fan_in as f64).sqrt() as f32;
@@ -85,7 +85,7 @@ mod tests {
         assert!((stddev - expected_std).abs() / expected_std < 0.2, "StdDev deviates too much from expected"); // Loose check for stddev (20% tolerance)
 
         // F64 case
-        let mut t_f64 = Tensor::zeros_f64(&[50, 200]).unwrap();
+        let mut t_f64 = zeros_f64(&[50, 200]).unwrap();
         kaiming_normal_(&mut t_f64).unwrap();
         let fan_in_f64 = 200;
         let expected_std_f64 = (2.0 / fan_in_f64 as f64).sqrt();
@@ -102,7 +102,7 @@ mod tests {
         assert!((stddev_f64 - expected_std_f64).abs() / expected_std_f64 < 0.2, "StdDev (F64) deviates too much from expected");
 
         // Error case: 1D tensor
-        let mut t_1d = Tensor::zeros(&[10]).unwrap();
+        let mut t_1d = zeros(&[10]).unwrap();
         let result = kaiming_normal_(&mut t_1d);
         assert!(result.is_err());
     }
@@ -110,7 +110,7 @@ mod tests {
     #[test]
     fn test_xavier_uniform_() {
         // F32 case
-        let mut t_f32 = Tensor::zeros(&[50, 20]).unwrap(); 
+        let mut t_f32 = zeros(&[50, 20]).unwrap();
         xavier_uniform_(&mut t_f32).unwrap();
         let fan_in = 20;
         let fan_out = 50;
@@ -120,7 +120,7 @@ mod tests {
         assert!(data_f32.iter().any(|&x| x != 0.0)); // Check not all zeros
 
         // F64 case
-        let mut t_f64 = Tensor::zeros_f64(&[10, 30]).unwrap();
+        let mut t_f64 = zeros_f64(&[10, 30]).unwrap();
         xavier_uniform_(&mut t_f64).unwrap();
         let fan_in_f64 = 30;
         let fan_out_f64 = 10;
@@ -130,15 +130,15 @@ mod tests {
         assert!(data_f64.iter().any(|&x| x != 0.0));
 
         // Error case: 1D tensor
-        let mut t_1d = Tensor::zeros(&[10]).unwrap();
+        let mut t_1d = zeros(&[10]).unwrap();
         let result = xavier_uniform_(&mut t_1d);
         assert!(result.is_err());
     }
 
     #[test]
     fn test_fill_inplace_autograd_error() {
-        let mut t = Tensor::zeros(&[2]).unwrap();
-        t.set_requires_grad(true);
+        let mut t = zeros(&[2]).unwrap();
+        let _ = t.set_requires_grad(true);
         let result = zeros_(&mut t);
         assert!(result.is_err());
         // Optionally check the specific error type
