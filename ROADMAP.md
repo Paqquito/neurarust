@@ -141,12 +141,12 @@
             *   [✅] Define `trait Module` with `forward` and potentially `parameters`.
             *   [✅] Add `rustdoc`.
         *   **Step 1.B.7: Implement `nn::Linear` Layer** *(Formerly 1.B.3)*
-            *   [ ] Create `src/nn/layers/linear.rs`.
-            *   [ ] Define `Linear` struct (`weight: Parameter`, `bias: Option<Parameter>`).
-            *   [ ] Implement `new()` using helpers from `nn::init` (Step 1.B.4).
-            *   [ ] Implement `Module` trait (`forward` using existing ops).
-            *   [ ] Add tests (constructor, forward, shape, autograd via `check_grad`).
-            *   [ ] Add `rustdoc`.
+            *   [✅] Create `src/nn/layers/linear.rs`.
+            *   [✅] Define `Linear` struct (`weight: Parameter`, `bias: Option<Parameter>`).
+            *   [✅] Implement `new()` using helpers from `nn::init` (Step 1.B.4).
+            *   [✅] Implement `Module` trait (`forward` using existing ops).
+            *   [✅] Add tests (constructor, forward, shape, autograd via `check_grad`).
+            *   [✅] Add `rustdoc`.
         *   **Step 1.B.8: Implement `nn::MSELoss` Function** *(Formerly 1.B.4)*
             *   [ ] Create `src/nn/losses/mse.rs`.
             *   [ ] Define `MSELoss` struct/function with reduction options.
