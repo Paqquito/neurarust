@@ -219,8 +219,8 @@
             *   [✅] Implement `Tensor::sub_scalar_(&mut self, scalar: S)`.
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.8: Implement `mul_scalar_`**
-            *   [ ] Implement `Tensor::mul_scalar_(&mut self, scalar: S)`.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Implement `Tensor::mul_scalar_(&mut self, scalar: S)`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.9: Implement `div_scalar_`**
             *   [ ] Implement `Tensor::div_scalar_(&mut self, scalar: S)`.
             *   [ ] Handle division by zero scalar.
