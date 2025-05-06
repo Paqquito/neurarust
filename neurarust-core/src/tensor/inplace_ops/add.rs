@@ -4,7 +4,7 @@ use crate::{
     types::DType,
     // buffer::{Buffer, CpuBuffer}, // Déjà géré par crate::buffer::
     tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64},
-    tensor::utils::{broadcast_shapes},
+    tensor::utils::broadcast_shapes,
 };
 use std::sync::Arc;
 // use std::ops::AddAssign; // Non utilisé directement ici, mais dans l'helper des scalaires
