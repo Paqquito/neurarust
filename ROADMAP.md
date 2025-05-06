@@ -204,8 +204,8 @@
             *   [✅] Implement `Tensor::mul_`, similar to `add_`.
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.4: Implement `div_`**
-            *   [ ] Implement `Tensor::div_`, similar to `add_`.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Implement `Tensor::div_`, similar to `mul_`, handle division by zero.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.5: Refactor Training Loop Example (Optional but Recommended)**
             *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`.
 

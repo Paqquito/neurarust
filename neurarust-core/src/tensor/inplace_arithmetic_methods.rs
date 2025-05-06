@@ -114,6 +114,52 @@ impl Tensor {
     pub fn mul_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::mul::perform_mul_inplace(self, other)
     }
+
+    /// Performs in-place division of this tensor by another tensor.
+    ///
+    /// `self /= other`
+    ///
+    /// This operation modifies the tensor's data directly.
+    /// It supports broadcasting the `other` tensor to the shape of `self`.
+    /// It will return an `ArithmeticError` if division by zero occurs.
+    ///
+    /// # Arguments
+    ///
+    /// * `other`: The tensor to divide `self` by.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(())` if the operation is successful.
+    /// * `Err(NeuraRustError)` if:
+    ///     * Division by zero occurs (`ArithmeticError`).
+    ///     * The tensors have different data types.
+    ///     * Broadcasting is not possible.
+    ///     * `self` requires gradient computation.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use neurarust_core::{Tensor, NeuraRustError, DType};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// # let mut a = Tensor::new(vec![10.0f32, 20.0, 30.0, 40.0], vec![2, 2])?;
+    /// # let b = Tensor::new(vec![2.0f32, 5.0, 2.0, 10.0], vec![2, 2])?;
+    /// # a.div_(&b)?;
+    /// # assert_eq!(a.get_f32_data().unwrap(), &[5.0, 4.0, 15.0, 4.0]);
+    /// #
+    /// # let mut c = Tensor::new(vec![10.0f32, 20.0], vec![1, 2])?;
+    /// # let d = Tensor::new(vec![2.0f32], vec![1])?; // Scalar broadcast
+    /// # c.div_(&d)?;
+    /// # assert_eq!(c.get_f32_data().unwrap(), &[5.0, 10.0]);
+    /// #
+    /// # let mut e = Tensor::new(vec![1.0f32], vec![1])?;
+    /// # let f = Tensor::new(vec![0.0f32], vec![1])?;
+    /// # assert!(matches!(e.div_(&f), Err(NeuraRustError::ArithmeticError(_))));
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn div_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::div::perform_div_inplace(self, other)
+    }
 }
 
 // The test module declaration previously here is now removed,

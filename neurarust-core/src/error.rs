@@ -242,5 +242,9 @@ pub enum NeuraRustError {
         operation: String,
     },
 
+    /// Error for arithmetic errors like division by zero.
+    #[error("{0}")]
+    ArithmeticError(String),
+
     // Add more specific errors as needed
 }
