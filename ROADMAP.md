@@ -158,34 +158,34 @@
     *   🎯 **Goal:** Create a runnable example demonstrating a minimal end-to-end training process.
     *   **Detailed Steps:**
         *   **Step 1.C.1: Define MLP Structure** *(Unchanged)*
-            *   [ ] Create `examples/basic_mlp_cpu.rs`.
-            *   [ ] Define `SimpleMLP` struct, implement `Module`.
-            *   [ ] Implement `forward` (`linear1 -> relu -> linear2`).
-            *   [ ] (Optional) Implement `parameters()` method.
+            *   [✅] Create `examples/basic_mlp_cpu.rs`.
+            *   [✅] Define `SimpleMLP` struct, implement `Module`.
+            *   [✅] Implement `forward` (`linear1 -> relu -> linear2`).
+            *   [✅] (Optional) Implement `parameters()` method.
         *   **Step 1.C.2: Create Synthetic Data** *(Unchanged)*
-            *   [ ] Generate `X`, `Y` tensors.
+            *   [✅] Generate `X`, `Y` tensors.
         *   **Step 1.C.3: Instantiate Model and Loss** *(Unchanged)*
-            *   [ ] Instantiate `SimpleMLP`, `MSELoss`.
+            *   [✅] Instantiate `SimpleMLP`, `MSELoss`.
         *   **Step 1.C.4: Implement `zero_grad` Mechanism**
-            *   [ ] Implement logic to zero gradients (e.g., method on `Parameter` or manual iteration setting `.grad = None`). Test it. Add docs.
+            *   [✅] Implement logic to zero gradients (e.g., method on `Parameter` or manual iteration setting `.grad = None`). Test it. Add docs.
         *   **Step 1.C.5: Implement Manual Training Loop** *(Using temporary inefficient update)*
-            *   [ ] Define `learning_rate`, `num_epochs`.
-            *   [ ] Loop:
-                *   **Forward Pass:** `y_pred = model.forward(&X)?`.
-                *   **Calculate Loss:** `loss = loss_fn.forward(&y_pred, &Y)?`.
-                *   **Backward Pass:** `loss.backward()?`.
-                *   **(Manual) Optimizer Step (Temporary Inefficient Version):**
-                    *   Iterate through parameters `p`.
-                    *   Access gradient `g`.
-                    *   **Create a *new* tensor for updated weights:** `new_p_data = p.data_view()? - learning_rate * g.data_view()?`.
-                    *   **Replace parameter's tensor with a new detached tensor:** `p.set_data(Tensor::new(new_p_data, p.shape()).detached())`.
-                    *   *Note: This approach is simple but inefficient. Phase 1.D will introduce efficient in-place updates.*
-                *   **Zero Gradients:** Use mechanism from Step 1.C.4.
-                *   **(Optional) Logging:** Use `item()` from Step 1.B.2.
+            *   [✅] Define `learning_rate`, `num_epochs`.
+            *   [✅] Loop:
+                *   [✅] **Forward Pass:** `y_pred = model.forward(&X)?`.
+                *   [✅] **Calculate Loss:** `loss = loss_fn.forward(&y_pred, &Y)?`.
+                *   [✅] **Backward Pass:** `loss.backward()?`.
+                *   [✅] **(Manual) Optimizer Step (Temporary Inefficient Version):**
+                    *   [✅] Iterate through parameters `p`.
+                    *   [✅] Access gradient `g`.
+                    *   [✅] **Create a *new* tensor for updated weights:** `new_p_data = p.data_view()? - learning_rate * g.data_view()?`.
+                    *   [✅] **Replace parameter's tensor with a new detached tensor:** `p.set_data(Tensor::new(new_p_data, p.shape()).detached())`.
+                    *   [✅] *Note: This approach is simple but inefficient. Phase 1.D will introduce efficient in-place updates.*
+                *   [✅] **Zero Gradients:** Use mechanism from Step 1.C.4.
+                *   [✅] **(Optional) Logging:** Use `item()` from Step 1.B.2.
         *   **Step 1.C.6: Configure Example Execution** *(Unchanged)*
-            *   [ ] Add `[[example]]` to `Cargo.toml`, ensure `cargo run --example basic_mlp_cpu` works.
+            *   [✅] Add `[[example]]` to `Cargo.toml`, ensure `cargo run --example basic_mlp_cpu` works.
         *   **Step 1.C.7: Add Documentation for Example** *(Unchanged)*
-            *   [ ] Add comments, module docs.
+            *   [✅] Add comments, module docs.
 
 *   **Sub-Phase 1.D: In-Place Operations:**
     *   🎯 **Goal:** Implement essential in-place arithmetic operations for performance and memory efficiency, critical for PyTorch parity.
@@ -210,4 +210,83 @@
             *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`.
 
 *   **Phase 1 Notes:**
-    *   *Other DTypes (`I64`, `I32`, `
+    *   *Other DTypes (`I64`, `I32`, `Bool`, etc.), full mixed-type operation support, and other creation functions (`arange`, `linspace`, `eye`) are deferred to later phases (e.g., Phase 2 or 4) to keep Phase 1 focused.*
+
+## Phase 2: Optimization, Data Loading & Core DTypes
+*   🎯 **Goal:** Introduce essential components for efficient model training (optimizers, data loaders) and expand core DType support to include Integers and Booleans.
+
+*   **Sub-Phase 2.A: Optimizers (`neurarust-optim` or core):**
+    *   🎯 **Goal:** Implement standard optimization algorithms.
+    *   **Detailed Steps:**
+        *   [ ] Define `Optimizer` trait (using in-place ops from Phase 1.D).
+        *   [ ] Implement SGD optimizer.
+        *   [ ] Implement Adam optimizer (requires storing momentum tensors).
+        *   [ ] Add tests for optimizers.
+        *   [ ] Add `rustdoc`.
+
+*   **Sub-Phase 2.B: Data Loading (`neurarust-data` or core):**
+    *   🎯 **Goal:** Implement basic data loading and batching capabilities.
+    *   **Detailed Steps:**
+        *   [ ] Define `Dataset` trait.
+        *   [ ] Implement a simple `VecDataset`.
+        *   [ ] Implement basic `DataLoader` (batching, shuffling on CPU). Handle collation of tensors (requires consistent DTypes in batch initially).
+        *   [ ] Add tests for DataLoader.
+        *   [ ] Add `rustdoc`.
+
+*   **Sub-Phase 2.C: Essential DType Support (Integer, Boolean):**
+    *   🎯 **Goal:** Add support for I64, I32, and Bool DTypes to core structures and operations.
+    *   **Detailed Steps:**
+        *   [ ] Extend `DType` enum with `I64`, `I32`, `Bool`.
+        *   [ ] Extend `Buffer`/`CpuBuffer` enums with corresponding variants.
+        *   [ ] Adapt creation functions (`zeros`, `ones`, `full`, `rand`, `Tensor::new`, etc.) to handle these new DTypes.
+        *   [ ] Adapt core tensor methods (`item`, `cast` if exists, etc.) for new types.
+        *   [ ] Adapt existing `ops` (arithmetic, linalg, reduction, view, etc.) to handle new DType combinations where it makes sense (e.g., basic arithmetic for Ints, logical ops for Bool). This involves adding `match` arms and potentially new kernels. *Focus on common, sensible operations initially.*
+        *   [ ] Add tests for creating and operating on tensors with these new DTypes.
+        *   [ ] Update `rustdoc`.
+
+## Phase 3: GPU Acceleration (CUDA First)
+*(Content mostly unchanged)*
+*   🎯 **Goal:** Enable high-performance training and inference by adding GPU support.
+*   **Sub-Phase 3.A: Backend Abstraction & CUDA Setup:**
+    *   Refine `StorageDevice` / `Buffer` for GPU.
+    *   Implement `Tensor::to(device)` for CPU <-> GPU copies.
+    *   Integrate CUDA bindings and context management.
+*   **Sub-Phase 3.B: GPU Kernels & Ops Integration:**
+    *   Implement CUDA kernels or integrate libraries (cuBLAS, cuDNN) for core ops (including in-place).
+    *   Adapt core operations to dispatch to GPU implementations.
+*   **Sub-Phase 3.C: Device Management & Autograd:**
+    *   Ensure autograd works seamlessly with GPU tensors.
+    *   Adapt NN layers and optimizers for device placement.
+
+## Phase 4: Expanding NN Capabilities & Interoperability
+*(Content mostly unchanged, but can explicitly include deferred items now)*
+*   🎯 **Goal:** Broaden the scope of supported architectures, DTypes, and enable interaction with the wider ML ecosystem.
+*   **Sub-Phase 4.A: Advanced Layers & Architectures:**
+    *   Implement Convolutional layers (Conv2d).
+    *   Implement Pooling layers.
+    *   Implement basic RNN layers.
+    *   (Future: Attention, Transformers...)
+*   **Sub-Phase 4.B: Advanced DType & Op Support:** *(Revised from former 4.B)*
+    *   🎯 **Goal:** Implement full mixed-type operations and support for remaining DTypes.
+    *   **Detailed Steps:**
+        *   [ ] Implement robust mixed-type operations across all supported DTypes (Numeric, Bool) with clear type promotion rules (e.g., `f32 + i64 -> f32`, `f64 * bool -> f64`).
+        *   [ ] Implement support for any other relevant DTypes if identified (e.g., `Complex`, smaller floats/ints).
+        *   [ ] Implement remaining creation functions (`arange`, `linspace`, `eye`, etc.), ensuring DType flexibility.
+        *   [ ] Add comprehensive tests for type promotion and new creation functions.
+        *   [ ] Update `rustdoc`.
+*   **Sub-Phase 4.C: Interoperability:**
+    *   ONNX export/import capabilities.
+    *   Python bindings (PyO3).
+
+## Phase 5: Deployment & Advanced Features
+*(Content mostly unchanged)*
+*   🎯 **Goal:** Target diverse deployment scenarios and implement advanced optimization techniques.
+*   **Sub-Phase 5.A: Deployment Targets:**
+    *   WebAssembly (WASM) compilation.
+    *   Native binary deployment strategies.
+    *   Edge/Embedded considerations (ARM).
+*   **Sub-Phase 5.B: Advanced Optimizations:**
+    *   Inference Optimizations (Quantization, Pruning - Exploratory).
+    *   Distributed Training (Multi-GPU/Multi-Node - Exploratory).
+
+*(This roadmap provides a high-level overview. Specific tasks within each sub-phase will be detailed as we progress.)*

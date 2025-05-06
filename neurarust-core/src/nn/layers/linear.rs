@@ -54,6 +54,26 @@ impl Linear {
             // dtype,
         })
     }
+
+    /// Retourne une référence au paramètre des poids.
+    pub fn weight(&self) -> &Parameter {
+        &self.weights
+    }
+
+    /// Retourne une référence mutable au paramètre des poids.
+    pub fn weight_mut(&mut self) -> &mut Parameter {
+        &mut self.weights
+    }
+
+    /// Retourne une référence optionnelle au paramètre du biais.
+    pub fn bias(&self) -> Option<&Parameter> {
+        self.bias.as_ref()
+    }
+
+    /// Retourne une référence mutable optionnelle au paramètre du biais.
+    pub fn bias_mut(&mut self) -> Option<&mut Parameter> {
+        self.bias.as_mut()
+    }
 }
 
 impl Module for Linear {

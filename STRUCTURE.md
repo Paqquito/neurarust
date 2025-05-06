@@ -19,15 +19,20 @@
 │   │   ├── error.rs
 │   │   ├── lib.rs
 │   │   ├── nn
+│   │   │   ├── init.rs
+│   │   │   ├── init_test.rs
 │   │   │   ├── layers
 │   │   │   │   ├── linear.rs
+│   │   │   │   ├── linear_test.rs
 │   │   │   │   └── mod.rs
 │   │   │   ├── losses
 │   │   │   │   ├── mod.rs
-│   │   │   │   └── mse.rs
+│   │   │   │   ├── mse.rs
+│   │   │   │   └── mse_test.rs
 │   │   │   ├── mod.rs
 │   │   │   ├── module.rs
-│   │   │   └── parameter.rs
+│   │   │   ├── parameter.rs
+│   │   │   └── parameter_test.rs
 │   │   ├── ops
 │   │   │   ├── activation
 │   │   │   │   ├── mod.rs
@@ -119,4 +124,4 @@
 ├── ROADMAP.md
 └── STRUCTURE.md
 
-21 directories, 99 files
+21 directories, 104 files

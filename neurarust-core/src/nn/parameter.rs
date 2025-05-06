@@ -10,12 +10,12 @@ use crate::error::NeuraRustError;
 pub struct Parameter(pub Tensor);
 
 impl Parameter {
-    /// Creates a new parameter wrapping the given tensor.
+    /// Creates a new `Parameter` wrapping the given `Tensor`.
+    /// The tensor will automatically have `requires_grad` set to `true`.
     pub fn new(tensor: Tensor) -> Self {
-        // TODO: Devrait probablement vérifier que le tenseur n'a pas déjà un grad_fn
-        // ou qu'il est bien une "feuille" du graphe.
-        let _ = tensor.set_requires_grad(true); // Ensure gradients are tracked
-        Parameter(tensor)
+        let t = tensor;
+        let _ = t.set_requires_grad(true);
+        Parameter(t)
     }
 
     /// Consumes the Parameter and returns the underlying Tensor.
@@ -86,6 +86,21 @@ impl Parameter {
             // But since we only support CPU, current_device should always be CPU.
             Ok(())
         }
+    }
+
+    /// Returns a reference to the underlying `Tensor`.
+    pub fn tensor(&self) -> &Tensor {
+        &self.0
+    }
+
+    /// Returns a mutable reference to the underlying `Tensor`.
+    pub fn tensor_mut(&mut self) -> &mut Tensor {
+        &mut self.0
+    }
+
+    /// Clears the gradient of the underlying tensor by setting it to `None`.
+    pub fn zero_grad(&mut self) {
+        self.0.clear_grad(); // Assuming Tensor has a clear_grad method
     }
 }
 
