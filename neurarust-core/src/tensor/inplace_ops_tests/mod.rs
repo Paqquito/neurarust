@@ -14,3 +14,5 @@ pub mod add_scalar_test;
 pub mod sub_scalar_test; 
 #[cfg(test)]
 pub mod mul_scalar_test; 
+#[cfg(test)]
+pub mod div_scalar_test; 

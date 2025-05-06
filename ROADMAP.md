@@ -222,9 +222,8 @@
             *   [✅] Implement `Tensor::mul_scalar_(&mut self, scalar: S)`.
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.9: Implement `div_scalar_`**
-            *   [ ] Implement `Tensor::div_scalar_(&mut self, scalar: S)`.
-            *   [ ] Handle division by zero scalar.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Implement `Tensor::div_scalar_(&mut self, scalar: S)`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.10: Refactor Training Loop Example (Optional but Recommended)**
             *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`, potentially `p.pow_f32(2.0)` or `p.add_scalar_(value)` if applicable).
 
