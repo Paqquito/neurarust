@@ -5,9 +5,10 @@ use crate::{
     types::DType,
     tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64},
     tensor::utils::broadcast_shapes,
+    // buffer::{Buffer, CpuBuffer} // Importé via crate::buffer
 };
 use std::sync::Arc;
-use std::ops::{Deref, DerefMut};
+// use std::ops::{Deref, DerefMut}; // Supprimés
 
 // Renamed self_tensor to current_tensor to avoid confusion with self keyword in methods
 pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Result<(), NeuraRustError> {
@@ -20,10 +21,10 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         });
     }
 
-    if current_tensor.requires_grad() || current_tensor.grad_fn().is_some() {
+    if current_tensor.grad_fn().is_some() {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "sub_".to_string(),
-            reason: "Tensor requires grad or has grad_fn.".to_string()
+            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
         });
     }
 
@@ -43,6 +44,7 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         });
     }
     
+    // --- Data Access and Clone-on-Write --- 
     let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
         lock_type: "write (self)".to_string(), 
         reason: "Failed to acquire write lock for self.data in sub_".to_string()
@@ -55,16 +57,26 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
     let self_offset_val = self_tensor_data_guard.offset;
     let numel_self = self_shape_vec.iter().product();
 
+    // Get a mutable reference to the Buffer enum itself, cloning if the Arc<Buffer> is shared.
+    let buffer_enum_mut_ref: &mut crate::buffer::Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+
     match self_dtype {
         DType::F32 => {
-            let self_buffer_mut_ref = Arc::get_mut(&mut self_tensor_data_guard.deref_mut().buffer)
-                .ok_or_else(|| NeuraRustError::BufferSharedError { operation: "sub_ (self, F32 - Arc::get_mut on TensorData.buffer failed)".to_string() })?;
-            let self_vec_mut = self_buffer_mut_ref.try_get_cpu_f32_mut().map_err(|e_core| NeuraRustError::BufferAccessError { 
-                buffer_type: "F32 mut vec (self)".to_string(), 
-                details: format!("{:?}", e_core) 
-            })?;
+            // Now, get a mutable reference to the Vec<f32> from the &mut Buffer enum,
+            // cloning the Arc<Vec<f32>> if it's shared.
+            let self_vec_mut: &mut Vec<f32> = match buffer_enum_mut_ref {
+                crate::buffer::Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+                    crate::buffer::CpuBuffer::F32(ref mut arc_vec) => Arc::make_mut(arc_vec),
+                    _ => return Err(NeuraRustError::DataTypeMismatch {
+                        expected: DType::F32, actual: self_dtype, operation: "sub_ inplace (self buffer is not F32)".to_string()
+                    }),
+                },
+                _ => return Err(NeuraRustError::DeviceMismatch {
+                    expected: crate::device::StorageDevice::CPU, actual: self_tensor_data_guard.device, operation: "sub_ inplace (self buffer is not CPU)".to_string()
+                }),
+            };
             
-            let other_buffer_concrete_ref: &crate::buffer::Buffer = &*other_tensor_data_guard.deref().buffer;
+            let other_buffer_concrete_ref: &crate::buffer::Buffer = &*other_tensor_data_guard.buffer; // This is Arc<Buffer>
             let other_buffer_arc_f32 = other_buffer_concrete_ref.try_get_cpu_f32().map_err(|e_core| NeuraRustError::BufferAccessError { 
                 buffer_type: "F32 Arc<Vec> (other)".to_string(), 
                 details: format!("{:?}", e_core) 
@@ -95,14 +107,19 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
             }
         }
         DType::F64 => {
-            let self_buffer_mut_ref = Arc::get_mut(&mut self_tensor_data_guard.deref_mut().buffer)
-                .ok_or_else(|| NeuraRustError::BufferSharedError { operation: "sub_ (self, F64 - Arc::get_mut on TensorData.buffer failed)".to_string() })?;
-            let self_vec_mut = self_buffer_mut_ref.try_get_cpu_f64_mut().map_err(|e_core| NeuraRustError::BufferAccessError { 
-                buffer_type: "F64 mut vec (self)".to_string(), 
-                details: format!("{:?}", e_core) 
-            })?;
-
-            let other_buffer_concrete_ref: &crate::buffer::Buffer = &*other_tensor_data_guard.deref().buffer;
+            let self_vec_mut: &mut Vec<f64> = match buffer_enum_mut_ref {
+                crate::buffer::Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+                    crate::buffer::CpuBuffer::F64(ref mut arc_vec) => Arc::make_mut(arc_vec),
+                    _ => return Err(NeuraRustError::DataTypeMismatch {
+                        expected: DType::F64, actual: self_dtype, operation: "sub_ inplace (self buffer is not F64)".to_string()
+                    }),
+                },
+                _ => return Err(NeuraRustError::DeviceMismatch {
+                    expected: crate::device::StorageDevice::CPU, actual: self_tensor_data_guard.device, operation: "sub_ inplace (self buffer is not CPU)".to_string()
+                }),
+            };
+            
+            let other_buffer_concrete_ref: &crate::buffer::Buffer = &*other_tensor_data_guard.buffer; // This is Arc<Buffer>
             let other_buffer_arc_f64 = other_buffer_concrete_ref.try_get_cpu_f64().map_err(|e_core| NeuraRustError::BufferAccessError { 
                 buffer_type: "F64 Arc<Vec> (other)".to_string(), 
                 details: format!("{:?}", e_core) 

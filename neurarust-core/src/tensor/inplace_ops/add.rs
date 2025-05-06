@@ -1,195 +1,155 @@
 use crate::{
     tensor::Tensor,
     error::NeuraRustError,
-    device::StorageDevice,
     types::DType,
+    // buffer::{Buffer, CpuBuffer}, // Déjà géré par crate::buffer::
     tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64},
-    tensor::utils::{broadcast_shapes, index_to_coord},
+    tensor::utils::{broadcast_shapes},
 };
 use std::sync::Arc;
-// use std::ops::DerefMut; // DerefMut is not directly used by Arc::get_mut path
+// use std::ops::AddAssign; // Non utilisé directement ici, mais dans l'helper des scalaires
+// use std::fmt::Debug; // Non utilisé directement ici, mais dans l'helper des scalaires
 // Deref is implicitly used for other_buffer_read_guard.buffer.try_get_cpu_f32()
 // but it's part of the prelude or automatically brought in scope usually.
 // If the compiler complains about Deref, we'll add `use std::ops::Deref;`
 
 // Renamed self_tensor to current_tensor to avoid confusion with self keyword in methods
 pub fn perform_add_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Result<(), NeuraRustError> {
-    // Step 1: Autograd Check
-    let self_read_guard = current_tensor.data.read().map_err(|_| NeuraRustError::LockError {
-        lock_type: "read".to_string(),
-        reason: "Failed to lock self.data for requires_grad check in add_".to_string(),
-    })?;
-    if self_read_guard.requires_grad {
+    if current_tensor.dtype() != other.dtype() {
+        return Err(NeuraRustError::DataTypeMismatch {
+            expected: current_tensor.dtype(),
+            actual: other.dtype(),
+            operation: "in-place addition (add_)".to_string(),
+        });
+    }
+
+    // MODIFIED: Allow in-place on leaf tensors that require grad.
+    if current_tensor.grad_fn().is_some() {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "add_".to_string(),
-            reason: "Cannot perform in-place operation on a tensor that requires gradients.".to_string(),
+            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string(),
         });
     }
 
-    // Step 2: Device and DType Checks, and gather initial info
-    let other_read_guard = other.data.read().map_err(|_| NeuraRustError::LockError {
-        lock_type: "read".to_string(),
-        reason: "Failed to lock other.data for checks in add_".to_string(),
+    let self_dtype = current_tensor.dtype();
+    let self_shape = current_tensor.shape().clone();
+    // Accéder à other.offset() via une garde de lecture temporaire si nécessaire, ou s'assurer qu'il est déjà disponible.
+    // Pour l'instant, on suppose qu'il est passé correctement ou accessible.
+    // La récupération de other_offset doit être faite AVANT la self_write_guard si other peut être current_tensor.
+    // Mais pour add, other est un &Tensor différent.
+    let other_read_guard_for_meta = other.data.read().map_err(|_| NeuraRustError::LockError {
+        lock_type: "read (other for meta)".to_string(),
+        reason: "Failed to acquire read lock for other.data (meta) in add_".to_string(),
     })?;
+    let other_shape = other_read_guard_for_meta.shape.clone();
+    let other_strides = other_read_guard_for_meta.strides.clone();
+    let other_offset = other_read_guard_for_meta.offset;
+    drop(other_read_guard_for_meta);
 
-    if self_read_guard.device != other_read_guard.device {
-        return Err(NeuraRustError::DeviceMismatch {
-            operation: "add_".to_string(),
-            expected: self_read_guard.device,
-            actual: other_read_guard.device,
-        });
-    }
-    if self_read_guard.device != StorageDevice::CPU {
-        return Err(NeuraRustError::UnsupportedDevice {
-            device: self_read_guard.device,
-            operation: "add_".to_string(),
-        });
-    }
-
-    if self_read_guard.dtype != other_read_guard.dtype {
-        return Err(NeuraRustError::DataTypeMismatch {
-            operation: "add_".to_string(),
-            expected: self_read_guard.dtype,
-            actual: other_read_guard.dtype,
-        });
-    }
-    let dtype = self_read_guard.dtype;
-
-    let self_shape = self_read_guard.shape.clone();
-    let self_strides = self_read_guard.strides.clone();
-    let self_offset = self_read_guard.offset;
-    let self_is_contiguous = self_read_guard.is_contiguous();
-
-    let other_shape = other_read_guard.shape.clone();
-    let other_strides = other_read_guard.strides.clone();
-    let other_offset = other_read_guard.offset;
-    
-    drop(self_read_guard);
-    drop(other_read_guard);
-    
-    // Broadcasting check (moved before write lock on current_tensor)
-    // This uses cloned shapes, so no tensor data access is needed here.
-    let broadcast_target_shape = broadcast_shapes(&self_shape, &other_shape)?;
-    if broadcast_target_shape.as_slice() != self_shape.as_slice() {
-        // This specific check ensures that `other` can be broadcast to `self` without `self` changing shape.
-        // The generic `broadcast_shapes` might return a larger shape if both can be broadcast to it.
-        // For in-place, `self` must dictate the final shape.
+    let broadcast_output_shape = broadcast_shapes(&self_shape, &other_shape)?;
+    if broadcast_output_shape != self_shape {
         return Err(NeuraRustError::BroadcastError {
-            shape1: self_shape.clone(), // Or format!("{:?}", self_shape)
-            shape2: other_shape.clone(), // Or format!("{:?}", other_shape)
+            shape1: self_shape.clone(),
+            shape2: other_shape.clone(),
         });
     }
 
+    // --- Data Access and Clone-on-Write ---
     let mut self_write_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError {
-        lock_type: "write".to_string(),
-        reason: "Failed to lock self.data for in-place modification in add_".to_string(),
+        lock_type: "write (self)".to_string(),
+        reason: "Failed to acquire write lock for self.data in add_".to_string(),
     })?;
-    
-    let other_buffer_read_guard = other.data.read().map_err(|_| NeuraRustError::LockError {
-        lock_type: "read".to_string(),
-        reason: "Failed to re-lock other.data for buffer access in add_".to_string(),
+    // Clone strides from self_write_guard BEFORE the mutable borrow of its buffer for CoW
+    let self_strides_cloned = self_write_guard.strides.clone(); 
+    let self_offset_val = self_write_guard.offset;
+    // It's better to also get self_write_guard.device here if needed in error messages within the match
+    let self_device_for_error = self_write_guard.device; 
+
+    let other_read_guard = other.data.read().map_err(|_| NeuraRustError::LockError {
+        lock_type: "read (other)".to_string(),
+        reason: "Failed to acquire read lock for other.data in add_".to_string(),
     })?;
 
-    match dtype {
+    let numel_self: usize = self_shape.iter().product();
+
+    // Get a mutable reference to the Buffer enum itself, cloning if the Arc<Buffer> is shared.
+    let buffer_enum_mut_ref: &mut crate::buffer::Buffer = Arc::make_mut(&mut self_write_guard.buffer);
+
+    match self_dtype {
         DType::F32 => {
-            let buffer_ref_mut = Arc::get_mut(&mut self_write_guard.buffer).ok_or_else(|| 
-                NeuraRustError::BufferSharedError { 
-                    operation: "add_ (TensorData.buffer is shared)".to_string() 
-                }
-            )?;
-            let self_buffer_vec_mut = buffer_ref_mut.try_get_cpu_f32_mut()?;
-            let other_buffer_f32 = other_buffer_read_guard.buffer.try_get_cpu_f32()?;
+            let self_buffer_vec_mut: &mut Vec<f32> = match buffer_enum_mut_ref {
+                crate::buffer::Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+                    crate::buffer::CpuBuffer::F32(ref mut arc_vec) => Arc::make_mut(arc_vec),
+                    _ => return Err(NeuraRustError::DataTypeMismatch { 
+                        expected: DType::F32, actual: self_dtype, operation: "add_ inplace (self buffer is not F32)".to_string()
+                    }),
+                },
+                _ => return Err(NeuraRustError::DeviceMismatch { 
+                    expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "add_ inplace (self buffer is not CPU)".to_string()
+                }),
+            };
+
+            let other_buffer_f32 = other_read_guard.buffer.try_get_cpu_f32()?;
 
             let mut broadcast_iter = NdArrayBroadcastingIter::new(
                 other_buffer_f32,
                 &other_shape,
                 &other_strides,
-                other_offset,
-                &self_shape, // Target shape for iteration is self's shape
+                other_offset, // other_offset est maintenant correctement récupéré
+                &self_shape, 
             )?;
 
-            let self_numel: usize = self_shape.iter().product();
-            if self_is_contiguous {
-                let start = self_offset; // self_offset was from the original self_read_guard
-                let end = self_offset + self_numel;
-                if end > self_buffer_vec_mut.len() { 
-                    return Err(NeuraRustError::InternalError("Contiguous slice out of bounds in add_".to_string()));
+            for i in 0..numel_self {
+                let logical_coords = crate::tensor::utils::index_to_coord(i, &self_shape);
+                let mut physical_offset_self = self_offset_val;
+                for d in 0..logical_coords.len() {
+                    physical_offset_self += logical_coords[d] * self_strides_cloned[d]; // Utiliser strides clonées
                 }
-                let self_slice = &mut self_buffer_vec_mut[start..end];
-                for (self_val, other_val) in self_slice.iter_mut().zip(broadcast_iter) {
-                    *self_val += other_val;
-                }
-            } else {
-                for i in 0..self_numel {
-                    let coord = index_to_coord(i, &self_shape);
-                    let mut self_idx = self_offset; // self_offset was from the original self_read_guard
-                    for (d, s) in coord.iter().zip(self_strides.iter()) {
-                        self_idx += d * s;
-                    }
-                    if self_idx >= self_buffer_vec_mut.len() { 
-                        return Err(NeuraRustError::InternalError(format!("Index {} out of bounds for self_buffer in add_ (non-contiguous)", self_idx)));
-                    }
-                    match broadcast_iter.next() {
-                        Some(other_val) => {
-                            self_buffer_vec_mut[self_idx] += other_val;
-                        }
-                        None => {
-                            return Err(NeuraRustError::InternalError("Broadcast iterator exhausted prematurely in add_ (non-contiguous).".to_string()));
-                        }
-                    }
+                let other_val = broadcast_iter.next().ok_or_else(|| NeuraRustError::InternalError("Other iterator exhausted prematurely in add_ (F32).".to_string()))?;
+                if physical_offset_self < self_buffer_vec_mut.len() {
+                    self_buffer_vec_mut[physical_offset_self] += other_val;
+                } else {
+                    return Err(NeuraRustError::IndexOutOfBounds{ index: logical_coords, shape: self_shape.clone() });
                 }
             }
         }
         DType::F64 => {
-            let buffer_ref_mut = Arc::get_mut(&mut self_write_guard.buffer).ok_or_else(|| 
-                NeuraRustError::BufferSharedError { 
-                    operation: "add_ (TensorData.buffer is shared for F64)".to_string() 
-                }
-            )?;
-            let self_buffer_vec_mut = buffer_ref_mut.try_get_cpu_f64_mut()?;
-            let other_buffer_f64 = other_buffer_read_guard.buffer.try_get_cpu_f64()?;
+            let self_buffer_vec_mut: &mut Vec<f64> = match buffer_enum_mut_ref {
+                crate::buffer::Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+                    crate::buffer::CpuBuffer::F64(ref mut arc_vec) => Arc::make_mut(arc_vec),
+                    _ => return Err(NeuraRustError::DataTypeMismatch { 
+                        expected: DType::F64, actual: self_dtype, operation: "add_ inplace (self buffer is not F64)".to_string()
+                    }),
+                },
+                _ => return Err(NeuraRustError::DeviceMismatch { 
+                    expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "add_ inplace (self buffer is not CPU)".to_string()
+                }),
+            };
+
+            let other_buffer_f64 = other_read_guard.buffer.try_get_cpu_f64()?;
 
             let mut broadcast_iter = NdArrayBroadcastingIterF64::new(
                 other_buffer_f64,
                 &other_shape,
                 &other_strides,
-                other_offset,
-                &self_shape, // Target shape for iteration is self's shape
+                other_offset, // other_offset est maintenant correctement récupéré
+                &self_shape, 
             )?;
 
-            let self_numel: usize = self_shape.iter().product();
-            if self_is_contiguous {
-                let start = self_offset; // self_offset was from the original self_read_guard
-                let end = self_offset + self_numel;
-                 if end > self_buffer_vec_mut.len() { 
-                    return Err(NeuraRustError::InternalError("Contiguous slice out of bounds in add_ (f64)".to_string()));
+            for i in 0..numel_self {
+                let logical_coords = crate::tensor::utils::index_to_coord(i, &self_shape);
+                let mut physical_offset_self = self_offset_val;
+                for d in 0..logical_coords.len() {
+                    physical_offset_self += logical_coords[d] * self_strides_cloned[d]; // Utiliser strides clonées
                 }
-                let self_slice = &mut self_buffer_vec_mut[start..end];
-                for (self_val, other_val) in self_slice.iter_mut().zip(broadcast_iter) {
-                    *self_val += other_val;
-                }
-            } else {
-                for i in 0..self_numel {
-                    let coord = index_to_coord(i, &self_shape);
-                    let mut self_idx = self_offset; // self_offset was from the original self_read_guard
-                    for (d, s) in coord.iter().zip(self_strides.iter()) {
-                        self_idx += d * s;
-                    }
-                    if self_idx >= self_buffer_vec_mut.len() { 
-                         return Err(NeuraRustError::InternalError(format!("Index {} out of bounds for self_buffer in add_ (f64, non-contiguous)", self_idx)));
-                    }
-                    match broadcast_iter.next() {
-                        Some(other_val) => {
-                            self_buffer_vec_mut[self_idx] += other_val;
-                        }
-                        None => {
-                            return Err(NeuraRustError::InternalError("Broadcast iterator exhausted prematurely in add_ (f64, non-contiguous).".to_string()));
-                        }
-                    }
+                let other_val = broadcast_iter.next().ok_or_else(|| NeuraRustError::InternalError("Other iterator exhausted prematurely in add_ (F64).".to_string()))?;
+                if physical_offset_self < self_buffer_vec_mut.len() {
+                    self_buffer_vec_mut[physical_offset_self] += other_val;
+                } else {
+                    return Err(NeuraRustError::IndexOutOfBounds{ index: logical_coords, shape: self_shape.clone() });
                 }
             }
         }
     }
-
     Ok(())
 } 

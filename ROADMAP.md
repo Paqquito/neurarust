@@ -225,7 +225,8 @@
             *   [✅] Implement `Tensor::div_scalar_(&mut self, scalar: S)`.
             *   [✅] Add tests and `rustdoc`.
         *   **Step 1.D.10: Refactor Training Loop Example (Optional but Recommended)**
-            *   [ ] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`, potentially `p.pow_f32(2.0)` or `p.add_scalar_(value)` if applicable).
+            *   [✅] Modify Step 1.C.5 (Optimizer Step) in `basic_mlp_cpu.rs` to use the efficient in-place operations (e.g., `p.sub_(g.mul_scalar(learning_rate))`, potentially `p.pow_f32(2.0)` or `p.add_scalar_(value)` if applicable).
+                 (Création d'un nouvel exemple `basic_mlp_cpu_inplace_optim.rs`)
 
 *   **Phase 1 Notes:**
     *   *Other DTypes (`I64`, `I32`, `Bool`, etc.), full mixed-type operation support, and other creation functions (`arange`, `linspace`, `eye`) are deferred to later phases (e.g., Phase 2 or 4) to keep Phase 1 focused.*

@@ -203,7 +203,7 @@ impl Tensor {
     /// # }
     /// ```
     pub fn pow_f32(&mut self, exponent: f32) -> Result<(), NeuraRustError> {
-        crate::tensor::inplace_ops::pow::perform_pow_inplace_f32(self, exponent)
+        crate::tensor::inplace_ops::pow::perform_pow_inplace(self, exponent)
     }
 
     /// Raises the elements of this tensor to the power of a scalar exponent, in-place.
@@ -241,7 +241,7 @@ impl Tensor {
     /// # }
     /// ```
     pub fn pow_f64(&mut self, exponent: f64) -> Result<(), NeuraRustError> {
-        crate::tensor::inplace_ops::pow::perform_pow_inplace_f64(self, exponent)
+        crate::tensor::inplace_ops::pow::perform_pow_inplace(self, exponent)
     }
 
     /// Adds a scalar to each element of this tensor, in-place.

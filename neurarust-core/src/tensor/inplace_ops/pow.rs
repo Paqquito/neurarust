@@ -2,132 +2,115 @@ use crate::{
     tensor::Tensor,
     error::NeuraRustError,
     types::DType,
-    buffer::{Buffer, CpuBuffer}
+    buffer::{Buffer, CpuBuffer},
+    ops::traits::NeuraNumeric // Pour la conversion de l'exposant
 };
 use std::sync::Arc;
-use num_traits::Float;
+use std::fmt::Debug;
 
-pub fn perform_pow_inplace_f32(current_tensor: &mut Tensor, exponent: f32) -> Result<(), NeuraRustError> {
-    if current_tensor.dtype() != DType::F32 {
-        return Err(NeuraRustError::DataTypeMismatch {
-            expected: DType::F32,
-            actual: current_tensor.dtype(),
-            operation: "in-place power (pow_) with f32 exponent".to_string()
-        });
-    }
-
-    if current_tensor.requires_grad() || current_tensor.grad_fn().is_some() {
+pub fn perform_pow_inplace<E: NeuraNumeric + Copy + Debug>(
+    current_tensor: &mut Tensor, 
+    exponent: E
+) -> Result<(), NeuraRustError> {
+    // Autograd Check (Modifié)
+    if current_tensor.grad_fn().is_some() {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "pow_".to_string(),
-            reason: "Tensor requires grad or has grad_fn.".to_string()
+            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
         });
     }
 
-    let self_shape_vec = current_tensor.shape();
-    let self_strides_vec = current_tensor.strides();
-    let self_offset_val;
-    let numel_self;
+    let self_dtype = current_tensor.dtype();
+    let self_shape_vec = current_tensor.shape().clone();
+    
+    let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
+        lock_type: "write (self)".to_string(), 
+        reason: "Failed to acquire write lock for self.data in pow_".to_string()
+    })?;
+    let self_strides_cloned = self_tensor_data_guard.strides.clone();
+    let self_offset_val = self_tensor_data_guard.offset;
+    let self_device_for_error = self_tensor_data_guard.device;
 
-    {
-        let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
-            lock_type: "write (self)".to_string(), 
-            reason: "Failed to acquire write lock for self.data in pow_ (f32)".to_string()
-        })?;
-        
-        self_offset_val = self_tensor_data_guard.offset;
-        numel_self = self_shape_vec.iter().product();
+    let numel_self = self_shape_vec.iter().product();
 
-        let buffer_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+    let buffer_enum_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
 
-        let self_vec_mut: &mut Vec<f32> = match buffer_mut_ref {
-            Buffer::Cpu(CpuBuffer::F32(arc_vec)) => Arc::make_mut(arc_vec),
-            _ => return Err(NeuraRustError::UnsupportedOperation(
-                "pow_ (f32) expects CPU F32 buffer".to_string()
-            )),
-        };
-        
-        apply_pow_to_vec(self_vec_mut, exponent, self_shape_vec.as_slice(), self_strides_vec.as_slice(), self_offset_val, numel_self)?;
-    }
-    Ok(())
-}
+    match self_dtype {
+        DType::F32 => {
+            let exp_f32 = exponent.to_f32().ok_or_else(|| NeuraRustError::DataTypeMismatch {
+                operation: "pow_ (exponent conversion to f32)".to_string(),
+                expected: DType::F32,
+                actual: self_dtype, // Ou un DType dérivé de E si possible
+            })?;
 
-pub fn perform_pow_inplace_f64(current_tensor: &mut Tensor, exponent: f64) -> Result<(), NeuraRustError> {
-    if current_tensor.dtype() != DType::F64 {
-        return Err(NeuraRustError::DataTypeMismatch {
-            expected: DType::F64,
-            actual: current_tensor.dtype(),
-            operation: "in-place power (pow_) with f64 exponent".to_string()
-        });
-    }
+            let self_vec_mut: &mut Vec<f32> = match buffer_enum_mut_ref {
+                Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+                    CpuBuffer::F32(ref mut arc_vec) => Arc::make_mut(arc_vec),
+                    _ => return Err(NeuraRustError::DataTypeMismatch { 
+                        expected: DType::F32, actual: self_dtype, operation: "pow_ inplace (self buffer is not F32)".to_string()
+                    }),
+                },
+                _ => return Err(NeuraRustError::DeviceMismatch { 
+                    expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "pow_ inplace (self buffer is not CPU)".to_string()
+                }),
+            };
 
-    if current_tensor.requires_grad() || current_tensor.grad_fn().is_some() {
-        return Err(NeuraRustError::InplaceModificationError {
-            operation: "pow_".to_string(),
-            reason: "Tensor requires grad or has grad_fn.".to_string()
-        });
-    }
-
-    let self_shape_vec = current_tensor.shape();
-    let self_strides_vec = current_tensor.strides();
-    let self_offset_val;
-    let numel_self;
-
-    {
-        let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
-            lock_type: "write (self)".to_string(), 
-            reason: "Failed to acquire write lock for self.data in pow_ (f64)".to_string()
-        })?;
-        
-        self_offset_val = self_tensor_data_guard.offset;
-        numel_self = self_shape_vec.iter().product();
-
-        let buffer_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
-
-        let self_vec_mut: &mut Vec<f64> = match buffer_mut_ref {
-            Buffer::Cpu(CpuBuffer::F64(arc_vec)) => Arc::make_mut(arc_vec),
-            _ => return Err(NeuraRustError::UnsupportedOperation(
-                "pow_ (f64) expects CPU F64 buffer".to_string()
-            )),
-        };
-
-        apply_pow_to_vec(self_vec_mut, exponent, self_shape_vec.as_slice(), self_strides_vec.as_slice(), self_offset_val, numel_self)?;
-    }
-    Ok(())
-}
-
-
-fn apply_pow_to_vec<T>(
-    vec_data: &mut Vec<T>, 
-    exponent: T, 
-    shape: &[usize],
-    strides: &[usize],
-    offset: usize,
-    numel: usize
-) -> Result<(), NeuraRustError>
-where
-    T: Float + Copy + std::fmt::Debug, // Debug for error messages
-{
-    for i in 0..numel {
-        let logical_coords = crate::tensor::utils::index_to_coord(i, shape);
-        let mut physical_offset = offset;
-        for d in 0..logical_coords.len() {
-            physical_offset += logical_coords[d] * strides[d];
-        }
-
-        if physical_offset < vec_data.len() {
-            let base_val = vec_data[physical_offset];
-            
-            if base_val.is_zero() && exponent.is_zero() {
-                vec_data[physical_offset] = T::one(); // 0^0 = 1
-            } else if base_val < T::zero() && exponent.fract() != T::zero() {
-                return Err(NeuraRustError::ArithmeticError(
-                    format!("pow_ error: negative base ({:?}) with non-integer exponent ({:?}).", base_val, exponent)
-                ));
-            } else {
-                vec_data[physical_offset] = base_val.powf(exponent);
+            for i in 0..numel_self {
+                let logical_coords = crate::tensor::utils::index_to_coord(i, &self_shape_vec);
+                let mut physical_offset_self = self_offset_val;
+                for d in 0..logical_coords.len() {
+                    physical_offset_self += logical_coords[d] * self_strides_cloned[d];
+                }
+                if physical_offset_self < self_vec_mut.len() {
+                    let val = self_vec_mut[physical_offset_self];
+                    if val < 0.0 && exp_f32.fract() != 0.0 { // Base négative à une puissance non entière
+                        return Err(NeuraRustError::ArithmeticError(
+                            format!("pow_: Negative base ({}) to non-integer exponent ({}) results in complex number or NaN.", val, exp_f32)
+                        ));
+                    }
+                    self_vec_mut[physical_offset_self] = val.powf(exp_f32);
+                } else {
+                    return Err(NeuraRustError::IndexOutOfBounds{ index: logical_coords, shape: self_shape_vec.clone() });
+                }
             }
-        } else {
-            return Err(NeuraRustError::IndexOutOfBounds{ index: logical_coords, shape: shape.to_vec() });
+        }
+        DType::F64 => {
+            let exp_f64 = exponent.to_f64().ok_or_else(|| NeuraRustError::DataTypeMismatch {
+                operation: "pow_ (exponent conversion to f64)".to_string(),
+                expected: DType::F64,
+                actual: self_dtype,
+            })?;
+
+            let self_vec_mut: &mut Vec<f64> = match buffer_enum_mut_ref {
+                Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+                    CpuBuffer::F64(ref mut arc_vec) => Arc::make_mut(arc_vec),
+                    _ => return Err(NeuraRustError::DataTypeMismatch { 
+                        expected: DType::F64, actual: self_dtype, operation: "pow_ inplace (self buffer is not F64)".to_string()
+                    }),
+                },
+                _ => return Err(NeuraRustError::DeviceMismatch { 
+                    expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "pow_ inplace (self buffer is not CPU)".to_string()
+                }),
+            };
+
+            for i in 0..numel_self {
+                let logical_coords = crate::tensor::utils::index_to_coord(i, &self_shape_vec);
+                let mut physical_offset_self = self_offset_val;
+                for d in 0..logical_coords.len() {
+                    physical_offset_self += logical_coords[d] * self_strides_cloned[d];
+                }
+                if physical_offset_self < self_vec_mut.len() {
+                    let val = self_vec_mut[physical_offset_self];
+                     if val < 0.0 && exp_f64.fract() != 0.0 { // Base négative à une puissance non entière
+                        return Err(NeuraRustError::ArithmeticError(
+                            format!("pow_: Negative base ({}) to non-integer exponent ({}) results in complex number or NaN.", val, exp_f64)
+                        ));
+                    }
+                    self_vec_mut[physical_offset_self] = val.powf(exp_f64);
+                } else {
+                    return Err(NeuraRustError::IndexOutOfBounds{ index: logical_coords, shape: self_shape_vec.clone() });
+                }
+            }
         }
     }
     Ok(())

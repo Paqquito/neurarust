@@ -134,6 +134,105 @@ pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     )
 }
 
+/// Performs element-wise multiplication of a tensor by a scalar (`tensor * scalar`).
+///
+/// This operation is not in-place; it returns a new tensor.
+/// It currently supports F32 and F64 data types.
+///
+/// # Arguments
+/// * `tensor`: The input `Tensor`.
+/// * `scalar`: The scalar value (must match tensor's DType implicitly, or be convertible).
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` or a `NeuraRustError`.
+pub fn mul_op_scalar<T: NeuraNumeric + Debug>(tensor: &Tensor, scalar: T) -> Result<Tensor, NeuraRustError> {
+    let tensor_guard = tensor.read_data();
+
+    if tensor_guard.device != crate::device::StorageDevice::CPU {
+        return Err(NeuraRustError::DeviceMismatch {
+            operation: "mul_op_scalar".to_string(),
+            expected: crate::device::StorageDevice::CPU,
+            actual: tensor_guard.device,
+        });
+    }
+
+    let output_shape = tensor_guard.shape.clone();
+    let numel = tensor_guard.numel();
+    let new_requires_grad = tensor_guard.requires_grad; // Scalar ops usually don't introduce new grad_fn directly this way
+                                                     // unless the scalar itself is a Tensor, which is not the case here.
+
+    let output_tensor = match tensor_guard.dtype {
+        crate::types::DType::F32 => {
+            let scalar_f32 = scalar.to_f32().ok_or_else(|| NeuraRustError::DataTypeMismatch {
+                operation: "mul_op_scalar (scalar conversion to f32)".to_string(),
+                expected: crate::types::DType::F32,
+                actual: tensor_guard.dtype, // This actual is a bit misleading, it's about the scalar type
+            })?;
+            let data_buffer = tensor_guard.buffer.try_get_cpu_f32()?;
+            let mut new_data = Vec::with_capacity(numel);
+            if numel == 0 {
+                // Handle empty tensor case
+            } else if tensor_guard.is_contiguous() {
+                let slice_data = &data_buffer[tensor_guard.offset..tensor_guard.offset + numel];
+                for &val in slice_data {
+                    new_data.push(val * scalar_f32);
+                }
+            } else {
+                // Non-contiguous: iterate using logical to physical index
+                for i in 0..numel {
+                    let coords = crate::tensor::utils::index_to_coord(i, &tensor_guard.shape);
+                    let physical_offset = tensor_guard.get_offset(&coords);
+                    new_data.push(data_buffer[physical_offset] * scalar_f32);
+                }
+            }
+            drop(tensor_guard); // Release lock before creating new tensor
+            Tensor::new(new_data, output_shape)?
+        }
+        crate::types::DType::F64 => {
+            let scalar_f64 = scalar.to_f64().ok_or_else(|| NeuraRustError::DataTypeMismatch {
+                operation: "mul_op_scalar (scalar conversion to f64)".to_string(),
+                expected: crate::types::DType::F64,
+                actual: tensor_guard.dtype,
+            })?;
+            let data_buffer = tensor_guard.buffer.try_get_cpu_f64()?;
+            let mut new_data = Vec::with_capacity(numel);
+            if numel == 0 {
+                // Handle empty tensor case
+            } else if tensor_guard.is_contiguous() {
+                let slice_data = &data_buffer[tensor_guard.offset..tensor_guard.offset + numel];
+                for &val in slice_data {
+                    new_data.push(val * scalar_f64);
+                }
+            } else {
+                for i in 0..numel {
+                    let coords = crate::tensor::utils::index_to_coord(i, &tensor_guard.shape);
+                    let physical_offset = tensor_guard.get_offset(&coords);
+                    new_data.push(data_buffer[physical_offset] * scalar_f64);
+                }
+            }
+            drop(tensor_guard);
+            Tensor::new_f64(new_data, output_shape)?
+        }
+        // Add other DTypes if supported by NeuraNumeric and Tensor creation
+    };
+
+    if new_requires_grad {
+        // If the input tensor required grad, the output should also (conceptually).
+        // However, a simple scalar multiplication usually doesn't add a new node to the graph
+        // unless the scalar is also a tensor. For this op, we assume the scalar is a constant.
+        // The backward pass of the *next* operation using this result would need to propagate
+        // to the original tensor that `tensor` was derived from, if any.
+        // For now, just propagate `requires_grad`.
+        // A more sophisticated autograd would handle this. If `tensor` had a `grad_fn`,
+        // this new tensor should not, as it's a result of an op not tracked by a BackwardOp here.
+        // Or, mul_op_scalar should take part in autograd graph if tensor requires_grad.
+        // For simplicity in an optimizer step (where grads are already computed):
+        output_tensor.set_requires_grad(true)?; // Or false, depending on autograd design for such ops
+    }
+
+    Ok(output_tensor)
+}
+
 // --- Tests --- 
 // Link the external test file
 #[cfg(test)]

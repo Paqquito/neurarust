@@ -5,6 +5,8 @@ use crate::{
     buffer::{Buffer, CpuBuffer}
 };
 use std::sync::Arc;
+use std::ops::AddAssign;
+use std::fmt::Debug;
 // use num_traits::Float; // Float might not be strictly necessary if we only add, but good for consistency with pow
 
 pub fn perform_add_scalar_inplace_f32(current_tensor: &mut Tensor, scalar: f32) -> Result<(), NeuraRustError> {
@@ -16,38 +18,40 @@ pub fn perform_add_scalar_inplace_f32(current_tensor: &mut Tensor, scalar: f32) 
         });
     }
 
-    if current_tensor.requires_grad() || current_tensor.grad_fn().is_some() {
+    if current_tensor.grad_fn().is_some() {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "add_scalar_f32".to_string(),
-            reason: "Tensor requires grad or has grad_fn.".to_string()
+            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
         });
     }
 
-    let self_shape_vec = current_tensor.shape(); // Read properties before mutable borrow
-    let self_strides_vec = current_tensor.strides();
-    let self_offset_val;
-    let numel_self;
+    let self_shape_vec = current_tensor.shape().clone();
+    
+    let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
+        lock_type: "write (self)".to_string(), 
+        reason: "Failed to acquire write lock for self.data in add_scalar_f32".to_string()
+    })?;
+    
+    let self_strides_cloned = self_tensor_data_guard.strides.clone();
+    let self_offset_val = self_tensor_data_guard.offset;
+    let self_device_for_error = self_tensor_data_guard.device;
+    let numel_self = self_shape_vec.iter().product();
 
-    {
-        let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
-            lock_type: "write (self)".to_string(), 
-            reason: "Failed to acquire write lock for self.data in add_scalar_f32".to_string()
-        })?;
+    let buffer_enum_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+
+    let self_vec_mut: &mut Vec<f32> = match buffer_enum_mut_ref {
+        Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+            CpuBuffer::F32(ref mut arc_vec) => Arc::make_mut(arc_vec),
+            _ => return Err(NeuraRustError::DataTypeMismatch { 
+                expected: DType::F32, actual: current_tensor.dtype(), operation: "add_scalar_f32 inplace (self buffer is not F32)".to_string()
+            }),
+        },
+        _ => return Err(NeuraRustError::DeviceMismatch { 
+            expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "add_scalar_f32 inplace (self buffer is not CPU)".to_string()
+        }),
+    };
         
-        self_offset_val = self_tensor_data_guard.offset;
-        numel_self = self_shape_vec.iter().product(); // numel depends on shape, which is read-only
-
-        let buffer_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
-
-        let self_vec_mut: &mut Vec<f32> = match buffer_mut_ref {
-            Buffer::Cpu(CpuBuffer::F32(arc_vec)) => Arc::make_mut(arc_vec),
-            _ => return Err(NeuraRustError::UnsupportedOperation(
-                "add_scalar_f32 expects CPU F32 buffer".to_string()
-            )),
-        };
-        
-        apply_add_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), self_strides_vec.as_slice(), self_offset_val, numel_self)?;
-    }
+    apply_add_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), &self_strides_cloned, self_offset_val, numel_self)?;
     Ok(())
 }
 
@@ -60,38 +64,40 @@ pub fn perform_add_scalar_inplace_f64(current_tensor: &mut Tensor, scalar: f64) 
         });
     }
 
-    if current_tensor.requires_grad() || current_tensor.grad_fn().is_some() {
+    if current_tensor.grad_fn().is_some() {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "add_scalar_f64".to_string(),
-            reason: "Tensor requires grad or has grad_fn.".to_string()
+            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
         });
     }
     
-    let self_shape_vec = current_tensor.shape();
-    let self_strides_vec = current_tensor.strides();
-    let self_offset_val;
-    let numel_self;
+    let self_shape_vec = current_tensor.shape().clone();
 
-    {
-        let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
-            lock_type: "write (self)".to_string(), 
-            reason: "Failed to acquire write lock for self.data in add_scalar_f64".to_string()
-        })?;
+    let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
+        lock_type: "write (self)".to_string(), 
+        reason: "Failed to acquire write lock for self.data in add_scalar_f64".to_string()
+    })?;
         
-        self_offset_val = self_tensor_data_guard.offset;
-        numel_self = self_shape_vec.iter().product();
+    let self_strides_cloned = self_tensor_data_guard.strides.clone();
+    let self_offset_val = self_tensor_data_guard.offset;
+    let self_device_for_error = self_tensor_data_guard.device;
+    let numel_self = self_shape_vec.iter().product();
 
-        let buffer_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+    let buffer_enum_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
 
-        let self_vec_mut: &mut Vec<f64> = match buffer_mut_ref {
-            Buffer::Cpu(CpuBuffer::F64(arc_vec)) => Arc::make_mut(arc_vec),
-            _ => return Err(NeuraRustError::UnsupportedOperation(
-                "add_scalar_f64 expects CPU F64 buffer".to_string()
-            )),
-        };
+    let self_vec_mut: &mut Vec<f64> = match buffer_enum_mut_ref {
+        Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+            CpuBuffer::F64(ref mut arc_vec) => Arc::make_mut(arc_vec),
+            _ => return Err(NeuraRustError::DataTypeMismatch { 
+                expected: DType::F64, actual: current_tensor.dtype(), operation: "add_scalar_f64 inplace (self buffer is not F64)".to_string()
+            }),
+        },
+        _ => return Err(NeuraRustError::DeviceMismatch { 
+            expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "add_scalar_f64 inplace (self buffer is not CPU)".to_string()
+        }),
+    };
 
-        apply_add_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), self_strides_vec.as_slice(), self_offset_val, numel_self)?;
-    }
+    apply_add_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), &self_strides_cloned, self_offset_val, numel_self)?;
     Ok(())
 }
 
@@ -104,7 +110,7 @@ fn apply_add_scalar_to_vec<T>(
     numel: usize
 ) -> Result<(), NeuraRustError>
 where
-    T: Copy + std::ops::AddAssign + std::fmt::Debug, // AddAssign for +=, Debug for potential errors
+    T: Copy + AddAssign + Debug,
 {
     for i in 0..numel {
         let logical_coords = crate::tensor::utils::index_to_coord(i, shape);
@@ -116,8 +122,6 @@ where
         if physical_offset < vec_data.len() {
             vec_data[physical_offset] += scalar;
         } else {
-            // This should ideally not happen if numel, shape, strides, and offset are consistent
-            // with the actual buffer length obtained after Arc::make_mut.
             return Err(NeuraRustError::IndexOutOfBounds{ index: logical_coords, shape: shape.to_vec() });
         }
     }

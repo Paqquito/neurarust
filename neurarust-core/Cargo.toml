@@ -27,3 +27,8 @@ rand_distr = "0.4" # For specific random distributions (randn)
 name = "basic_mlp_cpu"
 path = "../examples/basic_mlp_cpu.rs"
 required-features = [] # Ensure it can be run without special features for now
+
+[[example]]
+name = "basic_mlp_cpu_inplace_optim"
+path = "../examples/basic_mlp_cpu_inplace_optim.rs"
+required-features = []
