@@ -133,13 +133,12 @@
             *   [✅] Add tests for each initializer (checking basic statistics or values).
             *   [✅] Add `rustdoc` for the `nn::init` module and functions.
         *   **Step 1.B.5: Define `Parameter` Wrapper** *(Formerly Optional 1.B.1)*
-            *   [ ] Define `struct Parameter(Tensor)`.
-            *   [ ] Implement `new(Tensor)` setting `requires_grad = true`.
-            *   [ ] Implement `Deref`/`DerefMut`.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Define `struct Parameter(Tensor)`.
+            *   [✅] Implement `new(Tensor)` setting `requires_grad = true`.
+            *   [✅] Implement `Deref`/`DerefMut`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 1.B.6: Define Basic `Module` Trait** *(Formerly 1.B.2)*
             *   [ ] Define `trait Module` with `forward` and potentially `parameters`.
-            *   [ ] Add `rustdoc`.
         *   **Step 1.B.7: Implement `nn::Linear` Layer** *(Formerly 1.B.3)*
             *   [ ] Create `src/nn/layers/linear.rs`.
             *   [ ] Define `Linear` struct (`weight: Parameter`, `bias: Option<Parameter>`).

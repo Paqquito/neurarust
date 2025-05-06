@@ -1,6 +1,6 @@
 use crate::tensor::Tensor;
 use std::ops::{Deref, DerefMut};
-use std::fmt::{Debug};
+use std::fmt::Debug;
 
 /// A wrapper around a Tensor that indicates it is a trainable parameter.
 /// Stores the tensor itself and potentially metadata in the future.
@@ -36,4 +36,8 @@ impl<T> DerefMut for Parameter<T> {
     fn deref_mut(&mut self) -> &mut Self::Target {
         &mut self.0
     }
-} 
+}
+
+#[cfg(test)]
+#[path = "parameter_test.rs"]
+mod tests; 
