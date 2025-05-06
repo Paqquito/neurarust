@@ -52,7 +52,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Skipping F32 reshape backward due to potential check_grad precision issues."]
     fn test_reshape_backward_f32() -> Result<(), GradCheckError> {
         let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         t.set_requires_grad(true)?;

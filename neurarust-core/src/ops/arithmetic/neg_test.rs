@@ -16,7 +16,6 @@ fn test_neg_ok() -> Result<(), NeuraRustError> {
 // --- Autograd Tests ---
 
 #[test]
-#[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
 fn test_neg_backward() -> Result<(), GradCheckError> {
     let input_data = vec![1.0f32, -2.0, 3.0, -4.0, 0.0];
     let input_shape = vec![5];
@@ -32,8 +31,8 @@ fn test_neg_backward() -> Result<(), GradCheckError> {
         &[input],
         &output_grad,
         1e-5,
-        1e-6,
-        1e-4,
+        2e-3,
+        2e-3,
     )
 }
 

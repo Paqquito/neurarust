@@ -46,24 +46,25 @@ fn test_get_element_via_data() { // Renamed test as .get() doesn't exist
 }
 
 #[test]
-#[ignore = "Skipping until an element access method (e.g., Tensor::at(&[...])) exists OR slice_op with SliceArg::Index fully validates bounds and returns IndexOutOfBounds for Index variant."]
-fn test_get_element_out_of_bounds() {
-    /*
+// #[ignore = "Skipping until an element access method (e.g., Tensor::at(&[...])) exists OR slice_op with SliceArg::Index fully validates bounds and returns IndexOutOfBounds for Index variant."]
+fn test_get_element_out_of_bounds() -> Result<(), NeuraRustError> { // Return Result
     let t = create_test_tensor(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2]); // f32 for create_test_tensor
-    // This test requires either a t.at() method or for slice_op with SliceArg::Index(i)
-    // to explicitly return IndexOutOfBounds if i is out of bounds for the dimension,
-    // rather than clamping/producing an empty or boundary slice.
-    // Current slice_op clamps or makes empty slices for SliceArg::Slice, and Index is unsupported in normalize_slice.
-    assert!(t.at(&[2, 0]).is_err()); 
-    assert!(t.at(&[0, 2]).is_err());
-    match t.at(&[0, 2]).err().unwrap() {
+
+    // Test out of bounds access using the new at_f32 method
+    let res1 = t.at_f32(&[2, 0]);
+    assert!(res1.is_err());
+    assert!(matches!(res1.err().unwrap(), NeuraRustError::IndexOutOfBounds { .. }));
+    
+    let res2 = t.at_f32(&[0, 2]);
+    assert!(res2.is_err());
+    match res2.err().unwrap() {
         NeuraRustError::IndexOutOfBounds { index, shape } => {
             assert_eq!(index, vec![0, 2]);
             assert_eq!(shape, vec![2, 2]);
         }
         e => panic!("Expected IndexOutOfBounds, got {:?}", e),
     }
-    */
+    Ok(())
 }
 
 #[test]

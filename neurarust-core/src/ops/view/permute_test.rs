@@ -62,7 +62,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
     fn test_permute_backward() -> Result<(), GradCheckError> {
         let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         t.set_requires_grad(true)?;
@@ -77,7 +76,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
     fn test_permute_backward_higher_dim() -> Result<(), GradCheckError> {
         let t_data = (0..24).map(|x| x as f32).collect::<Vec<_>>();
         let t_shape = vec![2, 3, 4];
@@ -90,7 +88,7 @@ mod tests {
         let output_shape = vec![4, 2, 3];
         let output_grad = tensor::ones(&output_shape)?;
 
-        check_grad(func, &[t], &output_grad, 1e-3, 1e-4, 1e-3)
+        check_grad(func, &[t], &output_grad, 1e-3, 1e-2, 1e-2)
     }
 
     #[test]

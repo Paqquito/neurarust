@@ -59,7 +59,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Skipping due to check_grad F32 precision limitations."]
     fn test_transpose_backward_f32() -> Result<(), GradCheckError> {
         let input = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
         input.set_requires_grad(true)?;
@@ -73,7 +72,6 @@ mod tests {
     }
 
     #[test]
-    #[ignore = "Skipping due to check_grad F32 precision limitations."]
     fn test_transpose_backward_higher_dim_f32() -> Result<(), GradCheckError> {
         let input_data = (0..24).map(|x| x as f32).collect::<Vec<f32>>();
         let input = Tensor::new(input_data, vec![2, 3, 4])?;
@@ -84,7 +82,7 @@ mod tests {
         let output_shape = vec![2, 4, 3];
         let output_grad = tensor::ones(&output_shape)?;
 
-        check_grad(func, &[input], &output_grad, 1e-3, 1e-4, 1e-3)
+        check_grad(func, &[input], &output_grad, 1e-3, 1e-2, 1e-2)
     }
 
     #[test]

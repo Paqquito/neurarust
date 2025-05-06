@@ -63,7 +63,6 @@ mod tests {
 
     #[test]
     // Ignore still valid as grad for exponent might be tricky/unstable
-    #[ignore = "Gradient for exponent can be numerically unstable, especially near base=1 or base<=0"]
     fn test_pow_backward_only_exponent_grad() -> Result<(), GradCheckError> {
         let base = Tensor::new(vec![2.0, 3.0], vec![2])?; 
         // base does not require grad
@@ -93,7 +92,6 @@ mod tests {
     }
     
     #[test]
-    #[ignore = "Gradient for exponent can be numerically unstable, especially near base=1 or base<=0"]
     fn test_pow_backward_broadcast_exponent() -> Result<(), GradCheckError> {
         let base = Tensor::new(vec![2.0, 3.0], vec![1, 2])?; // Shape [1, 2]
         // base does not require grad

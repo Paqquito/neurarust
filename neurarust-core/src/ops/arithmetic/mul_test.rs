@@ -65,7 +65,6 @@ fn test_mul_non_contiguous() -> Result<(), NeuraRustError> {
 }
 
 #[test]
-#[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
 fn test_mul_backward_simple() -> Result<(), GradCheckError> {
     let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3])?;
     let b = Tensor::new(vec![4.0, 5.0, 6.0], vec![3])?;
@@ -79,7 +78,6 @@ fn test_mul_backward_simple() -> Result<(), GradCheckError> {
 }
 
 #[test]
-#[ignore = "Skipping due to check_grad F32 precision limitations. Backward logic visually verified."]
 fn test_mul_backward_broadcast() -> Result<(), GradCheckError> {
     let a = Tensor::new(vec![1.0, 2.0], vec![1, 2])?;
     let b = Tensor::new(vec![3.0, 4.0], vec![2, 1])?;
