@@ -1,16 +1,18 @@
-use crate::autograd::graph::NodeId;
 use crate::autograd::BackwardOp;
+use crate::autograd::graph::NodeId; // Correct import path
 use crate::error::NeuraRustError;
-use crate::device::StorageDevice;
-use crate::ops::reduction::sum::sum_kernel;
 use crate::tensor::Tensor;
 use crate::tensor_data::TensorData;
 use std::fmt::Debug;
-use std::sync::{Arc, RwLock, RwLockReadGuard};
+use std::sync::{Arc, RwLockReadGuard};
 use crate::types::DType;
 use crate::ops::arithmetic::mul_op;
 use crate::ops::view::expand_op;
 use super::utils::{calculate_reduction_output_shape, process_reduction_axes};
+use crate::tensor::create::{zeros, full, full_f64}; // Import specific creation fns
+use crate::ops::traits::NeuraNumeric; // Correct import path for the trait
+use crate::ops::dtype::cast_op; // Importer cast_op
+use crate::ops::reduction::sum::sum_kernel; // Importer sum_kernel
 // use crate::autograd::grad_check::check_grad; // Keep commented until check_grad is ready
 
 // --- MeanBackward Definition ---
@@ -22,9 +24,15 @@ use super::utils::{calculate_reduction_output_shape, process_reduction_axes};
 /// - The total number of elements that were reduced (`num_elements_reduced`) to compute the mean.
 #[derive(Debug)]
 struct MeanBackward {
-    input_node: Arc<RwLock<TensorData>>,
-    num_elements_reduced: usize,
+    input_node: NodeId,
+    input_shape: Vec<usize>,
+    output_shape: Vec<usize>,
+    keep_dims: bool,
 }
+
+// Add unsafe impls for Send + Sync because NodeId is a raw pointer
+unsafe impl Send for MeanBackward {}
+unsafe impl Sync for MeanBackward {}
 
 // --- BackwardOp Implementation for MeanBackward ---
 
@@ -48,73 +56,74 @@ impl BackwardOp for MeanBackward {
     /// with respect to the original input tensor. Returns an error if expansion or
     /// device operations fail.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // Get original input shape
-        let input_guard = self.input_node.read().map_err(|_| {
-            // Correct LockError format
-            NeuraRustError::LockError{
-                lock_type: "read".to_string(),
-                reason: "Failed to lock input node in MeanBackward".to_string()
-            }
-        })?;
-        let input_shape = input_guard.shape.clone();
-        // Ensure we drop the read guard before potential mutable operations later
-        drop(input_guard);
-
-        // Calculate scaling factor
-        let n = self.num_elements_reduced;
-        if n == 0 {
-            // If N is zero, the forward output was likely empty or NaN/inf.
-            // The gradient is ill-defined or should be zero. Let's return zero gradient
-            // with the correct input shape.
-            // TODO: Consider if returning an error or specific handling is better.
-             // Assume F32 for now - Correct zeros call
-            return Ok(vec![crate::tensor::zeros(&input_shape)?]);
+        let numel_reduced: usize = self.input_shape.iter().product::<usize>() 
+            / self.output_shape.iter().product::<usize>();
+        if numel_reduced == 0 {
+             let zero_grad = zeros(&self.input_shape)?;
+             return Ok(vec![cast_op(&zero_grad, grad_output.dtype())?]); // Utiliser cast_op
         }
-        let scale: f32 = 1.0 / (n as f32);
+        let scale_factor = 1.0 / (numel_reduced as f64);
 
-        // Create scalar tensor for scale factor (assuming F32, CPU)
-        let scale_tensor = Tensor::new(vec![scale], vec![])?; // Scalar tensor
+        let scale_tensor = match grad_output.dtype() {
+             DType::F32 => full(&[], scale_factor as f32)?,
+             DType::F64 => full_f64(&[], scale_factor)?,
+        };
 
-        // Multiply grad_output by scale: scaled_grad = grad_output * (1 / N)
-        // mul_op handles broadcasting the scalar scale_tensor
         let scaled_grad = mul_op(grad_output, &scale_tensor)?;
 
-        // Expand scaled_grad back to the original input shape
-        // expand_op handles the view creation
-        let grad_input = expand_op(&scaled_grad, input_shape)?;
+        let grad_to_expand = if !self.keep_dims {
+            scaled_grad.reshape(self.output_shape.clone())?
+        } else {
+            scaled_grad
+        };
+
+        let target_shape_isize: Vec<isize> = self.input_shape.iter().map(|&d| d as isize).collect();
+        let grad_input = expand_op(&grad_to_expand, &target_shape_isize)?;
 
         Ok(vec![grad_input])
     }
 
     fn inputs(&self) -> Vec<NodeId> {
-        vec![Arc::as_ptr(&self.input_node)] // Return NodeId from Arc
+        vec![self.input_node]
     }
 }
 
 // --- Kernel de Calcul (F32 CPU) ---
 
-/// Noyau de calcul privé pour la moyenne avec réduction d'axes. F32 CPU.
-fn mean_kernel(
-    input_guard: &RwLockReadGuard<'_, TensorData>,
-    input_data_slice: &[f32],
-    axes: &[usize],
-    keep_dims: bool,
-    output_shape: &[usize],
-    n: f32,                   // Use f32 for divisor
-) -> Result<Vec<f32>, NeuraRustError>
+/// Noyau de calcul privé pour la moyenne avec réduction d'axes.
+fn mean_kernel<T> (
+    input_guard: &RwLockReadGuard<TensorData>, // Renommé pour enlever le _
+    data: &[T], // Renommé
+    axes: &[usize], // Renommé
+    keep_dims: bool, // Renommé
+    output_shape: &[usize], // Renommé
+    n_val: T, // Renommé en n_val pour éviter conflit avec N générique si jamais
+) -> Result<Vec<T>, NeuraRustError>
+where
+    T: NeuraNumeric + std::ops::AddAssign + std::ops::Div<Output = T> + Default + Copy + Debug, // Mise à jour des traits
 {
-    // 1. Calculer la somme en utilisant le kernel de sum (expects f32)
-    let sum_data = sum_kernel(input_guard, input_data_slice, axes, keep_dims, output_shape)?;
-
-    // 2. Diviser chaque élément par N
-    if n == 0.0f32 {
-        return Err(NeuraRustError::DivisionByZero);
+    if n_val == T::zero() {
+        // Si N est zéro (et numel > 0), mean_op devrait déjà avoir retourné une erreur.
+        // Si numel est aussi zéro, mean_op retourne un tenseur de zéros casté.
+        // Ce cas ici est une double sécurité ou pour un N=0 inattendu.
+        // Retourner des zéros de la bonne forme est un comportement sûr.
+        println!("Warning: mean_kernel called with n_val = 0. Outputting zeros.");
+        return Ok(vec![T::zero(); output_shape.iter().product()]);
     }
 
-    // Division f32 / f32
-    let mean_data: Vec<f32> = sum_data.into_iter().map(|val| val / n).collect();
+    // 1. Calculer la somme en utilisant sum_kernel
+    let sum_result = sum_kernel(
+        input_guard,
+        data,
+        axes,
+        keep_dims, // sum_kernel utilise keep_dims pour déterminer sa logique interne
+        output_shape,
+    )?;
 
-    Ok(mean_data)
+    // 2. Diviser chaque élément du résultat de la somme par n_val
+    let mean_result: Vec<T> = sum_result.into_iter().map(|sum_val| sum_val / n_val).collect();
+
+    Ok(mean_result)
 }
 
 // --- mean_op Implementation (Internal API called by Tensor::mean) ---
@@ -140,87 +149,61 @@ pub(crate) fn mean_op(
     keep_dims: bool,
 ) -> Result<Tensor, NeuraRustError> {
     let t_guard = tensor.read_data();
-
-    // --- Device Check --- (Garder générique pour l'instant)
-    if t_guard.device != StorageDevice::CPU {
-        return Err(NeuraRustError::DeviceMismatch {
-            operation: "mean_op".to_string(),
-            expected: StorageDevice::CPU,
-            actual: t_guard.device,
-        });
-    }
-
-    // --- DType Check --- (Garder générique pour l'instant)
+    let requires_grad = t_guard.requires_grad;
+    let input_node_id = tensor.node_id();
+    let input_shape = t_guard.shape.clone();
     let dtype = t_guard.dtype;
-    if dtype != DType::F32 && dtype != DType::F64 {
-        return Err(NeuraRustError::UnsupportedOperation(format!(
-            "Mean operation only supports F32 and F64, got {:?}",
-            dtype
-        )));
-    }
 
-    // --- Process Axes --- (Utiliser l'utilitaire)
-    let rank = t_guard.shape.len();
+    // --- Process Axes & Output Shape ---
+    let rank = input_shape.len();
     let axes_vec = process_reduction_axes(rank, axes)?;
+    let output_shape = calculate_reduction_output_shape(&input_shape, &axes_vec, keep_dims);
+    let output_shape_clone = output_shape.clone();
 
-    // --- Calculate Output Shape --- (Utiliser l'utilitaire)
-    let output_shape = calculate_reduction_output_shape(&t_guard.shape, &axes_vec, keep_dims);
-
-    // --- Calculate N (Number of elements reduced) --- (Simplifié)
+    // --- Calculate N ---
     let n: usize = if axes_vec.is_empty() {
-        t_guard.numel() // Reduce all elements
+        t_guard.numel()
     } else {
-        // Product of the sizes of the dimensions being reduced
-        axes_vec.iter().map(|&axis| t_guard.shape[axis]).product()
+        axes_vec.iter().map(|&axis| input_shape[axis]).product()
     };
 
-    if n == 0 {
-        // Utiliser UnsupportedOperation car la moyenne de zéro élément n'est pas définie
+    if n == 0 && t_guard.numel() > 0 { // Reducing over zero elements, but tensor is not empty
         return Err(NeuraRustError::UnsupportedOperation(
-            "Cannot compute mean over zero elements (dimension size might be 0)".to_string(),
+            "Cannot compute mean over zero elements (e.g., reducing an axis with size 0)".to_string(),
         ));
+    } else if n == 0 && t_guard.numel() == 0 { // Input tensor is empty
+         let zeros_tensor = zeros(&output_shape)?;
+         return cast_op(&zeros_tensor, dtype); // Utiliser cast_op
     }
 
-    // --- Autograd Info ---
-    let requires_grad = t_guard.requires_grad;
-    // Clone Arc pour BackwardOp si nécessaire
-    let input_node_arc = if requires_grad { Some(tensor.data.clone()) } else { None };
-
-    // --- Dispatch Kernel based on DType ---
+    // --- Dispatch Kernel (Placeholder logic) ---
     let output_tensor = match dtype {
         DType::F32 => {
             let input_data_slice = t_guard.buffer().try_get_cpu_f32()?.as_slice();
-            // Convertir n en f32 pour le kernel
             let n_f32 = n as f32;
-            // Vérifier la conversion usize -> f32
-            if n_f32 == 0.0 && n > 0 {
-                return Err(NeuraRustError::InternalError(
-                    "Element count N is too large to represent accurately as f32 for mean".to_string()
-                 ));
-            }
-            let result_data = mean_kernel(
-                &t_guard,
-                input_data_slice,
-                &axes_vec,
-                keep_dims,
-                &output_shape,
-                n_f32, // Passer n as f32
+            // Correction: appeler mean_kernel et non sum_kernel
+            let result_data = mean_kernel::<f32>(
+                &t_guard, // Passer la garde du tenseur
+                input_data_slice, 
+                &axes_vec, 
+                keep_dims, 
+                &output_shape, 
+                n_f32, // Passer n converti au bon type
             )?;
             drop(t_guard);
             Tensor::new(result_data, output_shape)?
         }
         DType::F64 => {
-             let input_data_slice = t_guard.buffer().try_get_cpu_f64()?.as_slice();
-            // Convertir n en f64 pour le kernel
+            let input_data_slice = t_guard.buffer().try_get_cpu_f64()?.as_slice();
             let n_f64 = n as f64;
-             // Pas de vérification de perte de précision pour f64 ici (moins probable)
-            let result_data = mean_kernel_f64( // Appelera une version f64 du kernel (à créer)
-                &t_guard,
-                input_data_slice,
-                &axes_vec,
-                keep_dims,
-                &output_shape,
-                n_f64, // Passer n as f64
+            // Correction: appeler mean_kernel et non sum_kernel
+            let result_data = mean_kernel::<f64>(
+                &t_guard, // Passer la garde du tenseur
+                input_data_slice, 
+                &axes_vec, 
+                keep_dims, 
+                &output_shape, 
+                n_f64, // Passer n converti au bon type
             )?;
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
@@ -229,46 +212,19 @@ pub(crate) fn mean_op(
 
     // --- Autograd Setup ---
     if requires_grad {
-        if let Some(node_arc) = input_node_arc {
-            let grad_fn = MeanBackward {
-                input_node: node_arc,
-                num_elements_reduced: n, // Passer le n calculé (usize)
-            };
-            let mut output_guard = output_tensor.write_data();
-            output_guard.requires_grad = true;
-            output_guard.grad_fn = Some(Arc::new(grad_fn));
-        } else {
-            return Err(NeuraRustError::InternalError(
-                "Mean op requires grad but input Arc Node unavailable".to_string(),
-            ));
-        }
+        let grad_fn = MeanBackward { // Utilise la structure correcte
+            input_node: input_node_id,
+            //num_elements_reduced: n, // On recalcule dans backward si besoin
+            input_shape: input_shape, 
+            output_shape: output_shape_clone, 
+            keep_dims: keep_dims,
+        };
+        let mut output_guard = output_tensor.write_data();
+        output_guard.grad_fn = Some(Arc::new(grad_fn));
+        output_guard.requires_grad = true;
     }
 
     Ok(output_tensor)
-}
-
-// TODO: Implémenter mean_kernel_f64
-fn mean_kernel_f64(
-    input_guard: &RwLockReadGuard<'_, TensorData>,
-    input_data_slice: &[f64],
-    axes: &[usize],
-    keep_dims: bool,
-    output_shape: &[usize],
-    n: f64,                   // Utiliser f64 pour diviseur
-) -> Result<Vec<f64>, NeuraRustError> {
-    // 1. Calculer la somme en utilisant le kernel de sum<f64>
-    let sum_data = sum_kernel(input_guard, input_data_slice, axes, keep_dims, output_shape)?;
-
-    // 2. Diviser chaque élément par N
-    if n == 0.0f64 {
-        // Devrait être attrapé par la vérification n==0 dans mean_op, mais double-check ici.
-        return Err(NeuraRustError::DivisionByZero);
-    }
-
-    // Division f64 / f64
-    let mean_data: Vec<f64> = sum_data.into_iter().map(|val| val / n).collect();
-
-    Ok(mean_data)
 }
 
 #[cfg(test)]

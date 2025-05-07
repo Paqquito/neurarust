@@ -439,6 +439,54 @@ impl Tensor {
     pub fn squeeze(&self, dim: Option<usize>) -> Result<Self, NeuraRustError> {
         crate::ops::view::squeeze_unsqueeze::squeeze_op(self, dim)
     }
+
+    /// Creates a new view of this tensor with singleton dimensions (size 1)
+    /// expanded to a larger size.
+    ///
+    /// Expanding a tensor does not allocate new memory, but only creates a new
+    /// view on the existing tensor where dimensions with size 1 are expanded
+    /// to match the target shape by setting the stride for that dimension to 0.
+    /// Any dimension of size -1 in `new_shape` means that the size of that
+    /// dimension is kept the same as the original tensor.
+    /// The number of dimensions in `new_shape` must be greater than or equal
+    /// to the number of dimensions in the original tensor.
+    ///
+    /// This method delegates the operation (including autograd handling) to
+    /// [`ops::view::expand::expand_op`](../ops/view/fn.expand_op.html).
+    ///
+    /// # Arguments
+    /// * `new_shape`: The desired expanded shape. Use `-1` for dimensions
+    ///                that should not change size.
+    ///
+    /// # Returns
+    /// A `Result` containing the new expanded `Tensor` view, or a `NeuraRustError`
+    /// if the expansion is invalid (e.g., incompatible shapes).
+    ///
+    /// # Example
+    /// ```
+    /// # use neurarust_core::tensor::Tensor;
+    /// # use neurarust_core::error::NeuraRustError;
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// let t = Tensor::new(vec![1.0, 2.0, 3.0], vec![3, 1])?;
+    /// // Shape [3, 1]
+    ///
+    /// let expanded = t.expand(&[3, 4])?;
+    /// assert_eq!(expanded.shape(), vec![3, 4]);
+    ///
+    /// // Use -1 to keep the first dimension the same
+    /// let expanded_neg1 = t.expand(&[-1, 4])?;
+    /// assert_eq!(expanded_neg1.shape(), vec![3, 4]);
+    ///
+    /// // Add a new dimension
+    /// let t2 = Tensor::new(vec![4.0], vec![1])?;
+    /// let expanded_new_dim = t2.expand(&[2, 1, 5])?;
+    /// assert_eq!(expanded_new_dim.shape(), vec![2, 1, 5]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn expand(&self, new_shape: &[isize]) -> Result<Self, NeuraRustError> {
+        crate::ops::view::expand::expand_op(self, new_shape)
+    }
 }
 
 // Helper function to normalize dimension indices for flatten

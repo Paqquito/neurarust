@@ -48,6 +48,7 @@ pub mod loss;       // Loss functions (currently empty)
 pub mod math_elem;  // Element-wise math functions (ln, etc.)
 pub mod reduction;
 pub mod view;
+pub mod dtype; // Ajouter le nouveau module dtype
 
 // Re-exports: Make core operation functions easily accessible within the crate
 // Using pub(crate) keeps them internal but usable by Tensor methods etc.

@@ -199,12 +199,12 @@
                 *   [✅] Add/verify tests for various `dim` inputs, multi-dim squeezing, and error conditions.
                 *   [✅] Ensure `rustdoc` is comprehensive for both in `tensor/view_methods.rs`.
             *   **Step 1.B.10.3: Implement `Tensor::expand(new_shape)`**
-                *   [ ] Implement `expand(&self, new_shape: &[usize]) -> Result<Tensor, NeuraRustError>`.
-                *   [ ] Expands dimensions of size 1 to match `new_shape`. Dimensions of size -1 in `new_shape` mean "do not change this dimension".
-                *   [ ] Should return a view (no data copy) by adjusting strides (strides of expanded dimensions become 0).
-                *   [ ] Handle `new_shape` validation (compatibility with original shape, no shrinking of non-unit dimensions).
-                *   [ ] Add tests for shape, data integrity (view), stride calculation, and error conditions.
-                *   [ ] Add `rustdoc`.
+                *   [✅] Implement `expand(&self, new_shape: &[usize]) -> Result<Tensor, NeuraRustError>`.
+                *   [✅] Expands dimensions of size 1 to match `new_shape`. Dimensions of size -1 in `new_shape` mean "do not change this dimension".
+                *   [✅] Should return a view (no data copy) by adjusting strides (strides of expanded dimensions become 0).
+                *   [✅] Handle `new_shape` validation (compatibility with original shape, no shrinking of non-unit dimensions).
+                *   [✅] Add tests for shape, data integrity (view), stride calculation, and error conditions.
+                *   [✅] Add `rustdoc`.
 
 *   **Sub-Phase 1.C: Basic Training Loop Example:**
     *   🎯 **Goal:** Create a runnable example demonstrating a minimal end-to-end training process.

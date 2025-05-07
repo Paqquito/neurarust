@@ -106,8 +106,9 @@ impl BackwardOp for MaxBackward {
         };
         
         // 5. Expand output and (reshaped) grad_output to input shape
-        let expanded_output = expand_op(&output_to_expand, input_shape.clone())?;
-        let expanded_grad_output = expand_op(&grad_output_reshaped, input_shape.clone())?;
+        let target_shape_isize: Vec<isize> = input_shape.iter().map(|&d| d as isize).collect();
+        let expanded_output = expand_op(&output_to_expand, &target_shape_isize)?;
+        let expanded_grad_output = expand_op(&grad_output_reshaped, &target_shape_isize)?;
 
         // 6. Create the mask: (input == expanded_output)
         let mask = equal_op(&input_tensor, &expanded_output)?;

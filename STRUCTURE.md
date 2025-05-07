@@ -3,6 +3,7 @@
 ├── Cargo.toml
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
+├── DO_NOT_APPLY
 ├── examples
 │   ├── basic_mlp_cpu_inplace_optim.rs
 │   └── basic_mlp_cpu.rs
@@ -59,6 +60,9 @@
 │   │   │   │   ├── equal.rs
 │   │   │   │   ├── equal_test.rs
 │   │   │   │   └── mod.rs
+│   │   │   ├── dtype
+│   │   │   │   ├── cast.rs
+│   │   │   │   └── mod.rs
 │   │   │   ├── linalg
 │   │   │   │   ├── matmul.rs
 │   │   │   │   ├── matmul_test.rs
@@ -93,6 +97,7 @@
 │   │   │       ├── reshape_test.rs
 │   │   │       ├── slice.rs
 │   │   │       ├── slice_test.rs
+│   │   │       ├── squeeze_unsqueeze.rs
 │   │   │       ├── transpose.rs
 │   │   │       ├── transpose_test.rs
 │   │   │       └── utils.rs
@@ -137,6 +142,7 @@
 │   │   │   ├── view_methods.rs
 │   │   │   └── view_methods_test.rs
 │   │   ├── tensor_data.rs
+│   │   ├── test_utils.rs
 │   │   ├── types.rs
 │   │   ├── utils
 │   │   │   └── testing.rs
@@ -152,4 +158,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-24 directories, 129 files
+25 directories, 134 files

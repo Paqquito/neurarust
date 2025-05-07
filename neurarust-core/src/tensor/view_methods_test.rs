@@ -364,4 +364,114 @@ fn test_squeeze_propagates_requires_grad() -> Result<(), NeuraRustError> {
     assert!(s_noop.requires_grad());
     assert!(s_noop.grad_fn().is_some()); // Even if it's a no-op view, it should track
     Ok(())
-} 
+}
+
+// --- Tests for Tensor::expand --- 
+
+#[test]
+fn test_tensor_expand_basic() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0, 2.0], vec![2])?;
+    let expanded = t.expand(&[3, 2])?;
+    assert_eq!(expanded.shape(), &[3, 2]);
+    assert_eq!(expanded.strides(), &[0, 1]);
+    // Verify data sharing (optional, but good for views)
+    let t_lock = t.read_data();
+    let expanded_lock = expanded.read_data();
+    assert!(Arc::ptr_eq(t_lock.buffer(), expanded_lock.buffer()));
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_with_neg_one() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+
+    // Cas original du test: -1 pour une nouvelle dimension (devrait échouer)
+    // t shape [2,3], target_shape [-1, 5, -1]
+    // Le premier -1 est une nouvelle dimension (rang cible 3 vs rang source 2).
+    let target_shape = vec![-1isize, 5, -1];
+    let expanded_fail = t.expand(&target_shape);
+    assert!(matches!(
+        expanded_fail,
+        Err(NeuraRustError::UnsupportedOperation(msg)) if msg.contains("Dimension size -1 not allowed for new dimensions")
+    )); // Message de panique personnalisé retiré pour éviter le problème de move
+    
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_add_dims() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0, 2.0], vec![2])?;
+    let expanded = t.expand(&[2, 1, 2])?;
+    assert_eq!(expanded.shape(), &[2, 1, 2]);
+    assert_eq!(expanded.strides(), &[0, 0, 1]);
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_scalar() -> Result<(), NeuraRustError> {
+    let scalar = Tensor::new(vec![42.0f32], vec![])?;
+    let expanded = scalar.expand(&[2, 3])?;
+    assert_eq!(expanded.shape(), &[2, 3]);
+    assert_eq!(expanded.strides(), &[0, 0]);
+    // Check a value
+    assert_eq!(expanded.at_f32(&[0,0])?, 42.0f32);
+    assert_eq!(expanded.at_f32(&[1,2])?, 42.0f32);
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_error_neg_one_for_new_dim() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0], vec![1])?;
+    let result = t.expand(&[-1, 1]);
+    assert!(matches!(result, Err(NeuraRustError::UnsupportedOperation(_))));
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_error_negative_dim_size() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0], vec![1])?;
+    let result = t.expand(&[-2, 1]);
+    assert!(matches!(result, Err(NeuraRustError::UnsupportedOperation(_))));
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_error_incompatible_dim() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0, 2.0, 3.0], vec![3])?;
+    // Tentative d'étendre une dimension non-singleton (taille 3) à une taille plus grande (4)
+    let result = t.expand(&[4]);
+    assert!(matches!(
+        result,
+        Err(NeuraRustError::UnsupportedOperation(msg)) if msg.contains("Cannot expand source dimension 0 (size 3) to target size 4 because source is not 1")
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_error_too_small_rank() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
+    // La forme cible a un rang inférieur à la forme source
+    let result = t.expand(&[2]);
+    assert!(matches!(
+        result,
+        Err(NeuraRustError::UnsupportedOperation(msg)) if msg.contains("Target rank cannot be less than source rank")
+    ));
+    Ok(())
+}
+
+#[test]
+fn test_tensor_expand_propagates_requires_grad() -> Result<(), NeuraRustError> {
+    let t = Tensor::new(vec![1.0, 2.0], vec![1, 2])?;
+    t.set_requires_grad(true)?;
+
+    let expanded = t.expand(&[3, -1])?;
+    assert!(expanded.requires_grad());
+    assert!(expanded.grad_fn().is_some());
+    let grad_fn_name = format!("{:?}", expanded.grad_fn().unwrap());
+    assert!(grad_fn_name.contains("ExpandBackward"));
+    Ok(())
+}
+
+// It might be good to add an autograd check_grad test here too,
+// but it would be very similar to the one in expand_test.rs.
+// For now, focusing on the public API usage and error conditions. 

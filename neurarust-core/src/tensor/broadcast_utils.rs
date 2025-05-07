@@ -90,9 +90,32 @@ impl Tensor {
         if current_shape == target_shape {
             return Ok(self.clone());
         }
-        // For now, delegate to the main expand_op, assuming it handles broadcasting correctly.
-        // We might need more specific logic later.
-        crate::ops::view::expand_op(self, target_shape.to_vec())
+        let target_shape_isize: Vec<isize> = target_shape.iter().map(|&d| d as isize).collect();
+        crate::ops::view::expand_op(self, &target_shape_isize)
+    }
+
+    /// Expands the tensor to match a target shape by adding new dimensions (size 1) or repeating existing dimensions of size 1.
+    /// This is the counterpart to `reduce_to_shape` for broadcasting.
+    ///
+    /// Used in backward passes where a gradient needs to be expanded to the shape of an original input.
+    pub fn expand_to_match_nd(
+        &self,
+        target_shape: &[usize],
+    ) -> Result<Tensor, NeuraRustError> {
+        let current_shape = self.shape(); // Use non-generic accessor
+        if current_shape == target_shape {
+            return Ok(self.clone());
+        }
+
+        // Example: current_shape [3], target_shape [2, 3]
+        // We need to call expand_op with a target_shape that reflects the desired view.
+        // expand_op itself handles the logic of adding new axes (size 1) or expanding existing size 1 axes.
+
+        // Convert target_shape from &[usize] to &[isize] for expand_op
+        let target_shape_isize: Vec<isize> = target_shape.iter().map(|&dim| dim as isize).collect();
+
+        // Call the actual expand_op. This op should handle adding new leading dimensions if necessary.
+        crate::ops::view::expand_op(self, &target_shape_isize)
     }
 }
 

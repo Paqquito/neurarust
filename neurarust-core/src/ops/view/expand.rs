@@ -59,14 +59,13 @@ impl BackwardOp for ExpandBackward {
     }
 }
 
-/// Validates shapes for the expand operation.
-fn validate_expand_shapes(
-    tensor: &Tensor,
-    target_shape: &[usize],
+/// Validates shapes for the expand operation, assuming -1 has been processed.
+fn validate_expand_shapes_processed(
+    tensor_shape: &[usize],
+    processed_target_shape: &[usize],
 ) -> Result<(), NeuraRustError> {
-    let tensor_shape = tensor.shape();
     let tensor_rank = tensor_shape.len();
-    let target_rank = target_shape.len();
+    let target_rank = processed_target_shape.len();
 
     if tensor_rank > target_rank {
         return Err(NeuraRustError::ShapeMismatch {
@@ -78,19 +77,21 @@ fn validate_expand_shapes(
 
     let mut tensor_idx = (tensor_rank as isize) - 1;
     for target_idx in (0..target_rank).rev() {
-        let target_dim = target_shape[target_idx];
+        let target_dim = processed_target_shape[target_idx];
 
         if tensor_idx >= 0 {
             // Dimension exists in both input and target
             let shape_dim = tensor_shape[tensor_idx as usize];
             // Expansion is only valid if target dim matches input dim, OR input dim is 1.
+            // Since -1 is processed, target_dim should match shape_dim if shape_dim != 1.
             if !(shape_dim == target_dim || shape_dim == 1) {
                 return Err(NeuraRustError::ShapeMismatch {
                     operation: "expand".to_string(),
                     expected: format!(
-                        "Target dim {} or 1 at index {} (from right)",
+                        "Target dim {} or 1 at index {} (from right, original tensor dim {})",
                         shape_dim,
-                        target_rank - 1 - target_idx
+                        target_rank - 1 - target_idx,
+                        shape_dim
                     ),
                     actual: format!(
                         "Target dim {} at index {} (from right)",
@@ -101,18 +102,10 @@ fn validate_expand_shapes(
             }
             tensor_idx -= 1;
         } else {
-            // New dimension added by expand
-            // New dimensions cannot be size 0
-            if target_dim == 0 {
-                 return Err(NeuraRustError::ShapeMismatch {
-                    operation: "expand".to_string(),
-                    expected: "Target dim > 0 for new dimensions".to_string(),
-                    actual: format!(
-                        "Target dim 0 at index {} (from right)",
-                         target_rank - 1 - target_idx
-                    ),
-                });
-            }
+            // New dimension added by expand (e.g. tensor [2], target [3,2])
+            // target_dim here is a new dimension being created.
+            // It cannot be 0 if it's a new dimension, already handled by target_shape processing.
+            // No specific check needed here as -1 should have been resolved or errored.
         }
     }
 
@@ -120,61 +113,132 @@ fn validate_expand_shapes(
 }
 
 /// Performs the expand operation, creating a view with potentially larger dimensions.
-pub fn expand_op(tensor: &Tensor, target_shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    validate_expand_shapes(tensor, &target_shape)?;
-
-    let tensor_data_guard = tensor.read_data();
-
-    let original_shape = &tensor_data_guard.shape;
-    let original_strides = &tensor_data_guard.strides;
-    let original_rank = original_shape.len();
+pub fn expand_op(tensor: &Tensor, target_shape: &[isize]) -> Result<Tensor, NeuraRustError> {
+    let t_guard = tensor.read_data();
+    let source_shape = &t_guard.shape;
+    let source_rank = source_shape.len();
     let target_rank = target_shape.len();
 
-    let mut new_shape = target_shape.clone();
-    let mut new_strides = vec![0; target_rank];
+    if target_rank < source_rank {
+        return Err(NeuraRustError::UnsupportedOperation(
+            "Target rank cannot be less than source rank for expand.".to_string(),
+        ));
+    }
 
-    let mut shape_idx = (original_rank as isize) - 1;
-    for i in (0..target_rank).rev() {
-        let target_dim = target_shape[i];
+    // --- 1. Validate and Finalize Target Shape ---
+    let mut final_target_shape = Vec::with_capacity(target_rank);
+    let rank_diff = target_rank - source_rank;
 
-        if shape_idx >= 0 {
-            let original_dim = original_shape[shape_idx as usize];
-            let original_stride = original_strides[shape_idx as usize];
+    for j in 0..target_rank {
+        let val = target_shape[j];
+        let is_new_dim = j < rank_diff;
+        let source_dim_idx_opt = if is_new_dim { None } else { Some(j - rank_diff) };
 
-            if target_dim == usize::MAX {
-                new_shape[i] = original_dim;
-                new_strides[i] = original_stride;
-            } else if original_dim == target_dim {
-                new_strides[i] = original_stride;
-            } else if original_dim == 1 {
-                new_strides[i] = 0;
+        if val == -1 {
+            if is_new_dim {
+                return Err(NeuraRustError::UnsupportedOperation(
+                    "Dimension size -1 not allowed for new dimensions in expand.".to_string(),
+                ));
+            }
+            // Existing dimension, infer from source
+            final_target_shape.push(source_shape[source_dim_idx_opt.unwrap()]);
+        } else if val == 0 {
+            if is_new_dim {
+                // New dimension of size 0 is allowed
+                final_target_shape.push(0);
             } else {
-                unreachable!("Invalid expand case detected after validation.");
+                // Existing dimension
+                let src_dim_size = source_shape[source_dim_idx_opt.unwrap()];
+                if src_dim_size == 0 {
+                    final_target_shape.push(0); // Copying a 0-sized dimension
+                } else {
+                    return Err(NeuraRustError::UnsupportedOperation(format!(
+                        "Target dimension {} is 0, but corresponding source dimension {} is not 0 (it's {}). Only a 0-sized source dim can be targeted with 0.",
+                        j, source_dim_idx_opt.unwrap(), src_dim_size
+                    )));
+                }
+            }
+        } else if val > 0 {
+            let current_target_dim_size = val as usize;
+            if is_new_dim {
+                // New dimension with a specified positive size
+                final_target_shape.push(current_target_dim_size);
+            } else {
+                // Existing dimension
+                let src_dim_size = source_shape[source_dim_idx_opt.unwrap()];
+                if current_target_dim_size < src_dim_size {
+                    return Err(NeuraRustError::UnsupportedOperation(format!(
+                        "Target dimension {} size {} is smaller than source dimension {} size {}.",
+                        j, current_target_dim_size, source_dim_idx_opt.unwrap(), src_dim_size
+                    )));
+                }
+                if current_target_dim_size > src_dim_size && src_dim_size != 1 {
+                    return Err(NeuraRustError::UnsupportedOperation(format!(
+                        "Cannot expand source dimension {} (size {}) to target size {} because source is not 1.",
+                        source_dim_idx_opt.unwrap(), src_dim_size, current_target_dim_size
+                    )));
+                }
+                final_target_shape.push(current_target_dim_size);
+            }
+        } else { // val < -1
+            return Err(NeuraRustError::UnsupportedOperation(format!(
+                "Invalid target dimension size: {}. Must be -1 (infer), 0 (copy if original is 0 or new 0-dim), or > 0.",
+                val
+            )));
+        }
+    }
+
+    // If shapes are identical after finalization, just return a view (clone of the Arc)
+    if *source_shape == final_target_shape {
+        // No need to drop t_guard yet, tensor.clone() is cheap.
+        return Ok(tensor.clone());
+    }
+
+    validate_expand_shapes_processed(source_shape, &final_target_shape)?;
+
+    let original_strides = &t_guard.strides;
+    let current_original_rank = source_shape.len(); 
+    let current_target_rank = final_target_shape.len();
+
+    let mut new_strides = vec![0; current_target_rank];
+
+    let mut shape_idx = (current_original_rank as isize) - 1;
+    for i in (0..current_target_rank).rev() { 
+        let target_dim_val = final_target_shape[i];
+
+        if shape_idx >= 0 { 
+            let original_dim_val = source_shape[shape_idx as usize];
+            let original_stride_val = original_strides[shape_idx as usize];
+
+            if original_dim_val == target_dim_val {
+                new_strides[i] = original_stride_val;
+            } else if original_dim_val == 1 && target_dim_val > 1 {
+                new_strides[i] = 0;
+            } else if original_dim_val == 1 && target_dim_val == 1 {
+                new_strides[i] = original_stride_val;
+            } else {
+                unreachable!(
+                    "Invalid expand case detected after validation. Original: {}, Target: {}",
+                    original_dim_val, target_dim_val
+                );
             }
             shape_idx -= 1;
         } else {
-            if target_dim == usize::MAX {
-                return Err(NeuraRustError::UnsupportedOperation(
-                    "Target shape cannot use usize::MAX (sentinel for -1) for new dimensions.".to_string()
-                ));
-            }
             new_strides[i] = 0;
         }
     }
 
-    let buffer_arc = tensor_data_guard.buffer.clone();
-    let device = tensor_data_guard.device;
-    let offset = tensor_data_guard.offset;
-    let requires_grad = tensor_data_guard.requires_grad;
+    let buffer_arc = t_guard.buffer.clone();
+    let device = t_guard.device;
+    let offset = t_guard.offset;
+    let requires_grad = t_guard.requires_grad;
     let input_node_arc = if requires_grad { Some(Arc::clone(&tensor.data)) } else { None };
-
-    drop(tensor_data_guard);
 
     let view_td = TensorData::new_view(
         buffer_arc,
         device,
         offset,
-        new_shape,
+        final_target_shape,
         new_strides
     )?;
 
@@ -182,10 +246,9 @@ pub fn expand_op(tensor: &Tensor, target_shape: Vec<usize>) -> Result<Tensor, Ne
 
     if let Some(input_node) = input_node_arc {
         if requires_grad {
-            let original_shape_for_backward = tensor.shape();
             let backward_op = ExpandBackward {
                 input_node: input_node,
-                original_shape: original_shape_for_backward,
+                original_shape: source_shape.to_vec(), 
             };
             let backward_op_arc: Arc<dyn BackwardOp + Send + Sync> = Arc::new(backward_op);
             output_tensor.write_data().grad_fn = Some(backward_op_arc);
