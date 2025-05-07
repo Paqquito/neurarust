@@ -2,7 +2,6 @@ use crate::tensor::Tensor;
 use crate::error::NeuraRustError;
 use crate::types::DType;
 use crate::device::StorageDevice;
-use crate::ops::view::SliceArg;
 
 pub fn cast_op(tensor: &Tensor, new_dtype: DType) -> Result<Tensor, NeuraRustError> {
     let tensor_guard = tensor.read_data();
@@ -71,6 +70,7 @@ pub fn cast_op(tensor: &Tensor, new_dtype: DType) -> Result<Tensor, NeuraRustErr
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::ops::view::SliceArg;
     use crate::tensor::Tensor;
     use crate::types::DType;
 

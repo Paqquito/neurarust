@@ -7,3 +7,4 @@ pub mod add_scalar;
 pub mod sub_scalar; 
 pub mod mul_scalar; 
 pub mod div_scalar; 
+pub(super) mod clamp; 

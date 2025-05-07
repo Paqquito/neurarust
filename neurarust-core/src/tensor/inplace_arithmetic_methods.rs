@@ -5,6 +5,19 @@ use crate::{
     // device::StorageDevice, // Likely unused
     // tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64}, // Unused
     // tensor::utils::{broadcast_shapes, index_to_coord}, // Unused
+    ops::traits::numeric::NeuraNumeric,
+    // super::inplace_ops::{
+    //     add::add_impl,
+    //     add_scalar::add_scalar_impl,
+    //     clamp::clamp_impl,
+    //     div::div_impl,
+    //     div_scalar::div_scalar_impl,
+    //     mul::mul_impl,
+    //     mul_scalar::mul_scalar_impl,
+    //     pow::pow_f_impl,
+    //     sub::sub_impl,
+    //     sub_scalar::sub_scalar_impl,
+    // },
 };
 // use std::sync::Arc; // Unused
 // use std::ops::{Deref, DerefMut}; // Unused
@@ -525,6 +538,103 @@ impl Tensor {
     /// ```
     pub fn div_scalar_f64(&mut self, scalar: f64) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::div_scalar::perform_div_scalar_inplace_f64(self, scalar)
+    }
+
+    /// Performs in-place clamping of tensor elements.
+    ///
+    /// Each element `x` in the tensor will be clamped to be within the range `[min, max]`.
+    /// If `min` is `None`, there is no lower bound.
+    /// If `max` is `None`, there is no upper bound.
+    ///
+    /// The types of `min` and `max` (`S`) must be convertible to the tensor's element type.
+    /// Currently, this operation is supported for `F32` and `F64` tensors.
+    /// `S` is constrained by `NeuraNumeric`, which is currently implemented for `f32` and `f64`.
+    ///
+    /// # Arguments
+    ///
+    /// * `self`: A mutable reference to the tensor.
+    /// * `min`: An optional minimum value. Values of type `S: NeuraNumeric`.
+    /// * `max`: An optional maximum value. Values of type `S: NeuraNumeric`.
+    ///
+    /// # Errors
+    ///
+    /// * `NeuraRustError::InternalError`: If conversion from `S` to the tensor's `DType` fails unexpectedly
+    ///   (should not happen if `S` is `f32` or `f64` as per `NeuraNumeric` current impls).
+    /// * `NeuraRustError::InplaceModificationError`: If the tensor is not suitable for in-place modification.
+    /// * `NeuraRustError::UnsupportedOperation`: If the tensor's `DType` is not `F32` or `F64`.
+    ///
+    /// # Examples
+    ///
+    /// ```rust
+    /// use neurarust_core::{Tensor, DType, NeuraRustError, ops::traits::numeric::NeuraNumeric};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// let mut tensor = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0], vec![5])?;
+    /// tensor.clamp_(Some(2.5f32), Some(4.5f32))?;
+    /// assert_eq!(tensor.get_f32_data()?, vec![2.5, 2.5, 3.0, 4.0, 4.5]);
+    ///
+    /// let mut tensor2 = Tensor::new_f64(vec![-1.0, 0.0, 1.0, 2.0], vec![4])?;
+    /// tensor2.clamp_(Some(0.0f64), None)?;
+    /// assert_eq!(tensor2.get_f64_data()?, vec![0.0, 0.0, 1.0, 2.0]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn clamp_<S: NeuraNumeric>(
+        &mut self,
+        min: Option<S>,
+        max: Option<S>,
+    ) -> Result<&mut Self, NeuraRustError> {
+        if self.grad_fn().is_some() || (self.grad_fn().is_none() && self.requires_grad()) {
+            return Err(NeuraRustError::InplaceModificationError {
+                operation: "clamp_".to_string(),
+                reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string(),
+            });
+        }
+
+        // Match DType. Since DType currently only has F32 and F64, this match is exhaustive.
+        // If new DTypes are added, the compiler will error here, forcing an update.
+        match self.dtype() {
+            DType::F32 => {
+                let min_val = match min {
+                    Some(s_val) => Some(s_val.to_f32().ok_or_else(|| NeuraRustError::InternalError(
+                        format!("clamp_: Failed to convert min value of type {} to f32.", std::any::type_name::<S>())
+                    ))?),
+                    None => None,
+                };
+                let max_val = match max {
+                    Some(s_val) => Some(s_val.to_f32().ok_or_else(|| NeuraRustError::InternalError(
+                        format!("clamp_: Failed to convert max value of type {} to f32.", std::any::type_name::<S>())
+                    ))?),
+                    None => None,
+                };
+                let mut tensor_data_guard = self.data.write().map_err(|e| NeuraRustError::LockError {
+                    lock_type: "write".to_string(),
+                    reason: format!("Failed to lock tensor data for clamp_ (F32): {}", e),
+                })?;
+                crate::tensor::inplace_ops::clamp::clamp_tensor_data::<f32>(&mut *tensor_data_guard, min_val, max_val)?;
+            }
+            DType::F64 => {
+                let min_val = match min {
+                    Some(s_val) => Some(s_val.to_f64().ok_or_else(|| NeuraRustError::InternalError(
+                        format!("clamp_: Failed to convert min value of type {} to f64.", std::any::type_name::<S>())
+                    ))?),
+                    None => None,
+                };
+                let max_val = match max {
+                    Some(s_val) => Some(s_val.to_f64().ok_or_else(|| NeuraRustError::InternalError(
+                        format!("clamp_: Failed to convert max value of type {} to f64.", std::any::type_name::<S>())
+                    ))?),
+                    None => None,
+                };
+                let mut tensor_data_guard = self.data.write().map_err(|e| NeuraRustError::LockError {
+                    lock_type: "write".to_string(),
+                    reason: format!("Failed to lock tensor data for clamp_ (F64): {}", e),
+                })?;
+                crate::tensor::inplace_ops::clamp::clamp_tensor_data::<f64>(&mut *tensor_data_guard, min_val, max_val)?;
+            }
+            // No `_` arm is needed if DType only contains F32 and F64.
+            // The compiler will enforce exhaustiveness if DType is extended.
+        }
+        Ok(self)
     }
 }
 

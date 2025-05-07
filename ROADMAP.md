@@ -280,18 +280,18 @@
                  (Création d'un nouvel exemple `basic_mlp_cpu_inplace_optim.rs`)
         *   **Step 1.D.11: Implement `clamp_` In-Place**
             *   🎯 **Goal:** Add in-place clamping operation for tensors.
-            *   [ ] Implement `Tensor::clamp_(&mut self, min: Option<S>, max: Option<S>)`
+            *   [✅] Implement `Tensor::clamp_(&mut self, min: Option<S>, max: Option<S>)`
                 *   `S` should match the tensor's DType (e.g., `f32`, `f64`).
                 *   If `min` is `Some`, all elements less than `min` are set to `min`.
                 *   If `max` is `Some`, all elements greater than `max` are set to `max`.
                 *   Modify the tensor's buffer directly.
                 *   Perform autograd checks similar to other in-place operations (error if modifying a tensor part of a graph that requires it for backward, unless it's a leaf and `requires_grad` or if CoW is triggered).
-            *   [ ] Add comprehensive unit tests:
+            *   [✅] Add comprehensive unit tests:
                 *   Test with `min` only, `max` only, both `min` and `max`.
                 *   Test cases where no clamping occurs.
                 *   Test edge cases (e.g., `min` > `max`, though this behavior might be undefined or an error).
                 *   Test autograd error triggering.
-            *   [ ] Add `rustdoc` for `clamp_`, detailing its behavior and arguments.
+            *   [✅] Add `rustdoc` for `clamp_`, detailing its behavior and arguments.
         *   **Step 1.D.12: Implement `fill_` In-Place**
             *   🎯 **Goal:** Allow in-place filling of a tensor with a scalar value.
             *   **Step 1.D.12.1: Implement `Tensor::fill_(&mut self, value: S)`**
