@@ -144,54 +144,74 @@ fn main() -> Result<(), NeuraRustError> {
         // Paramètres de linear1
         if let Some(grad_tensor) = mlp.linear1.weight().tensor().grad() {
             let update_value = match grad_tensor.dtype() {
-                DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor, learning_rate)?,
+                DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
                 _ => return Err(NeuraRustError::DataTypeMismatch {
                     expected: DType::F32,
                     actual: grad_tensor.dtype(),
                     operation: "Optimizer step (linear1 weight mul_op_scalar)".to_string(),
                 }),
             };
-            mlp.linear1.weight_mut().sub_(&update_value)?;
+            let weight_param_tensor = mlp.linear1.weight_mut().tensor_mut();
+            let detached_weight_data = weight_param_tensor.detach();
+            let updated_weight_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_weight_data, &update_value)?;
+            let final_updated_data = updated_weight_data_from_op.detach();
+            final_updated_data.set_requires_grad(true)?;
+            *weight_param_tensor = final_updated_data;
         }
 
         if let Some(bias_param_mut) = mlp.linear1.bias_mut() {
             if let Some(grad_tensor) = bias_param_mut.tensor().grad() {
                 let update_value = match grad_tensor.dtype() {
-                    DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor, learning_rate)?,
+                    DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
                     _ => return Err(NeuraRustError::DataTypeMismatch {
                         expected: DType::F32,
                         actual: grad_tensor.dtype(),
                         operation: "Optimizer step (linear1 bias mul_op_scalar)".to_string(),
                     }),
                 };
-                bias_param_mut.sub_(&update_value)?;
+                let bias_tensor_mut = bias_param_mut.tensor_mut();
+                let detached_bias_data = bias_tensor_mut.detach();
+                let updated_bias_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_bias_data, &update_value)?;
+                let final_updated_bias_data = updated_bias_data_from_op.detach();
+                final_updated_bias_data.set_requires_grad(true)?;
+                *bias_tensor_mut = final_updated_bias_data;
             }
         }
 
         // Paramètres de linear2
         if let Some(grad_tensor) = mlp.linear2.weight().tensor().grad() {
             let update_value = match grad_tensor.dtype() {
-                DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor, learning_rate)?,
+                DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
                 _ => return Err(NeuraRustError::DataTypeMismatch {
                     expected: DType::F32,
                     actual: grad_tensor.dtype(),
                     operation: "Optimizer step (linear2 weight mul_op_scalar)".to_string(),
                 }),
             };
-            mlp.linear2.weight_mut().sub_(&update_value)?;
+            let weight_param_tensor = mlp.linear2.weight_mut().tensor_mut();
+            let detached_weight_data = weight_param_tensor.detach();
+            let updated_weight_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_weight_data, &update_value)?;
+            let final_updated_data = updated_weight_data_from_op.detach();
+            final_updated_data.set_requires_grad(true)?;
+            *weight_param_tensor = final_updated_data;
         }
 
         if let Some(bias_param_mut) = mlp.linear2.bias_mut() {
             if let Some(grad_tensor) = bias_param_mut.tensor().grad() {
                 let update_value = match grad_tensor.dtype() {
-                    DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor, learning_rate)?,
+                    DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
                     _ => return Err(NeuraRustError::DataTypeMismatch {
                         expected: DType::F32,
                         actual: grad_tensor.dtype(),
                         operation: "Optimizer step (linear2 bias mul_op_scalar)".to_string(),
                     }),
                 };
-                bias_param_mut.sub_(&update_value)?;
+                let bias_tensor_mut = bias_param_mut.tensor_mut();
+                let detached_bias_data = bias_tensor_mut.detach();
+                let updated_bias_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_bias_data, &update_value)?;
+                let final_updated_bias_data = updated_bias_data_from_op.detach();
+                final_updated_bias_data.set_requires_grad(true)?;
+                *bias_tensor_mut = final_updated_bias_data;
             }
         }
 
@@ -210,41 +230,4 @@ fn main() -> Result<(), NeuraRustError> {
 // 1. `Parameter` doit implémenter `zero_grad()` et exposer son `Tensor` de manière mutable.
 //    (Ex: `tensor_mut()` ou via `DerefMut`). Actuellement, `Parameter(Tensor)` avec `DerefMut` existe.
 //    `zero_grad` sur `Parameter` mettrait `tensor.grad = None`.
-// 2. `Linear` doit fournir une méthode comme `get_mutable_parameters(&mut self) -> Vec<&mut Parameter>`.
-//    Ou alors `SimpleMLP::parameters()` devrait retourner `Vec<Arc<RwLock<Parameter>>>`
-//    et la boucle d'optimisation devrait utiliser `param_lock.write().unwrap()` pour obtenir
-//    une garde mutable sur `Parameter`.
-//    L'exemple `basic_mlp_cpu.rs` faisait: `mlp.linear1.weight_mut()` qui retourne `&mut Parameter`.
-//    Donc, `Linear` doit avoir `weight_mut()` et `bias_mut()`.
-//    `SimpleMLP::get_mutable_parameters` est une façon de collecter ces `&mut Parameter`.
-
-// Pour la méthode `mul_scalar_op`:
-// Si `Tensor` n'a pas de `mul_scalar_op` non in-place, il faudrait l'ajouter:
-// impl Tensor {
-//     pub fn mul_scalar_op(&self, scalar: f32) -> Result<Tensor, NeuraRustError> {
-//         if self.dtype() != DType::F32 { /* error */ }
-//         // Logique pour créer un nouveau tenseur résultat de self * scalar
-//         // Pourrait utiliser `ops::arithmetic::mul::mul_op_scalar(self, scalar)`
-//         ops::arithmetic::mul::mul_op_scalar(self, scalar) // Si mul_op_scalar accepte f32 directement
-                                                          // ou si une conversion est faite.
-                                                          // ops::arithmetic::mul::mul_op_scalar<f32>(self, scalar)
-//     }
-// }
-// Le `ops::arithmetic::mul::mul_op_scalar` semble être la bonne voie.
-// Il est défini comme `pub fn mul_op_scalar<T: NeuraNumeric>(tensor: &Tensor, scalar: T) -> Result<Tensor, NeuraRustError>`.
-// Donc, `ops::arithmetic::mul::mul_op_scalar(&grad_tensor_owned, learning_rate)` devrait fonctionner.
-
-// Révision de la boucle d'update avec `ops::arithmetic::mul::mul_op_scalar`:
-// ... dans la boucle for ...
-// if let Some(grad_tensor_owned) = param_ref_mut.tensor().grad() {
-//     let update_value = match grad_tensor_owned.dtype() {
-//         DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor_owned, learning_rate)?,
-//         DType::F64 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor_owned, learning_rate as f64)?, // Cast lr si besoin
-//         _ => { /* error */ }
-//     };
-//     param_ref_mut.sub_(&update_value)?;
-// }
-// ...
-// Cette approche est plus propre car elle utilise directement une fonction d'op existante.
-// Il faudra s'assurer que `learning_rate` a le bon type (f32 ou f64) pour correspondre au paramètre.
-// L'exemple étant F32, `learning_rate` est déjà f32.
+// 2. `
