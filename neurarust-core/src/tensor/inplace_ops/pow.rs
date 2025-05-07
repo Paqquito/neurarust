@@ -12,11 +12,11 @@ pub fn perform_pow_inplace<E: NeuraNumeric + Copy + Debug>(
     current_tensor: &mut Tensor, 
     exponent: E
 ) -> Result<(), NeuraRustError> {
-    // Autograd Check (Modifié)
-    if current_tensor.grad_fn().is_some() {
+    // Autograd check: Disallow in-place if it's a non-leaf or a leaf that requires grad.
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "pow_".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
 

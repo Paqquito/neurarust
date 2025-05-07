@@ -1,8 +1,8 @@
 use crate::{
     tensor::Tensor,
     error::NeuraRustError,
+    types::DType,
     // device::StorageDevice, // Likely unused
-    // types::DType,          // Likely unused
     // tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64}, // Unused
     // tensor::utils::{broadcast_shapes, index_to_coord}, // Unused
 };
@@ -203,6 +203,13 @@ impl Tensor {
     /// # }
     /// ```
     pub fn pow_f32(&mut self, exponent: f32) -> Result<(), NeuraRustError> {
+        if self.dtype() != DType::F32 {
+            return Err(NeuraRustError::DataTypeMismatch {
+                operation: "pow_f32".to_string(),
+                expected: DType::F32,
+                actual: self.dtype(),
+            });
+        }
         crate::tensor::inplace_ops::pow::perform_pow_inplace(self, exponent)
     }
 
@@ -241,6 +248,13 @@ impl Tensor {
     /// # }
     /// ```
     pub fn pow_f64(&mut self, exponent: f64) -> Result<(), NeuraRustError> {
+        if self.dtype() != DType::F64 {
+            return Err(NeuraRustError::DataTypeMismatch {
+                operation: "pow_f64".to_string(),
+                expected: DType::F64,
+                actual: self.dtype(),
+            });
+        }
         crate::tensor::inplace_ops::pow::perform_pow_inplace(self, exponent)
     }
 

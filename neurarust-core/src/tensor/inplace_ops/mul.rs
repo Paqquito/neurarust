@@ -17,10 +17,11 @@ pub fn perform_mul_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         });
     }
 
-    if current_tensor.grad_fn().is_some() {
+    // Autograd check: Disallow in-place if it's a non-leaf or a leaf that requires grad.
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "mul_".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
 
@@ -48,6 +49,13 @@ pub fn perform_mul_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         lock_type: "write (self)".to_string(), 
         reason: "Failed to acquire write lock for self.data in mul_".to_string()
     })?;
+
+    if Arc::strong_count(&self_tensor_data_guard.buffer) > 1 {
+        return Err(NeuraRustError::BufferSharedError {
+            operation: "mul_ (buffer is shared)".to_string(),
+        });
+    }
+
     let self_strides_cloned = self_tensor_data_guard.strides.clone();
     let self_offset_val = self_tensor_data_guard.offset;
     let self_device_for_error = self_tensor_data_guard.device;

@@ -140,9 +140,12 @@ pub mod tests {
         let b = tensor_new_f32(vec![2.0, 2.0, 2.0, 2.0], vec![2, 2])?;
         
         let result = a.mul_(&b);
-        assert!(result.is_ok(), "mul_ should succeed with CoW, got {:?}", result);
-
-        assert_eq!(a.get_f32_data().unwrap(), &[2.0, 4.0, 6.0, 8.0], "Tensor 'a' was not modified as expected after CoW mul_.");
+        match result {
+            Err(NeuraRustError::BufferSharedError { operation }) => {
+                assert_eq!(operation, "mul_ (buffer is shared)", "Unexpected operation string in BufferSharedError.");
+            }
+            _ => panic!("Expected BufferSharedError with operation 'mul_ (buffer is shared)', got {:?}", result),
+        }
         
         Ok(())
     }
@@ -153,22 +156,14 @@ pub mod tests {
         let mut a = base.transpose(0, 1)?;
         let b = tensor_new_f32(vec![2.0; 9], vec![3, 3])?;
         
-        // Capture data of base *before* mul_ on a
-        let base_data_before_op = base.get_f32_data()?;
+        let result = a.mul_(&b);
 
-        a.mul_(&b)?;
-
-        let expected_a_data_after_mul = vec![2.0, 8.0, 14.0, 4.0, 10.0, 16.0, 6.0, 12.0, 18.0];
-        let mut current_a_data = Vec::with_capacity(9);
-        for i in 0..3 {
-            for j in 0..3 {
-                current_a_data.push(a.at_f32(&[i,j])?);
+        match result {
+            Err(NeuraRustError::BufferSharedError { operation }) => {
+                assert_eq!(operation, "mul_ (buffer is shared)", "Unexpected operation string in BufferSharedError for non_contiguous_self.");
             }
+            _ => panic!("Expected BufferSharedError for non_contiguous_self, got {:?}", result),
         }
-        assert_eq!(current_a_data.as_slice(), expected_a_data_after_mul.as_slice(), "Tensor 'a' (view) was not modified correctly.");
-
-        // With CoW, base should NOT be modified.
-        assert_eq!(base.get_f32_data()?.as_slice(), base_data_before_op.as_slice(), "Tensor 'base' should not be modified after CoW on view 'a'.");
         Ok(())
     }
 
@@ -178,22 +173,14 @@ pub mod tests {
         let mut a = base.transpose(0, 1)?;
         let b = tensor_new_f64(vec![2.0; 9], vec![3, 3])?;
 
-        // Capture data of base *before* mul_ on a
-        let base_data_before_op = base.get_f64_data()?;
+        let result = a.mul_(&b);
 
-        a.mul_(&b)?;
-
-        let expected_a_data_after_mul = vec![2.0, 8.0, 14.0, 4.0, 10.0, 16.0, 6.0, 12.0, 18.0];
-        let mut current_a_data: Vec<f64> = Vec::with_capacity(9);
-        for i in 0..3 {
-            for j in 0..3 { 
-                current_a_data.push(a.at_f64(&[i,j])?);
+        match result {
+            Err(NeuraRustError::BufferSharedError { operation }) => {
+                assert_eq!(operation, "mul_ (buffer is shared)", "Unexpected operation string in BufferSharedError for non_contiguous_self_f64.");
             }
+            _ => panic!("Expected BufferSharedError for non_contiguous_self_f64, got {:?}", result),
         }
-        assert_eq!(current_a_data.as_slice(), expected_a_data_after_mul.as_slice(), "Tensor 'a' (view) was not modified correctly.");
-
-        // With CoW, base should NOT be modified.
-        assert_eq!(base.get_f64_data()?.as_slice(), base_data_before_op.as_slice(), "Tensor 'base' should not be modified after CoW on view 'a'.");
         Ok(())
     }
 } 

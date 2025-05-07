@@ -21,10 +21,11 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         });
     }
 
-    if current_tensor.grad_fn().is_some() {
+    // Autograd check: Disallow in-place if it's a non-leaf or a leaf that requires grad.
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "sub_".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
 
@@ -49,6 +50,13 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         lock_type: "write (self)".to_string(), 
         reason: "Failed to acquire write lock for self.data in sub_".to_string()
     })?;
+
+    if Arc::strong_count(&self_tensor_data_guard.buffer) > 1 {
+        return Err(NeuraRustError::BufferSharedError {
+            operation: "sub_ (buffer is shared)".to_string(),
+        });
+    }
+
     let other_tensor_data_guard = other.data.read().map_err(|_| NeuraRustError::LockError{
         lock_type: "read (other)".to_string(),
         reason: "Failed to acquire read lock for other.data in sub_".to_string()

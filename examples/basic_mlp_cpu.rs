@@ -85,8 +85,8 @@ impl Module for SimpleMLP {
 
     /// Retourne une liste des paramètres du module.
     /// Actuellement, collecte les poids et les biais des couches linéaires.
-    fn parameters(&self) -> Vec<Parameter> {
-        let mut params = Vec::new();
+    fn parameters(&self) -> Vec<&Parameter> {
+        let mut params: Vec<&Parameter> = Vec::new();
         params.extend(self.linear1.parameters());
         params.extend(self.linear2.parameters());
         params

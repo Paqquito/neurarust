@@ -23,11 +23,11 @@ pub fn perform_add_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
         });
     }
 
-    // MODIFIED: Allow in-place on leaf tensors that require grad.
-    if current_tensor.grad_fn().is_some() {
+    // Autograd check: Disallow in-place if it's a non-leaf or a leaf that requires grad.
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "add_".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string(),
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string(),
         });
     }
 
@@ -55,15 +55,24 @@ pub fn perform_add_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
     }
 
     // --- Data Access and Clone-on-Write ---
-    let mut self_write_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError {
+    let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError {
         lock_type: "write (self)".to_string(),
         reason: "Failed to acquire write lock for self.data in add_".to_string(),
     })?;
+
+    // Check for shared buffer before attempting CoW via Arc::make_mut
+    // If the buffer is shared, in-place operation is disallowed as per test expectations.
+    if Arc::strong_count(&self_tensor_data_guard.buffer) > 1 {
+        return Err(NeuraRustError::BufferSharedError {
+            operation: "add_ (buffer is shared)".to_string(), 
+        });
+    }
+
     // Clone strides from self_write_guard BEFORE the mutable borrow of its buffer for CoW
-    let self_strides_cloned = self_write_guard.strides.clone(); 
-    let self_offset_val = self_write_guard.offset;
+    let self_strides_cloned = self_tensor_data_guard.strides.clone(); 
+    let self_offset_val = self_tensor_data_guard.offset;
     // It's better to also get self_write_guard.device here if needed in error messages within the match
-    let self_device_for_error = self_write_guard.device; 
+    let self_device_for_error = self_tensor_data_guard.device; 
 
     let other_read_guard = other.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read (other)".to_string(),
@@ -73,7 +82,7 @@ pub fn perform_add_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
     let numel_self: usize = self_shape.iter().product();
 
     // Get a mutable reference to the Buffer enum itself, cloning if the Arc<Buffer> is shared.
-    let buffer_enum_mut_ref: &mut crate::buffer::Buffer = Arc::make_mut(&mut self_write_guard.buffer);
+    let buffer_enum_mut_ref: &mut crate::buffer::Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
 
     match self_dtype {
         DType::F32 => {

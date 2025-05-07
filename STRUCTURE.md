@@ -4,6 +4,7 @@
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
 ├── examples
+│   ├── basic_mlp_cpu_inplace_optim.rs
 │   └── basic_mlp_cpu.rs
 ├── Goals copy.md
 ├── Goals.md
@@ -104,6 +105,29 @@
 │   │   │   ├── create.rs
 │   │   │   ├── create_test.rs
 │   │   │   ├── debug.rs
+│   │   │   ├── inplace_arithmetic_methods.rs
+│   │   │   ├── inplace_ops
+│   │   │   │   ├── add.rs
+│   │   │   │   ├── add_scalar.rs
+│   │   │   │   ├── div.rs
+│   │   │   │   ├── div_scalar.rs
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── mul.rs
+│   │   │   │   ├── mul_scalar.rs
+│   │   │   │   ├── pow.rs
+│   │   │   │   ├── sub.rs
+│   │   │   │   └── sub_scalar.rs
+│   │   │   ├── inplace_ops_tests
+│   │   │   │   ├── add_scalar_test.rs
+│   │   │   │   ├── add_test.rs
+│   │   │   │   ├── div_scalar_test.rs
+│   │   │   │   ├── div_test.rs
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── mul_scalar_test.rs
+│   │   │   │   ├── mul_test.rs
+│   │   │   │   ├── pow_test.rs
+│   │   │   │   ├── sub_scalar_test.rs
+│   │   │   │   └── sub_test.rs
 │   │   │   ├── iter_utils.rs
 │   │   │   ├── mod.rs
 │   │   │   ├── reduction_methods.rs
@@ -124,6 +148,7 @@
 │       └── tensor_view_ops.rs
 ├── README.md
 ├── ROADMAP.md
-└── STRUCTURE.md
+├── STRUCTURE.md
+└── text.txt
 
-22 directories, 105 files
+24 directories, 128 files

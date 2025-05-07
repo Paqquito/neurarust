@@ -44,10 +44,10 @@ pub fn perform_mul_scalar_inplace_f32(current_tensor: &mut Tensor, scalar: f32) 
         });
     }
 
-    if current_tensor.grad_fn().is_some() {
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "mul_scalar_f32".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
 
@@ -90,10 +90,10 @@ pub fn perform_mul_scalar_inplace_f64(current_tensor: &mut Tensor, scalar: f64) 
         });
     }
 
-    if current_tensor.grad_fn().is_some() {
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "mul_scalar_f64".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
     

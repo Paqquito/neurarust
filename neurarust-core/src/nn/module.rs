@@ -10,7 +10,7 @@ use crate::types::DType;
 /// This trait defines the fundamental operations that any neural network module
 /// should support, such as performing a forward pass and accessing its parameters.
 /// It is designed to be generic over the data type `T` (e.g., `f32`, `f64`).
-pub trait Module {
+pub trait Module: std::fmt::Debug + Send + Sync {
     /// Performs a forward pass of the module.
     ///
     /// # Arguments
@@ -25,7 +25,7 @@ pub trait Module {
     ///
     /// Parameters are typically weights and biases of layers that are adjusted during training.
     /// This method should collect all such parameters, including those from sub-modules.
-    fn parameters(&self) -> Vec<Parameter>;
+    fn parameters(&self) -> Vec<&Parameter>;
 
     /// Sets the device for all parameters of the module.
     ///
@@ -92,6 +92,7 @@ mod tests {
     use crate::device::StorageDevice as Device; // Idem pour Device
 
     // Mock Module pour les tests
+    #[derive(Debug)]
     struct MockModule {
         param: Parameter,
     }
@@ -111,8 +112,8 @@ mod tests {
             Ok(input.clone())
         }
 
-        fn parameters(&self) -> Vec<Parameter> {
-            vec![self.param.clone()]
+        fn parameters(&self) -> Vec<&Parameter> {
+            vec![&self.param]
         }
 
         fn to_device(&mut self, device: Device) -> Result<(), NeuraRustError> {

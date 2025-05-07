@@ -51,10 +51,11 @@ pub fn perform_div_scalar_inplace_f32(current_tensor: &mut Tensor, scalar: f32) 
         return Err(NeuraRustError::ArithmeticError("Division by zero in div_scalar_f32.".to_string()));
     }
 
-    if current_tensor.grad_fn().is_some() {
+    // Autograd check: Disallow in-place if it's a non-leaf or a leaf that requires grad.
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "div_scalar_f32".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
 
@@ -100,10 +101,11 @@ pub fn perform_div_scalar_inplace_f64(current_tensor: &mut Tensor, scalar: f64) 
         return Err(NeuraRustError::ArithmeticError("Division by zero in div_scalar_f64.".to_string()));
     }
 
-    if current_tensor.grad_fn().is_some() {
+    // Autograd check: Disallow in-place if it's a non-leaf or a leaf that requires grad.
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
         return Err(NeuraRustError::InplaceModificationError {
             operation: "div_scalar_f64".to_string(),
-            reason: "Tensor is not a leaf node (it has a grad_fn). In-place operations are only allowed on leaf tensors.".to_string()
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
         });
     }
     

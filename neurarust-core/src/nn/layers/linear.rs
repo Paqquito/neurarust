@@ -101,11 +101,11 @@ impl Module for Linear {
         Ok(output)
     }
 
-    fn parameters(&self) -> Vec<Parameter> {
+    fn parameters(&self) -> Vec<&Parameter> {
         let mut params = Vec::new();
-        params.push(self.weights.clone());
+        params.push(&self.weights);
         if let Some(ref bias) = self.bias {
-            params.push(bias.clone());
+            params.push(bias);
         }
         params
     }

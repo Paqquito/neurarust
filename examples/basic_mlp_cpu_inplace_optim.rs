@@ -60,8 +60,8 @@ impl Module for SimpleMLP {
     }
 
     /// Retourne une liste des paramètres clonés du module.
-    fn parameters(&self) -> Vec<Parameter> {
-        let mut model_params = Vec::new();
+    fn parameters(&self) -> Vec<&Parameter> {
+        let mut model_params: Vec<&Parameter> = Vec::new();
         model_params.extend(self.linear1.parameters());
         model_params.extend(self.linear2.parameters());
         model_params

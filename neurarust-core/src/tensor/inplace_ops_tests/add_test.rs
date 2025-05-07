@@ -107,7 +107,7 @@ mod tests {
             NeuraRustError::DataTypeMismatch { expected, actual, operation } => {
                 assert_eq!(expected, DType::F32);
                 assert_eq!(actual, DType::F64);
-                assert_eq!(operation, "add_");
+                assert_eq!(operation, "in-place addition (add_)");
             }
             other_err => panic!("Expected DataTypeMismatch, got {:?}", other_err),
         }
@@ -126,7 +126,7 @@ mod tests {
         assert!(result.is_err(), "Expected error for in-place op on shared buffer, got {:?}", result);
         match result.err().unwrap() {
             NeuraRustError::BufferSharedError { operation } => {
-                assert!(operation.contains("add_ (TensorData.buffer is shared)") || operation.contains("try_get_cpu_f32_mut"), "Operation was: {}", operation);
+                assert_eq!(operation, "add_ (buffer is shared)", "Operation was: {}", operation);
             }
             other_err => panic!("Expected BufferSharedError, got {:?}", other_err),
         }
@@ -145,7 +145,7 @@ mod tests {
         assert!(result.is_err(), "Expected BufferSharedError because a_transposed shares buffer with a_orig");
         match result.err().unwrap() {
             NeuraRustError::BufferSharedError { operation } => {
-                assert!(operation.contains("add_ (TensorData.buffer is shared)"));
+                assert_eq!(operation, "add_ (buffer is shared)");
             }
             other_err => panic!("Expected BufferSharedError for non_contiguous test, got {:?}", other_err),
         }
@@ -225,7 +225,7 @@ mod tests {
         assert!(result.is_err(), "Expected BufferSharedError because a_transposed shares buffer with a_orig (f64)");
         match result.err().unwrap() {
             NeuraRustError::BufferSharedError { operation } => {
-                assert!(operation.contains("add_ (TensorData.buffer is shared") || operation.contains("try_get_cpu_f64_mut"), 
+                assert_eq!(operation, "add_ (buffer is shared)", 
                         "Unexpected BufferSharedError operation: {}", operation);
             }
             other_err => panic!("Expected BufferSharedError for non_contiguous_f64 test, got {:?}", other_err),
