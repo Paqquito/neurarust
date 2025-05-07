@@ -17,3 +17,4 @@ pub mod mul_scalar_test;
 #[cfg(test)]
 pub mod div_scalar_test; 
 pub mod clamp_test; 
+pub mod fill_test; 

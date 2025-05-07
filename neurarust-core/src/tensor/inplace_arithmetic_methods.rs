@@ -636,6 +636,59 @@ impl Tensor {
         }
         Ok(self)
     }
+
+    /// Fills this tensor with the specified scalar value, in-place.
+    ///
+    /// `self = value` (element-wise)
+    ///
+    /// This operation modifies the tensor's data directly.
+    /// The tensor must be contiguous and have a DType compatible with the provided value (`f32` or `f64`).
+    ///
+    /// # Arguments
+    ///
+    /// * `value`: The scalar value (`f32` or `f64`) to fill the tensor with.
+    ///
+    /// # Returns
+    ///
+    /// * `Ok(&mut Self)` if the operation is successful.
+    /// * `Err(NeuraRustError)` if:
+    ///     * `self` requires gradient computation (`InplaceModificationError`).
+    ///     * The tensor is not contiguous (`UnsupportedOperation`).
+    ///     * The provided `value` cannot be converted to the tensor's DType.
+    ///     * The underlying buffer of `self` cannot be uniquely (mutably) accessed.
+    ///
+    /// # Examples
+    ///
+    /// ```
+    /// # use neurarust_core::{Tensor, NeuraRustError, DType};
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// # let mut a = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2])?;
+    /// # a.fill_(7.0f32)?;
+    /// # assert_eq!(a.get_f32_data().unwrap(), &[7.0, 7.0, 7.0, 7.0]);
+    /// #
+    /// # let mut b = Tensor::new_f64(vec![1.0, 2.0], vec![2])?;
+    /// # b.fill_(-1.5f64)?;
+    /// # assert_eq!(b.get_f64_data().unwrap(), &[-1.5, -1.5]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn fill_<S: NeuraNumeric>(
+        &mut self,
+        value: S,
+    ) -> Result<&mut Self, NeuraRustError> {
+        if self.requires_grad() {
+            return Err(NeuraRustError::InplaceModificationError {
+                operation: "fill_".to_string(),
+                reason: "Cannot perform in-place fill on a tensor that requires gradients."
+                    .to_string(),
+            });
+        }
+
+        // Call the internal implementation
+        crate::tensor::inplace_ops::fill::perform_fill_inplace(self, value)?;
+
+        Ok(self)
+    }
 }
 
 // The test module declaration previously here is now removed,

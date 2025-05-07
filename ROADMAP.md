@@ -295,11 +295,11 @@
         *   **Step 1.D.12: Implement `fill_` In-Place**
             *   🎯 **Goal:** Allow in-place filling of a tensor with a scalar value.
             *   **Step 1.D.12.1: Implement `Tensor::fill_(&mut self, value: S)`**
-                *   [ ] Implement `fill_(&mut self, value: S)` where `S` matches tensor's DType.
-                *   [ ] Modifies the tensor buffer directly, setting all elements to `value`.
-                *   [ ] Perform autograd checks (similar to other in-place ops).
-                *   [ ] Add tests for correctness across DTypes and autograd error triggering.
-                *   [ ] Add `rustdoc`.
+                *   [✅] Implement `fill_(&mut self, value: S)` where `S` matches tensor's DType.
+                *   [✅] Modifies the tensor buffer directly, setting all elements to `value`.
+                *   [✅] Perform autograd checks (similar to other in-place ops).
+                *   [✅] Add tests for correctness across DTypes and autograd error triggering.
+                *   [✅] Add `rustdoc`.
         *   **Step 1.D.13: Logical In-Place Operations (Deferred to align with DType support in Phase 2.C)**
             *   🎯 **Goal:** Implement in-place logical operations for Boolean tensors once they are supported.
             *   [ ] **`Tensor::logical_and_(&mut self, other: &Tensor)`** (for Boolean Tensors)
