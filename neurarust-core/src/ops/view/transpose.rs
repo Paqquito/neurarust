@@ -35,7 +35,7 @@ use super::utils;
 /// let transposed_view = transpose_op(&t, 0, 2)?;
 /// // transposed_view will have shape [4, 3, 2]
 /// ```
-pub(crate) fn transpose_op(input: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, NeuraRustError> {
+pub fn transpose_op(input: &Tensor, dim1: usize, dim2: usize) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),
         reason: "Failed to lock input TensorData for read in transpose_op".to_string(),

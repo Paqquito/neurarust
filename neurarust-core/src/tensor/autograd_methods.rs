@@ -462,6 +462,16 @@ impl Tensor {
         }
         // Silently ignore lock errors, as clearing grad is often best-effort
     }
+
+    /// Returns a raw pointer to the underlying `RwLock<TensorData>`.
+    /// This pointer serves as a unique identifier for this tensor's data in the computation graph.
+    /// 
+    /// **Caution:** This is a low-level method. The pointer should only be used as an ID
+    /// and not be dereferenced unsafely. The lifetime and validity are tied to the `Arc`
+    /// managing the `TensorData`.
+    pub fn node_id(&self) -> NodeId {
+        Arc::as_ptr(&self.data)
+    }
 }
 
 // --- Tests --- 

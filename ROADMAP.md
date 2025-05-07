@@ -192,12 +192,12 @@
                 *   [✅] Add tests for shape, data integrity (view), and error conditions.
                 *   [✅] Add `rustdoc`.
             *   **Step 1.B.10.2: Review and Enhance `Tensor::unsqueeze(dim)` and `Tensor::squeeze(dim)`**
-                *   [ ] Confirm/implement `unsqueeze(&self, dim: usize) -> Result<Tensor, NeuraRustError>` and `squeeze(&self, dim: usize) -> Result<Tensor, NeuraRustError>`.
-                *   [ ] `unsqueeze` adds a new dimension of size 1 at `dim`.
-                *   [ ] `squeeze` removes dimensions of size 1. If `dim` is specified, only that dimension is squeezed if it's size 1.
-                *   [ ] Ensure these return views.
-                *   [ ] Add/verify tests for various `dim` inputs, multi-dim squeezing, and error conditions.
-                *   [ ] Ensure `rustdoc` is comprehensive for both in `tensor/view_methods.rs`.
+                *   [✅] Confirm/implement `unsqueeze(&self, dim: usize) -> Result<Tensor, NeuraRustError>` and `squeeze(&self, dim: Option<usize>) -> Result<Tensor, NeuraRustError>`.
+                *   [✅] `unsqueeze` adds a new dimension of size 1 at `dim`.
+                *   [✅] `squeeze` removes dimensions of size 1. If `dim` is specified, only that dimension is squeezed if it's size 1. If `dim` is None, all dimensions of size 1 are removed.
+                *   [✅] Ensure these return views.
+                *   [✅] Add/verify tests for various `dim` inputs, multi-dim squeezing, and error conditions.
+                *   [✅] Ensure `rustdoc` is comprehensive for both in `tensor/view_methods.rs`.
 
 *   **Sub-Phase 1.C: Basic Training Loop Example:**
     *   🎯 **Goal:** Create a runnable example demonstrating a minimal end-to-end training process.

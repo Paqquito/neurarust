@@ -54,7 +54,7 @@ use std::sync::{Arc, RwLock};
 /// use neurarust_core::{tensor::Tensor, error::NeuraRustError};
 /// use neurarust_core::ops::view::reshape_op;
 ///
-pub(crate) fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+pub fn reshape_op(input: &Tensor, new_shape_vec: Vec<usize>) -> Result<Tensor, NeuraRustError> {
     let input_data_guard = input.data.read().map_err(|_| NeuraRustError::LockError {
         lock_type: "read".to_string(),
         reason: "Failed to lock input TensorData for read in reshape_op".to_string(),

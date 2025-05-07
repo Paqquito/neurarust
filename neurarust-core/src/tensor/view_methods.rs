@@ -19,7 +19,7 @@ impl Tensor {
     /// See [`ops::view::SliceArg`](../ops/view/enum.SliceArg.html) for how to define ranges.
     ///
     /// This method delegates the operation (including autograd handling) to
-    /// [`ops::view::slice_op`](../ops/view/fn.slice_op.html).
+    /// [`ops::view::slice::slice_op`](../ops/view/fn.slice_op.html).
     ///
     /// # Arguments
     /// * `ranges`: A slice of `SliceArg` defining the start and end points for each dimension.
@@ -48,7 +48,7 @@ impl Tensor {
     /// assert!(!sliced.is_contiguous()); // Slicing often creates non-contiguous views
     /// ```
     pub fn slice(&self, ranges: &[crate::ops::view::SliceArg]) -> Result<Self, NeuraRustError> {
-        crate::ops::view::slice_op(self, ranges)
+        crate::ops::view::slice::slice_op(self, ranges)
     }
 
     /// Creates a view of the tensor with two specified dimensions transposed (swapped).
@@ -350,6 +350,94 @@ impl Tensor {
             }
         }
         self.reshape(new_shape_vec)
+    }
+
+    /// Adds a new dimension of size 1 at the specified position `dim`.
+    ///
+    /// This operation returns a new view of the tensor with the additional dimension.
+    /// The underlying data is not copied.
+    ///
+    /// # Arguments
+    /// * `dim`: The dimension at which to insert the new axis. Must be within `0 <= dim <= rank`
+    ///          (where `rank` is the original rank of the tensor).
+    ///
+    /// # Returns
+    /// A `Result` containing the new `Tensor` view with the unsqueezed dimension, 
+    /// or a `NeuraRustError` if `dim` is out of bounds.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    ///
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+    /// // Shape: [2, 2]
+    ///
+    /// // Unsqueeze at dimension 0
+    /// let unsqueezed_0 = t.unsqueeze(0).unwrap();
+    /// assert_eq!(unsqueezed_0.shape(), vec![1, 2, 2]);
+    ///
+    /// // Unsqueeze at dimension 1
+    /// let unsqueezed_1 = t.unsqueeze(1).unwrap();
+    /// assert_eq!(unsqueezed_1.shape(), vec![2, 1, 2]);
+    ///
+    /// // Unsqueeze at dimension 2 (at the end)
+    /// let unsqueezed_2 = t.unsqueeze(2).unwrap();
+    /// assert_eq!(unsqueezed_2.shape(), vec![2, 2, 1]);
+    ///
+    /// // Attempting to unsqueeze at an invalid dimension
+    /// assert!(t.unsqueeze(3).is_err());
+    /// ```
+    pub fn unsqueeze(&self, dim: usize) -> Result<Self, NeuraRustError> {
+        crate::ops::view::squeeze_unsqueeze::unsqueeze_op(self, dim)
+    }
+
+    /// Removes dimensions of size 1 from the shape of a tensor.
+    ///
+    /// If `dim` is `None`, all dimensions of size 1 are removed.
+    /// If `dim` is `Some(d)`, only the dimension `d` is removed if its size is 1.
+    /// If the specified dimension `d` is not of size 1, the tensor is returned unchanged (as a new view).
+    ///
+    /// This operation returns a new view of the tensor; the underlying data is not copied.
+    ///
+    /// # Arguments
+    /// * `dim`: An optional dimension to squeeze. 
+    ///          - If `None`, all dimensions of size 1 are removed.
+    ///          - If `Some(d)`, only dimension `d` is considered for removal.
+    ///
+    /// # Returns
+    /// A `Result` containing the new `Tensor` view with squeezed dimensions, 
+    /// or a `NeuraRustError` if `dim` is out of bounds.
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    ///
+    /// let t = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![1, 3, 1]).unwrap();
+    /// // Shape: [1, 3, 1]
+    ///
+    /// // Squeeze all dimensions of size 1
+    /// let squeezed_all = t.squeeze(None).unwrap();
+    /// assert_eq!(squeezed_all.shape(), vec![3]);
+    ///
+    /// // Squeeze dimension 0
+    /// let squeezed_0 = t.squeeze(Some(0)).unwrap();
+    /// assert_eq!(squeezed_0.shape(), vec![3, 1]);
+    ///
+    /// // Squeeze dimension 2
+    /// let squeezed_2 = t.squeeze(Some(2)).unwrap();
+    /// assert_eq!(squeezed_2.shape(), vec![1, 3]);
+    ///
+    /// // Attempt to squeeze dimension 1 (size 3) - should be no-op for that dim
+    /// let squeezed_1 = t.squeeze(Some(1)).unwrap();
+    /// assert_eq!(squeezed_1.shape(), vec![1, 3, 1]);
+    ///
+    /// // Squeeze to scalar
+    /// let scalar_t = Tensor::new(vec![5.0f32], vec![1, 1, 1]).unwrap();
+    /// let scalar_squeezed = scalar_t.squeeze(None).unwrap();
+    /// assert_eq!(scalar_squeezed.shape(), vec![]); // Empty shape for scalar
+    /// ```
+    pub fn squeeze(&self, dim: Option<usize>) -> Result<Self, NeuraRustError> {
+        crate::ops::view::squeeze_unsqueeze::squeeze_op(self, dim)
     }
 }
 

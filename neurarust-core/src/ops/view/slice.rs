@@ -30,7 +30,7 @@ pub enum SliceArg {
 
 /// Internal representation of a processed slice for a single dimension.
 #[derive(Debug, Clone, Copy)]
-pub(crate) struct SliceRange {
+pub struct SliceRange {
     /// The starting index (inclusive) in the original dimension.
     pub start: usize,
     /// The step size for the slice.
@@ -125,6 +125,7 @@ impl BackwardOp for SliceBackward {
                     is_valid_coord = false; // Should not happen if ranges were validated correctly
                     break;
                 }
+
             }
 
             if !is_valid_coord {
@@ -246,7 +247,7 @@ impl BackwardOp for SliceBackward {
 /// use neurarust_core::{tensor::Tensor, error::NeuraRustError, slice};
 /// use neurarust_core::ops::view::slice_op;
 ///
-pub(crate) fn slice_op(
+pub fn slice_op(
     input: &Tensor,
     ranges: &[SliceArg],
 ) -> Result<Tensor, NeuraRustError> {

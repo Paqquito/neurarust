@@ -31,232 +31,34 @@
 //! (e.g., [`tensor.slice()`](../../tensor/struct.Tensor.html#method.slice), [`tensor.transpose()`](../../tensor/struct.Tensor.html#method.transpose), etc.),
 //! which provide a more user-friendly interface.
 
-pub mod slice;
-pub mod transpose;
+pub mod contiguous;
+pub mod expand;
 pub mod permute;
 pub mod reshape;
-pub mod expand;
-pub mod contiguous;
+pub mod slice;
+pub mod squeeze_unsqueeze;
+pub mod transpose;
+pub mod utils;
 
-pub mod utils; // Declare the utils module
+// Re-exports for easier access
+pub use expand::expand_op;
+pub use permute::permute_op;
+pub use reshape::reshape_op;
+pub use slice::SliceArg; // slice_op and SliceRange are kept crate-public for now
+pub use squeeze_unsqueeze::{unsqueeze_op, squeeze_op};
+pub use transpose::transpose_op;
+// Note: contiguous_op is part of Tensor::contiguous directly, not a separate op here.
 
-// Re-exports for easier access (optional)
-// Use pub(crate) for ops not meant for direct user call yet
-pub(crate) use slice::slice_op;
-pub(crate) use transpose::transpose_op;
-pub(crate) use permute::permute_op;
-pub(crate) use reshape::reshape_op;
-// pub use expand::expand_op; // Keep expand_op public for now
+// The rest of the file used to contain definition for ExpandBackward etc.
+// These should remain in their respective files (e.g. expand.rs)
+// This file should primarily be for module declarations and re-exports.
 
-// Conserver la définition de SliceArg ici car elle est utilisée par slice_op
-pub use slice::SliceArg;
+// Example of what might have been here before refactoring into submodules:
+// use crate::autograd::BackwardOp;
+// use crate::autograd::graph::NodeId;
+// use crate::error::NeuraRustError;
+// use crate::tensor::Tensor;
+// use crate::tensor_data::TensorData;
+// use std::sync::{Arc, RwLock};
+// use std::fmt::Debug;
 
-// Le reste du code (implémentations des ops, backward structs, tests)
-// a été déplacé dans les modules slice.rs, transpose.rs, etc.
-
-use crate::autograd::BackwardOp;
-use crate::autograd::graph::NodeId;
-use crate::error::NeuraRustError;
-use crate::tensor::Tensor;
-use crate::tensor_data::TensorData;
-use std::sync::{Arc, RwLock};
-use std::fmt::Debug;
-
-// --- Expand Operation ---
-
-/// Backward operation for the expand operation.
-///
-/// Stores the original input tensor node to route gradients back to it.
-/// The backward pass involves reducing the incoming gradient back to the
-/// original input shape by summing along the dimensions that were expanded.
-#[derive(Debug)]
-struct ExpandBackward {
-    input_node: Arc<RwLock<TensorData>>, // Store original tensor info
-    _original_shape: Vec<usize>, // TODO: Use this shape in backward pass
-}
-
-impl BackwardOp for ExpandBackward {
-    /// Computes the gradient for the expand operation.
-    ///
-    /// This requires summing the incoming gradient (`grad_output`) along the dimensions
-    /// that were expanded during the forward pass to match the original input shape.
-    ///
-    /// **Note:** This implementation is currently incomplete (`todo!`).
-    ///
-    /// # Arguments
-    ///
-    /// * `grad_output` - The gradient flowing back from the subsequent operation,
-    ///   corresponding to the output of the original expand operation.
-    ///
-    /// # Returns
-    ///
-    /// A `Result` containing a `Vec<Tensor>` with the gradient for the original input.
-    /// Should eventually return the summed gradient. Currently panics.
-    fn backward(&self, _grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // TODO: Implement expand backward using a reduction operation (likely sum)
-        // Identify expanded dimensions by comparing grad_output.shape() and self._original_shape.
-        // Call sum_op along those dimensions, with keep_dims=false.
-        // Need to handle the axes correctly for sum_op.
-        todo!("Implement Expand backward using reduction (sum_op)");
-    }
-
-    fn inputs(&self) -> Vec<NodeId> {
-        vec![Arc::as_ptr(&self.input_node)]
-    }
-}
-
-/// Creates a new view of the tensor with singleton dimensions expanded
-/// to match the target shape, similar to broadcasting rules.
-///
-/// This operation does not copy the underlying data. It works by manipulating
-/// the tensor's strides: dimensions that are expanded from size 1 have their
-/// stride set to 0.
-///
-/// # Arguments
-///
-/// * `tensor` - The input tensor.
-/// * `target_shape` - The desired shape after expansion. Must be compatible with the
-///   input tensor's shape according to broadcasting rules:
-///   - The target shape's rank must be greater than or equal to the input's rank.
-///   - When iterating dimensions from right to left:
-///     - If the input dimension size is equal to the target dimension size, it's compatible.
-///     - If the input dimension size is 1, it can be expanded to match the target size (stride becomes 0).
-///     - If the input dimension size is different from the target dimension size and not 1, it's an error.
-///     - If the target shape has more dimensions than the input, the new leading dimensions
-///       are treated as being expanded from size 1 (stride becomes 0).
-///
-/// # Returns
-///
-/// A `Result` containing the expanded `Tensor` view. Returns an error if:
-/// *   The target shape is incompatible with the input shape.
-/// *   Device or autograd operations fail.
-///
-/// # Example
-///
-/// ```rust,ignore
-/// // Assuming t is a Tensor of shape [3, 1] with data [[1], [2], [3]]
-/// // use crate::ops::view::expand_op; // Assuming direct access
-///
-/// let expanded = expand_op(&t, vec![3, 4])?;
-/// // expanded will have shape [3, 4]
-/// // Data effectively looks like:
-/// // [[1, 1, 1, 1],
-/// //  [2, 2, 2, 2],
-/// //  [3, 3, 3, 3]]
-/// // But the underlying data buffer is unchanged.
-///
-/// // Assuming s is a scalar Tensor (shape []) with value 5
-/// let expanded_scalar = expand_op(&s, vec![2, 2])?;
-/// // expanded_scalar will have shape [2, 2] with all elements 5.
-/// ```
-/// assert_eq!(expanded.shape(), &[2, 3, 4]);
-/// assert_eq!(expanded.get_f32_data().unwrap(), vec![1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 3.0, 4.0, 1.0, 2.0, 1.0, 2.0, 1.0, 2.0, 3.0, 4.0, 3.0, 4.0, 3.0, 4.0]);
-/// # Ok::<(), NeuraRustError>(())
-/// # }
-/// // Example ignored as doc-test: illustrative purpose
-/// ```rust, ignore
-/// use neurarust_core::{tensor::Tensor, error::NeuraRustError};
-/// use neurarust_core::ops::view::expand_op;
-///
-pub fn expand_op(tensor: &Tensor, target_shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    let input_guard = tensor.read_data();
-    let input_shape = &input_guard.shape;
-    let input_strides = &input_guard.strides;
-    let input_rank = input_shape.len();
-    let target_rank = target_shape.len();
-
-    if target_rank < input_rank {
-        return Err(NeuraRustError::ShapeMismatch {
-            expected: format!("Rank >= {}", input_rank),
-            actual: format!("Rank {}", target_rank),
-            operation: "expand_op (target rank must be >= input rank)".to_string(),
-        });
-    }
-
-    // Calculate new strides and check shape compatibility
-    let mut new_strides = vec![0; target_rank];
-    for i in (0..target_rank).rev() {
-        let input_dim_idx = (i as isize) - (target_rank as isize - input_rank as isize);
-        if input_dim_idx >= 0 {
-            // Corresponding dimension exists in input
-            let input_dim_idx = input_dim_idx as usize;
-            let current_input_dim = input_shape[input_dim_idx];
-            let current_target_dim = target_shape[i];
-
-            if current_input_dim == current_target_dim {
-                new_strides[i] = input_strides[input_dim_idx];
-            } else if current_input_dim == 1 {
-                // Expand singleton dimension
-                if current_target_dim == 0 { // Cannot expand to zero
-                     return Err(NeuraRustError::ShapeMismatch { 
-                        expected: format!("non-zero target dim"), // expecting non-zero target dim 
-                        actual: format!("0"), 
-                        operation: "expand_op (cannot expand to size 0)".to_string()
-                    });
-                }
-                new_strides[i] = 0; // Stride is 0 for expanded dim
-            } else {
-                // Mismatched non-singleton dimension
-                return Err(NeuraRustError::ShapeMismatch {
-                    expected: format!("{}", current_input_dim),
-                    actual: format!("{}", current_target_dim),
-                    operation: format!("expand_op (dimension mismatch at index {})", i),
-                });
-            }
-        } else {
-            // This is a new dimension added at the front
-            if target_shape[i] == 0 { // Cannot expand to zero
-                return Err(NeuraRustError::ShapeMismatch { 
-                    expected: format!("non-zero target dim"), // expecting non-zero target dim 
-                    actual: format!("0"), 
-                    operation: "expand_op (cannot expand new dim to size 0)".to_string()
-                });
-            }
-            new_strides[i] = 0; // Stride is 0 for new dim
-        }
-    }
-
-    // Clone necessary data before dropping guard
-    let buffer = input_guard.buffer.clone();
-    let dtype = input_guard.dtype;
-    let device = input_guard.device;
-    let offset = input_guard.offset;
-    let requires_grad = input_guard.requires_grad;
-    let input_node_arc = if requires_grad { Some(tensor.data.clone()) } else { None };
-    let original_shape_clone = input_guard.shape.clone(); // For backward
-
-    drop(input_guard);
-
-    // Create new TensorData
-    let output_td = TensorData {
-        buffer,
-        dtype,
-        device,
-        shape: target_shape.clone(),
-        strides: new_strides,
-        offset,
-        requires_grad: requires_grad, // Inherit requires_grad initially
-        grad: None,          // New tensor view starts with no grad
-        grad_fn: None,       // Will be set below if needed
-    };
-
-    let output_tensor = Tensor { data: Arc::new(RwLock::new(output_td)) };
-
-    // Setup autograd
-    if requires_grad {
-        if let Some(node_arc) = input_node_arc {
-            let grad_fn = ExpandBackward {
-                input_node: node_arc,
-                _original_shape: original_shape_clone,
-            };
-            output_tensor.write_data().grad_fn = Some(Arc::new(grad_fn));
-            // output_tensor requires_grad is already true via inheritance
-        } else {
-             return Err(NeuraRustError::InternalError(
-                "Expand op requires grad but input Arc Node unavailable".to_string(),
-            ));
-        }
-    }
-
-    Ok(output_tensor)
-}

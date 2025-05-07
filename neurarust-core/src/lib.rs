@@ -60,6 +60,4 @@ pub use buffer::Buffer;
 pub use device::StorageDevice;
 pub use types::DType;
 
-// Remove the tests module declaration
-// #[cfg(test)]
-// mod tests;
+// Le module de test temporaire a été supprimé ici
