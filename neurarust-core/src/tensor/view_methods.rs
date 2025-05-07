@@ -1,10 +1,10 @@
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
-use crate::types::DType; // Need DType
+use crate::types::DType; // Corrected DType import
 use crate::tensor::iter_utils::{NdArraySimpleIter, NdArraySimpleIterF64};
-use crate::ops::view::contiguous::ContiguousBackward; // Importer l'op Backward
-use crate::autograd::graph::NodeId; // Importer NodeId
+use crate::ops::view::contiguous::ContiguousBackward;
+use crate::autograd::graph::NodeId;
 use std::sync::Arc;
 
 /// This `impl` block provides methods for creating views of a `Tensor` or manipulating its shape and layout.
@@ -286,4 +286,110 @@ impl Tensor {
             Ok(output_tensor)
         }
     }
+
+    /// Flattens a contiguous range of dimensions into a single dimension.
+    ///
+    /// This method returns a view of the original tensor if the tensor is contiguous.
+    ///
+    /// # Arguments
+    /// * `start_dim_isize`: The first dimension to flatten (inclusive). Supports negative indexing.
+    /// * `end_dim_isize`: The last dimension to flatten (inclusive). Supports negative indexing.
+    ///
+    /// # Returns
+    /// A `Result` containing the new flattened tensor (view) or a `NeuraRustError`.
+    ///
+    /// # Errors
+    /// - `NeuraRustError::DimensionError` if `start_dim` > `end_dim` or if dimensions are out of bounds.
+    /// - `NeuraRustError::ReshapeError` if the tensor is not contiguous (from the underlying `reshape` call).
+    ///
+    /// # Example
+    /// ```
+    /// use neurarust_core::tensor::Tensor;
+    /// use neurarust_core::error::NeuraRustError;
+    ///
+    /// # fn main() -> Result<(), NeuraRustError> {
+    /// let t = Tensor::new(vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0], vec![2, 3])?;
+    /// let flattened_t = t.flatten(0, 1)?; // Flatten all dimensions
+    /// assert_eq!(flattened_t.shape(), &[6]);
+    ///
+    /// let t2 = Tensor::new((0..24).map(|x| x as f32).collect(), vec![2, 3, 4])?;
+    /// let flattened_t2 = t2.flatten(1, 2)?; // Flatten dimensions 1 and 2
+    /// assert_eq!(flattened_t2.shape(), &[2, 12]);
+    ///
+    /// let scalar = Tensor::new(vec![42.0], vec![])?;
+    /// let flattened_scalar = scalar.flatten(0, 0)?;
+    /// assert_eq!(flattened_scalar.shape(), &[1]);
+    /// # Ok(())
+    /// # }
+    /// ```
+    pub fn flatten(&self, start_dim_isize: isize, end_dim_isize: isize) -> Result<Tensor, NeuraRustError> {
+        let rank = self.rank();
+
+        let start_dim = normalize_dim_for_flatten(start_dim_isize, rank, "start_dim")?;
+        let end_dim = normalize_dim_for_flatten(end_dim_isize, rank, "end_dim")?;
+
+        if start_dim > end_dim {
+            return Err(NeuraRustError::UnsupportedOperation(format!(
+                "start_dim ({} normalized to {}) must be <= end_dim ({} normalized to {})",
+                start_dim_isize, start_dim, end_dim_isize, end_dim
+            )));
+        }
+
+        let mut new_shape_vec: Vec<usize> = Vec::new();
+
+        if rank == 0 {
+            new_shape_vec.push(1);
+        } else {
+            new_shape_vec.extend_from_slice(&self.shape()[0..start_dim]);
+
+            let middle_dim_size: usize = self.shape()[start_dim..=end_dim].iter().product();
+            new_shape_vec.push(middle_dim_size);
+
+            if end_dim + 1 < rank {
+                new_shape_vec.extend_from_slice(&self.shape()[end_dim + 1..]);
+            }
+        }
+        self.reshape(new_shape_vec)
+    }
 }
+
+// Helper function to normalize dimension indices for flatten
+// This function is private to the module
+fn normalize_dim_for_flatten(dim: isize, rank: usize, dim_name: &str) -> Result<usize, NeuraRustError> {
+    let current_dim: usize;
+    if rank == 0 { // Scalar tensor
+        if dim == 0 || dim == -1 {
+            current_dim = 0;
+        } else {
+            return Err(NeuraRustError::UnsupportedOperation(format!(
+                "{} ({}) out of range for scalar tensor (rank 0). Expected 0 or -1.",
+                dim_name, dim
+            )));
+        }
+    } else { // Non-scalar tensor
+        if dim < 0 {
+            let d_abs = dim.abs() as usize;
+            if d_abs == 0 || d_abs > rank { 
+                 return Err(NeuraRustError::UnsupportedOperation(format!(
+                    "Negative {} ({}) results in an out-of-bounds dimension for tensor of rank {}. Valid range for negative indexing is [-{}, -1].",
+                    dim_name, dim, rank, rank
+                )));
+            }
+            current_dim = rank - d_abs;
+        } else {
+            current_dim = dim as usize;
+        }
+
+        if current_dim >= rank {
+            return Err(NeuraRustError::InvalidAxis {
+                axis: current_dim,
+                rank,
+            });
+        }
+    }
+    Ok(current_dim)
+}
+
+#[cfg(test)]
+#[path = "view_methods_test.rs"]
+mod tests;

@@ -185,12 +185,12 @@
         *   **Step 1.B.10: Essential Shape Manipulation Methods (Non-Mutating Views)**
             *   🎯 **Goal:** Provide core methods for reshaping or inspecting tensor dimensions without data copies.
             *   **Step 1.B.10.1: Implement `Tensor::flatten(start_dim, end_dim)`**
-                *   [ ] Implement `flatten(&self, start_dim: usize, end_dim: usize) -> Result<Tensor, NeuraRustError>`.
-                *   [ ] Flattens a contiguous range of dims into a single dimension.
-                *   [ ] Should return a view (no data copy) by adjusting shape and strides.
-                *   [ ] Handle `start_dim` and `end_dim` validation (e.g., `start_dim <= end_dim`, within rank).
-                *   [ ] Add tests for shape, data integrity (view), and error conditions.
-                *   [ ] Add `rustdoc`.
+                *   [✅] Implement `flatten(&self, start_dim: usize, end_dim: usize) -> Result<Tensor, NeuraRustError>`.
+                *   [✅] Flattens a contiguous range of dims into a single dimension.
+                *   [✅] Should return a view (no data copy) by adjusting shape and strides.
+                *   [✅] Handle `start_dim` and `end_dim` validation (e.g., `start_dim <= end_dim`, within rank).
+                *   [✅] Add tests for shape, data integrity (view), and error conditions.
+                *   [✅] Add `rustdoc`.
             *   **Step 1.B.10.2: Review and Enhance `Tensor::unsqueeze(dim)` and `Tensor::squeeze(dim)`**
                 *   [ ] Confirm/implement `unsqueeze(&self, dim: usize) -> Result<Tensor, NeuraRustError>` and `squeeze(&self, dim: usize) -> Result<Tensor, NeuraRustError>`.
                 *   [ ] `unsqueeze` adds a new dimension of size 1 at `dim`.

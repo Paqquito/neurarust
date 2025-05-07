@@ -134,7 +134,8 @@
 │   │   │   ├── traits.rs
 │   │   │   ├── utils.rs
 │   │   │   ├── utils_test.rs
-│   │   │   └── view_methods.rs
+│   │   │   ├── view_methods.rs
+│   │   │   └── view_methods_test.rs
 │   │   ├── tensor_data.rs
 │   │   ├── types.rs
 │   │   ├── utils
@@ -151,4 +152,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-24 directories, 128 files
+24 directories, 129 files

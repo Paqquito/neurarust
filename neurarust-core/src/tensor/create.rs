@@ -449,10 +449,8 @@ pub fn randint(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        _ => Err(NeuraRustError::UnsupportedOperation(format!(
-            "randint currently only supports DType::F32 and DType::F64, got {:?}",
-            dtype
-        ))),
+        // The _ arm is removed as DType only has F32 and F64 for now.
+        // If DType is extended, the compiler will enforce updating this match.
     }
 }
 
@@ -522,10 +520,8 @@ pub fn bernoulli_scalar(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        _ => Err(NeuraRustError::UnsupportedOperation(format!(
-            "bernoulli_scalar currently only supports DType::F32 and DType::F64, got {:?}",
-            dtype
-        ))),
+        // The _ arm is removed as DType only has F32 and F64 for now.
+        // If DType is extended, the compiler will enforce updating this match.
     }
 }
 
