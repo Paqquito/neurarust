@@ -103,8 +103,25 @@ impl Module for SimpleMLP {
         params
     }
 
+    fn children(&self) -> Vec<&dyn Module> {
+        vec![&self.linear1, &self.linear2]
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![
+            ("linear1".to_string(), &self.linear1 as &dyn Module),
+            ("linear2".to_string(), &self.linear2 as &dyn Module),
+        ]
+    }
+
     fn modules(&self) -> Vec<&dyn Module> {
-        todo!("Implement modules for SimpleMLP")
+        let mut mods: Vec<&dyn Module> = vec![self as &dyn Module];
+        mods.push(&self.linear1 as &dyn Module);
+        mods.push(&self.linear2 as &dyn Module);
+        // Pour une structure de Module plus profonde, nous devrions appeler récursivement
+        // child.modules() et étendre la liste. Pour un SimpleMLP avec des Linear (feuilles),
+        // ceci est suffisant pour correspondre à la sémantique attendue (self + enfants directs).
+        mods
     }
 }
 
@@ -139,6 +156,27 @@ fn main() -> Result<(), NeuraRustError> {
         println!("- {}", name);
     }
     assert_eq!(named_params.len(), 4); // Devrait aussi être 4
+
+    // Test de children()
+    let children = mlp.children();
+    println!("Nombre d'enfants directs dans le MLP: {}", children.len());
+    assert_eq!(children.len(), 2);
+
+    // Test de named_children()
+    let named_children = mlp.named_children();
+    println!("Enfants nommés dans le MLP:");
+    for (name, _module) in &named_children {
+        println!("- {}", name);
+    }
+    assert_eq!(named_children.len(), 2);
+    assert!(named_children.iter().any(|(name, _)| name == "linear1"));
+    assert!(named_children.iter().any(|(name, _)| name == "linear2"));
+
+    // Test de modules()
+    let modules = mlp.modules();
+    println!("Nombre total de modules (self + descendants) dans le MLP: {}", modules.len());
+    // Devrait être 3: SimpleMLP lui-même, linear1, linear2
+    assert_eq!(modules.len(), 3);
 
     // Step 1.C.2: Create Synthetic Data
     let batch_size = 4;

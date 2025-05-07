@@ -154,7 +154,7 @@
             *   [ ] Define `modules(&self) -> Vec<&dyn Module>` method in the `Module` trait.
                 *   [ ] This method should return an iterator over all modules in the tree (self + all descendants), depth-first.
             *   [✅] Implement these introspection methods for `nn::Linear` (parameters, named_parameters, modules; children would be empty).
-            *   [ ] Implement these introspection methods for `SimpleMLP` (example in `basic_mlp_cpu.rs`).
+            *   [✅] Implement `named_parameters` for `SimpleMLP` in example files (`basic_mlp_cpu.rs`, `basic_mlp_cpu_inplace_optim.rs`). (`modules` and `children` still TODO for `SimpleMLP`)
             *   [✅] Add/Update `rustdoc` for the `Module` trait and its methods, explaining their purpose and usage.
         *   **Step 1.B.7: Implement `nn::Linear` Layer**
             *   [✅] Create `src/nn/layers/linear.rs`.

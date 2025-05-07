@@ -78,8 +78,22 @@ impl Module for SimpleMLP {
         params
     }
 
+    fn children(&self) -> Vec<&dyn Module> {
+        vec![&self.linear1, &self.linear2]
+    }
+
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        vec![
+            ("linear1".to_string(), &self.linear1 as &dyn Module),
+            ("linear2".to_string(), &self.linear2 as &dyn Module),
+        ]
+    }
+
     fn modules(&self) -> Vec<&dyn Module> {
-        todo!("Implement modules for SimpleMLP (inplace optim example)")
+        let mut mods: Vec<&dyn Module> = vec![self as &dyn Module];
+        mods.push(&self.linear1 as &dyn Module);
+        mods.push(&self.linear2 as &dyn Module);
+        mods
     }
 }
 
@@ -95,6 +109,26 @@ fn main() -> Result<(), NeuraRustError> {
         println!("- {}", name);
     }
     assert_eq!(named_params.len(), 4); // Devrait aussi être 4
+
+    // Test de children()
+    let children = mlp.children();
+    println!("Nombre d'enfants directs dans le MLP (in-place optim): {}", children.len());
+    assert_eq!(children.len(), 2);
+
+    // Test de named_children()
+    let named_children = mlp.named_children();
+    println!("Enfants nommés dans le MLP (in-place optim):");
+    for (name, _module) in &named_children {
+        println!("- {}", name);
+    }
+    assert_eq!(named_children.len(), 2);
+    assert!(named_children.iter().any(|(name, _)| name == "linear1"));
+    assert!(named_children.iter().any(|(name, _)| name == "linear2"));
+
+    // Test de modules()
+    let modules = mlp.modules();
+    println!("Nombre total de modules (self + descendants) dans le MLP (in-place optim): {}", modules.len());
+    assert_eq!(modules.len(), 3);
 
     let input_tensor = randn(vec![1, 10])?;
     let _output = mlp.forward(&input_tensor)?; // Vérifier que forward passe
