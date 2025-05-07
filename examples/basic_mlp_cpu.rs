@@ -93,7 +93,14 @@ impl Module for SimpleMLP {
     }
 
     fn named_parameters(&self) -> Vec<(String, &Parameter)> {
-        todo!("Implement named_parameters for SimpleMLP")
+        let mut params = Vec::new();
+        for (name, param) in self.linear1.named_parameters() {
+            params.push((format!("linear1.{}", name), param));
+        }
+        for (name, param) in self.linear2.named_parameters() {
+            params.push((format!("linear2.{}", name), param));
+        }
+        params
     }
 
     fn modules(&self) -> Vec<&dyn Module> {
@@ -124,6 +131,14 @@ fn main() -> Result<(), NeuraRustError> {
     assert_eq!(params.len(), 4); 
 
     println!("Paramètres récupérés avec succès.");
+
+    // Affichage des paramètres nommés pour vérification
+    let named_params = mlp.named_parameters();
+    println!("Paramètres nommés dans le MLP:");
+    for (name, _param) in &named_params {
+        println!("- {}", name);
+    }
+    assert_eq!(named_params.len(), 4); // Devrait aussi être 4
 
     // Step 1.C.2: Create Synthetic Data
     let batch_size = 4;

@@ -68,7 +68,14 @@ impl Module for SimpleMLP {
     }
 
     fn named_parameters(&self) -> Vec<(String, &Parameter)> {
-        todo!("Implement named_parameters for SimpleMLP (inplace optim example)")
+        let mut params = Vec::new();
+        for (name, param) in self.linear1.named_parameters() {
+            params.push((format!("linear1.{}", name), param));
+        }
+        for (name, param) in self.linear2.named_parameters() {
+            params.push((format!("linear2.{}", name), param));
+        }
+        params
     }
 
     fn modules(&self) -> Vec<&dyn Module> {
@@ -80,6 +87,14 @@ impl Module for SimpleMLP {
 fn main() -> Result<(), NeuraRustError> {
     let mut mlp = SimpleMLP::new(10, 20, 5)?;
     println!("SimpleMLP (pour optim in-place) créé avec succès !");
+
+    // Affichage des paramètres nommés pour vérification
+    let named_params = mlp.named_parameters();
+    println!("Paramètres nommés dans le MLP (in-place optim):");
+    for (name, _param) in &named_params {
+        println!("- {}", name);
+    }
+    assert_eq!(named_params.len(), 4); // Devrait aussi être 4
 
     let input_tensor = randn(vec![1, 10])?;
     let _output = mlp.forward(&input_tensor)?; // Vérifier que forward passe
