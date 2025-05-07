@@ -63,3 +63,6 @@ pub use types::DType;
 // Le module de test temporaire a été supprimé ici
 
 pub mod test_utils;
+
+// Add the new optim module
+pub mod optim;

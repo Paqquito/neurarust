@@ -3,7 +3,6 @@
 ├── Cargo.toml
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
-├── DO_NOT_APPLY
 ├── examples
 │   ├── basic_mlp_cpu_inplace_optim.rs
 │   └── basic_mlp_cpu.rs
@@ -102,6 +101,10 @@
 │   │   │       ├── transpose_test.rs
 │   │   │       └── utils.rs
 │   │   ├── optim
+│   │   │   ├── mod.rs
+│   │   │   ├── optimizer_state.rs
+│   │   │   ├── optimizer_trait.rs
+│   │   │   └── param_group.rs
 │   │   ├── tensor
 │   │   │   ├── accessors.rs
 │   │   │   ├── autograd_methods.rs
@@ -114,8 +117,10 @@
 │   │   │   ├── inplace_ops
 │   │   │   │   ├── add.rs
 │   │   │   │   ├── add_scalar.rs
+│   │   │   │   ├── clamp.rs
 │   │   │   │   ├── div.rs
 │   │   │   │   ├── div_scalar.rs
+│   │   │   │   ├── fill.rs
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── mul.rs
 │   │   │   │   ├── mul_scalar.rs
@@ -125,8 +130,10 @@
 │   │   │   ├── inplace_ops_tests
 │   │   │   │   ├── add_scalar_test.rs
 │   │   │   │   ├── add_test.rs
+│   │   │   │   ├── clamp_test.rs
 │   │   │   │   ├── div_scalar_test.rs
 │   │   │   │   ├── div_test.rs
+│   │   │   │   ├── fill_test.rs
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── mul_scalar_test.rs
 │   │   │   │   ├── mul_test.rs
@@ -158,4 +165,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-25 directories, 134 files
+25 directories, 141 files

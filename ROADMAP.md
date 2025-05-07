@@ -328,17 +328,17 @@
     *   **Detailed Steps:**
         *   **Step 2.A.1: Define `Optimizer` Trait and Core Logic**
             *   🎯 **Goal:** Establish a common interface and lifecycle for all optimizers.
-            *   [ ] Define `trait Optimizer`:
-                *   [ ] `step(&mut self) -> Result<(), NeuraRustError>`: Performs a single optimization step (updates parameters).
-                *   [ ] `zero_grad(&mut self)`: Clears the gradients of all parameters managed by the optimizer.
-                *   [ ] `add_param_group(&mut self, param_group: ParamGroup)`: (Optional, for later) Allows adding new parameter groups.
-                *   [ ] `load_state_dict(&mut self, state_dict: &OptimizerState)` and `state_dict(&self) -> OptimizerState`: For saving/loading optimizer state (e.g., momentum buffers).
-            *   [ ] Define `struct ParamGroup`:
-                *   [ ] Contains `params: Vec<Arc<Mutex<Parameter>>>` (or similar reference to parameters).
-                *   [ ] Contains optimizer-specific hyperparameters (e.g., `lr: f32`, `weight_decay: f32`).
-            *   [ ] Design `OptimizerState` enum/struct to hold state for various optimizers.
-            *   [ ] Implement a mechanism for optimizers to hold and manage references to `Parameter`s (likely via `Arc<Mutex<Parameter>>` obtained from `Module::parameters()`).
-            *   [ ] Add `rustdoc` for the trait and supporting structs.
+            *   [✅] Define `trait Optimizer`:
+                *   [✅] `step(&mut self) -> Result<(), NeuraRustError>`: Performs a single optimization step (updates parameters).
+                *   [✅] `zero_grad(&mut self)`: Clears the gradients of all parameters managed by the optimizer.
+                *   [✅] `add_param_group(&mut self, param_group: ParamGroup)`: (Optional, for later) Allows adding new parameter groups.
+                *   [✅] `load_state_dict(&mut self, state_dict: &OptimizerState)` and `state_dict(&self) -> OptimizerState`: For saving/loading optimizer state (e.g., momentum buffers).
+            *   [✅] Define `struct ParamGroup`:
+                *   [✅] Contains `params: Vec<Arc<Mutex<Parameter>>>` (or similar reference to parameters).
+                *   [✅] Contains optimizer-specific hyperparameters (e.g., `lr: f32`, `weight_decay: f32`).
+            *   [✅] Design `OptimizerState` enum/struct to hold state for various optimizers.
+            *   [✅] Implement a mechanism for optimizers to hold and manage references to `Parameter`s (likely via `Arc<Mutex<Parameter>>` obtained from `Module::parameters()`).
+            *   [✅] Add `rustdoc` for the trait and supporting structs.
         *   **Step 2.A.2: Implement SGD Optimizer**
             *   🎯 **Goal:** Implement the Stochastic Gradient Descent optimizer with common features.
             *   [ ] Create `struct SgdOptimizer` implementing `Optimizer`.
