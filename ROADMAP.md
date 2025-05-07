@@ -145,16 +145,16 @@
             *   [✅] Define `trait Module` with a `forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError>` method.
             *   [✅] Define `parameters(&self) -> Vec<&Parameter>` method in the `Module` trait.
             *   [✅] Define `named_parameters(&self) -> Vec<(String, &Parameter)>` method in the `Module` trait.
-            *   [ ] This method should collect and return references to all `Parameter`s along with their names (e.g., "linear1.weight", "bias").
-            *   [ ] Implement logic to generate unique and hierarchical names for parameters within nested modules.
-            *   [ ] Define `children(&self) -> Vec<&dyn Module>` method in the `Module` trait.
-                *   [ ] This method should return direct child modules.
-            *   [ ] Define `named_children(&self) -> Vec<(String, &dyn Module)>` method in the `Module` trait.
-                *   [ ] This method should return direct child modules along with their attribute names.
-            *   [ ] Define `modules(&self) -> Vec<&dyn Module>` method in the `Module` trait.
-                *   [ ] This method should return an iterator over all modules in the tree (self + all descendants), depth-first.
+            *   [✅] This method should collect and return references to all `Parameter`s along with their names (e.g., "linear1.weight", "bias").
+            *   [✅] Implement logic to generate unique and hierarchical names for parameters within nested modules.
+            *   [✅] Define `children(&self) -> Vec<&dyn Module>` method in the `Module` trait.
+                *   [✅] This method should return direct child modules.
+            *   [✅] Define `named_children(&self) -> Vec<(String, &dyn Module)>` method in the `Module` trait.
+                *   [✅] This method should return direct child modules along with their attribute names.
+            *   [✅] Define `modules(&self) -> Vec<&dyn Module>` method in the `Module` trait.
+                *   [✅] This method should return an iterator over all modules in the tree (self + all descendants), depth-first.
             *   [✅] Implement these introspection methods for `nn::Linear` (parameters, named_parameters, modules; children would be empty).
-            *   [✅] Implement `named_parameters` for `SimpleMLP` in example files (`basic_mlp_cpu.rs`, `basic_mlp_cpu_inplace_optim.rs`). (`modules` and `children` still TODO for `SimpleMLP`)
+            *   [✅] Implement `named_parameters` `children`, `named_children`, and modules for `SimpleMLP` in example files (`basic_mlp_cpu.rs`, `basic_mlp_cpu_inplace_optim.rs`). 
             *   [✅] Add/Update `rustdoc` for the `Module` trait and its methods, explaining their purpose and usage.
         *   **Step 1.B.7: Implement `nn::Linear` Layer**
             *   [✅] Create `src/nn/layers/linear.rs`.
@@ -173,15 +173,15 @@
             *   🎯 **Goal:** Expand tensor creation capabilities for integer and boolean types once they are supported.
             *   [ ] **`randint(low: i64, high: i64, shape: &[usize], dtype: DType, device: StorageDevice)`**
                 *   [ ] Implement for integer DTypes (I32, I64) when available (Phase 2.C). Generates integers in `[low, high)`.
-                *   [ ] (Optional) Initial F32/F64 version could produce floats then cast, or be skipped until Int DTypes.
-                *   [ ] Add tests for shape, range, DType correctness.
-                *   [ ] Add `rustdoc`.
+                *   [✅] (Optional) Initial F32/F64 version could produce floats then cast, or be skipped until Int DTypes. (Implemented F32/F64 version)
+                *   [✅] Add tests for shape, range, DType correctness. (Implemented for F32/F64 version)
+                *   [✅] Add `rustdoc`. (Added for F32/F64 version)
             *   [ ] **`bernoulli(p: &Tensor, dtype: DType, device: StorageDevice)` or `bernoulli_scalar(p_scalar: f64, shape: &[usize], ...)`**
                 *   [ ] Implement to generate boolean tensors (from probabilities `p`) when Bool DType is available (Phase 2.C).
                 *   [ ] `p` can be a scalar probability or a tensor of probabilities. Output is 0 or 1.
-                *   [ ] (Optional) Initial F32/F64 version could produce 0.0/1.0.
-                *   [ ] Add tests for shape, distribution according to `p`, DType correctness.
-                *   [ ] Add `rustdoc`.
+                *   [✅] (Optional) Initial F32/F64 version could produce 0.0/1.0. (Implemented `bernoulli_scalar` F32/F64 version)
+                *   [✅] Add tests for shape, distribution according to `p`, DType correctness. (Implemented for `bernoulli_scalar` F32/F64 version)
+                *   [✅] Add `rustdoc`. (Added for `bernoulli_scalar` F32/F64 version)
         *   **Step 1.B.10: Essential Shape Manipulation Methods (Non-Mutating Views)**
             *   🎯 **Goal:** Provide core methods for reshaping or inspecting tensor dimensions without data copies.
             *   **Step 1.B.10.1: Implement `Tensor::flatten(start_dim, end_dim)`**

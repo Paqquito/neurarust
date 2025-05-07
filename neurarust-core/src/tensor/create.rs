@@ -5,6 +5,7 @@ use crate::error::NeuraRustError;
 use crate::types::DType;
 use rand::Rng;
 use rand_distr::StandardNormal;
+use crate::device::StorageDevice;
  // Import necessary types
 
 /// Creates a new CPU tensor filled with zeros with the specified shape.
@@ -373,6 +374,159 @@ pub fn randn(shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
         .map(|_| rng.sample(StandardNormal))
         .collect();
     Tensor::new(data, shape)
+}
+
+/// Creates a CPU tensor with the given shape, filled with random integers
+/// from `low` (inclusive) to `high` (exclusive).
+///
+/// Currently, this function supports `DType::F32` and `DType::F64`,
+/// where the generated integers are cast to floating-point numbers.
+/// True integer DType support for tensors is planned for a later phase.
+/// The `device` parameter is currently ignored; tensors are always created on the CPU.
+///
+/// # Arguments
+/// * `low`: The lower bound of the random integers (inclusive).
+/// * `high`: The upper bound of the random integers (exclusive).
+/// * `shape`: A vector defining the dimensions of the tensor.
+/// * `dtype`: The data type of the tensor (currently `DType::F32` or `DType::F64`).
+/// * `device`: The device to create the tensor on (currently ignored, always CPU).
+///
+/// # Returns
+/// A `Result` containing the new tensor or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError::ArithmeticError` if `low >= high`.
+/// Returns `NeuraRustError::UnsupportedOperation` if a DType other than F32 or F64 is specified.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::randint;
+/// use neurarust_core::types::DType;
+/// use neurarust_core::device::StorageDevice;
+///
+/// let t_f32 = randint(0, 10, vec![2, 2], DType::F32, StorageDevice::CPU).unwrap();
+/// assert_eq!(t_f32.shape(), &[2, 2]);
+/// assert_eq!(t_f32.dtype(), DType::F32);
+/// // Values should be between 0.0 and 9.0 inclusive
+/// for &val in t_f32.get_f32_data().unwrap().iter() {
+///     assert!(val >= 0.0 && val < 10.0);
+///     assert_eq!(val, val.trunc()); // Check if it's an integer value
+/// }
+///
+/// let t_f64 = randint(-5, 5, vec![3], DType::F64, StorageDevice::CPU).unwrap();
+/// assert_eq!(t_f64.shape(), &[3]);
+/// assert_eq!(t_f64.dtype(), DType::F64);
+/// ```
+pub fn randint(
+    low: i64,
+    high: i64,
+    shape: Vec<usize>,
+    dtype: DType,
+    _device: StorageDevice, // Device is ignored for now
+) -> Result<Tensor, NeuraRustError> {
+    if low >= high {
+        return Err(NeuraRustError::ArithmeticError(format!(
+            "low bound {} must be less than high bound {} for randint",
+            low, high
+        )));
+    }
+
+    let numel = shape.iter().product();
+    let mut rng = rand::thread_rng();
+
+    match dtype {
+        DType::F32 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(rng.gen_range(low..high) as f32);
+            }
+            Tensor::new(data_vec, shape)
+        }
+        DType::F64 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(rng.gen_range(low..high) as f64);
+            }
+            Tensor::new_f64(data_vec, shape)
+        }
+        _ => Err(NeuraRustError::UnsupportedOperation(format!(
+            "randint currently only supports DType::F32 and DType::F64, got {:?}",
+            dtype
+        ))),
+    }
+}
+
+/// Creates a CPU tensor with the given shape, where each element is 0 or 1,
+/// drawn from a Bernoulli distribution with the given probability `p` of being 1.
+///
+/// Currently, this function supports `DType::F32` and `DType::F64`,
+/// returning `0.0` or `1.0`.
+/// True Boolean DType support for tensors is planned for a later phase.
+/// The `device` parameter is currently ignored; tensors are always created on the CPU.
+///
+/// # Arguments
+/// * `p`: The probability of an element being 1. Must be between 0.0 and 1.0 inclusive.
+/// * `shape`: A vector defining the dimensions of the tensor.
+/// * `dtype`: The data type of the tensor (currently `DType::F32` or `DType::F64`).
+/// * `device`: The device to create the tensor on (currently ignored, always CPU).
+///
+/// # Returns
+/// A `Result` containing the new tensor or a `NeuraRustError`.
+///
+/// # Errors
+/// Returns `NeuraRustError::ArithmeticError` if `p` is not between 0.0 and 1.0.
+/// Returns `NeuraRustError::UnsupportedOperation` if a DType other than F32 or F64 is specified.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::create::bernoulli_scalar;
+/// use neurarust_core::types::DType;
+/// use neurarust_core::device::StorageDevice;
+///
+/// let t_f32 = bernoulli_scalar(0.7, vec![2, 2], DType::F32, StorageDevice::CPU).unwrap();
+/// assert_eq!(t_f32.shape(), &[2, 2]);
+/// assert_eq!(t_f32.dtype(), DType::F32);
+/// // Values should be 0.0 or 1.0
+/// for &val in t_f32.get_f32_data().unwrap().iter() {
+///     assert!(val == 0.0 || val == 1.0, "Value not 0.0 or 1.0: {}", val);
+/// }
+/// ```
+pub fn bernoulli_scalar(
+    p: f64,
+    shape: Vec<usize>,
+    dtype: DType,
+    _device: StorageDevice, // Device is ignored for now
+) -> Result<Tensor, NeuraRustError> {
+    if !(0.0..=1.0).contains(&p) {
+        return Err(NeuraRustError::ArithmeticError(format!(
+            "probability p ({}) must be between 0.0 and 1.0 for bernoulli_scalar",
+            p
+        )));
+    }
+
+    let numel = shape.iter().product();
+    let mut rng = rand::thread_rng();
+
+    match dtype {
+        DType::F32 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(if rng.gen_bool(p) { 1.0f32 } else { 0.0f32 });
+            }
+            Tensor::new(data_vec, shape)
+        }
+        DType::F64 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(if rng.gen_bool(p) { 1.0f64 } else { 0.0f64 });
+            }
+            Tensor::new_f64(data_vec, shape)
+        }
+        _ => Err(NeuraRustError::UnsupportedOperation(format!(
+            "bernoulli_scalar currently only supports DType::F32 and DType::F64, got {:?}",
+            dtype
+        ))),
+    }
 }
 
 // Link the external tests file

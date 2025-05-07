@@ -203,4 +203,98 @@ fn test_linspace() {
     assert!((data[2] - 5.0).abs() < 1e-6);
     assert!((data[3] - 7.5).abs() < 1e-6);
     assert!((data[4] - 10.0).abs() < 1e-6);
+}
+
+#[test]
+fn test_randint() {
+    // Test F32
+    let t_f32 = randint(0, 10, vec![2, 3], DType::F32, StorageDevice::CPU).unwrap();
+    assert_eq!(t_f32.shape(), &[2, 3]);
+    assert_eq!(t_f32.dtype(), DType::F32);
+    let data_f32 = t_f32.get_f32_data().unwrap();
+    assert_eq!(data_f32.len(), 6);
+    for &val in data_f32.iter() {
+        assert!(val >= 0.0 && val < 10.0, "Value out of range: {}", val);
+        assert_eq!(val, val.trunc(), "Value not an integer: {}", val);
+    }
+
+    // Test F64
+    let t_f64 = randint(-5, 5, vec![4], DType::F64, StorageDevice::CPU).unwrap();
+    assert_eq!(t_f64.shape(), &[4]);
+    assert_eq!(t_f64.dtype(), DType::F64);
+    let data_f64 = t_f64.get_f64_data().unwrap();
+    assert_eq!(data_f64.len(), 4);
+    for &val in data_f64.iter() {
+        assert!(val >= -5.0 && val < 5.0, "Value out of range: {}", val);
+        assert_eq!(val, val.trunc(), "Value not an integer: {}", val);
+    }
+
+    // Test scalar shape
+    let t_scalar = randint(100, 101, vec![], DType::F32, StorageDevice::CPU).unwrap();
+    assert_eq!(t_scalar.shape(), &[] as &[usize]); // empty slice for scalar
+    assert_eq!(t_scalar.item_f32().unwrap(), 100.0);
+
+
+    // Test error for low >= high
+    let err_range = randint(10, 0, vec![1], DType::F32, StorageDevice::CPU);
+    assert!(matches!(err_range, Err(NeuraRustError::ArithmeticError(_))));
+
+    let err_equal_range = randint(5, 5, vec![1], DType::F32, StorageDevice::CPU);
+     assert!(matches!(err_equal_range, Err(NeuraRustError::ArithmeticError(_))));
+
+    // Test error for unsupported DType (hypothetical, as we only have F32/F64 for now)
+    // If DType::I32 were a variant but not supported by randint, this would be:
+    // let err_dtype = randint(0, 1, vec![1], DType::I32, StorageDevice::CPU);
+    // assert!(matches!(err_dtype, Err(NeuraRustError::UnsupportedOperation(_))));
+    // For now, this test is more conceptual for when other DTypes are added to the enum
+    // but not yet supported by this specific function.
+}
+
+#[test]
+fn test_bernoulli_scalar() {
+    // Test F32
+    let p_f32 = 0.75;
+    let t_f32 = bernoulli_scalar(p_f32, vec![1000], DType::F32, StorageDevice::CPU).unwrap();
+    assert_eq!(t_f32.shape(), &[1000]);
+    assert_eq!(t_f32.dtype(), DType::F32);
+    let data_f32 = t_f32.get_f32_data().unwrap();
+    let mut ones_f32 = 0;
+    for &val in data_f32.iter() {
+        assert!(val == 0.0 || val == 1.0, "Value not 0.0 or 1.0: {}", val);
+        if val == 1.0 {
+            ones_f32 += 1;
+        }
+    }
+    // Check if the proportion of ones is roughly p_f32 (very loose check for randomness)
+    let proportion_f32 = ones_f32 as f64 / 1000.0;
+    assert!((proportion_f32 - p_f32).abs() < 0.1, "Proportion {} out of expected range for p={}", proportion_f32, p_f32);
+
+    // Test F64
+    let p_f64 = 0.25;
+    let t_f64 = bernoulli_scalar(p_f64, vec![500], DType::F64, StorageDevice::CPU).unwrap();
+    assert_eq!(t_f64.shape(), &[500]);
+    assert_eq!(t_f64.dtype(), DType::F64);
+    let data_f64 = t_f64.get_f64_data().unwrap();
+    let mut ones_f64 = 0;
+    for &val in data_f64.iter() {
+        assert!(val == 0.0 || val == 1.0, "Value not 0.0 or 1.0: {}", val);
+        if val == 1.0 {
+            ones_f64 += 1;
+        }
+    }
+    let proportion_f64 = ones_f64 as f64 / 500.0;
+    assert!((proportion_f64 - p_f64).abs() < 0.1, "Proportion {} out of expected range for p={}", proportion_f64, p_f64);
+
+
+    // Test scalar shape
+    let t_scalar_1 = bernoulli_scalar(1.0, vec![], DType::F32, StorageDevice::CPU).unwrap();
+    assert_eq!(t_scalar_1.item_f32().unwrap(), 1.0);
+    let t_scalar_0 = bernoulli_scalar(0.0, vec![], DType::F64, StorageDevice::CPU).unwrap();
+    assert_eq!(t_scalar_0.item_f64().unwrap(), 0.0);
+
+    // Test error for p out of range
+    let err_p_high = bernoulli_scalar(1.1, vec![1], DType::F32, StorageDevice::CPU);
+    assert!(matches!(err_p_high, Err(NeuraRustError::ArithmeticError(_))));
+    let err_p_low = bernoulli_scalar(-0.1, vec![1], DType::F32, StorageDevice::CPU);
+    assert!(matches!(err_p_low, Err(NeuraRustError::ArithmeticError(_))));
 } 
