@@ -181,4 +181,39 @@ mod tests {
         // Use looser tolerances for F32: epsilon=1e-4, abs_tol=2e-3, rel_tol=6e-2
         check_grad(func, &[input.clone()], &default_output_grad, 1e-4, 2e-3, 6e-2)
     }
+
+    #[test]
+    fn test_linear_named_parameters() -> Result<(), NeuraRustError> {
+        let linear_with_bias = Linear::new(3, 2, true, DType::F32)?;
+        let named_params_wb = linear_with_bias.named_parameters();
+        assert_eq!(named_params_wb.len(), 2);
+        assert_eq!(named_params_wb[0].0, "weight");
+        assert_eq!(named_params_wb[0].1.name(), Some("weight")); // Vérifie le nom interne du Parameter aussi
+        assert_eq!(named_params_wb[1].0, "bias");
+        assert_eq!(named_params_wb[1].1.name(), Some("bias"));
+
+        let linear_no_bias = Linear::new(3, 2, false, DType::F32)?;
+        let named_params_w = linear_no_bias.named_parameters();
+        assert_eq!(named_params_w.len(), 1);
+        assert_eq!(named_params_w[0].0, "weight");
+        assert_eq!(named_params_w[0].1.name(), Some("weight"));
+        Ok(())
+    }
+
+    #[test]
+    fn test_linear_children_and_modules() -> Result<(), NeuraRustError> {
+        let linear = Linear::new(3, 2, true, DType::F32)?;
+
+        let children = linear.children();
+        assert!(children.is_empty(), "Linear layer (leaf) should have no children");
+
+        let named_children = linear.named_children();
+        assert!(named_children.is_empty(), "Linear layer (leaf) should have no named children");
+
+        let modules = linear.modules();
+        assert_eq!(modules.len(), 1, "Linear layer (leaf) should return itself in modules()");
+        // Vérification indirecte que c'est bien le module Linear lui-même
+        assert_eq!(modules[0].parameters().len(), linear.parameters().len(), "The module in modules() should be the Linear layer itself");
+        Ok(())
+    }
 }

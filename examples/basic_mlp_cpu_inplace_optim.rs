@@ -66,6 +66,14 @@ impl Module for SimpleMLP {
         model_params.extend(self.linear2.parameters());
         model_params
     }
+
+    fn named_parameters(&self) -> Vec<(String, &Parameter)> {
+        todo!("Implement named_parameters for SimpleMLP (inplace optim example)")
+    }
+
+    fn modules(&self) -> Vec<&dyn Module> {
+        todo!("Implement modules for SimpleMLP (inplace optim example)")
+    }
 }
 
 

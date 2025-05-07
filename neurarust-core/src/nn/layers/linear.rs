@@ -109,6 +109,19 @@ impl Module for Linear {
         }
         params
     }
+
+    fn named_parameters(&self) -> Vec<(String, &Parameter)> {
+        let mut params = Vec::new();
+        params.push(("weight".to_string(), &self.weights));
+        if let Some(ref bias) = self.bias {
+            params.push(("bias".to_string(), bias));
+        }
+        params
+    }
+
+    fn modules(&self) -> Vec<&dyn Module> {
+        vec![self]
+    }
 }
 
 #[cfg(test)]

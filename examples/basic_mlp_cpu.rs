@@ -91,6 +91,14 @@ impl Module for SimpleMLP {
         params.extend(self.linear2.parameters());
         params
     }
+
+    fn named_parameters(&self) -> Vec<(String, &Parameter)> {
+        todo!("Implement named_parameters for SimpleMLP")
+    }
+
+    fn modules(&self) -> Vec<&dyn Module> {
+        todo!("Implement modules for SimpleMLP")
+    }
 }
 
 // Un petit main pour tester la structure pour l'instant

@@ -27,6 +27,27 @@ pub trait Module: std::fmt::Debug + Send + Sync {
     /// This method should collect all such parameters, including those from sub-modules.
     fn parameters(&self) -> Vec<&Parameter>;
 
+    /// Returns a vector of all learnable parameters (`Parameter` instances) of the module
+    /// along with their names.
+    /// Names should be unique within the module and follow a hierarchical structure for nested modules
+    /// (e.g., "layer1.weight", "layer1.bias").
+    fn named_parameters(&self) -> Vec<(String, &Parameter)>;
+
+    /// Returns a vector of direct child `Module`s.
+    /// For modules that do not contain other modules, this should return an empty vector.
+    fn children(&self) -> Vec<&dyn Module> {
+        Vec::new()
+    }
+
+    /// Returns a vector of direct child `Module`s along with their names.
+    /// Names are typically the field names under which the children are stored.
+    fn named_children(&self) -> Vec<(String, &dyn Module)> {
+        Vec::new()
+    }
+
+    /// Returns an iterator over all modules in the tree (self + all descendants), depth-first.
+    fn modules(&self) -> Vec<&dyn Module>;
+
     /// Sets the device for all parameters of the module.
     ///
     /// # Arguments
@@ -116,12 +137,21 @@ mod tests {
             vec![&self.param]
         }
 
+        fn named_parameters(&self) -> Vec<(String, &Parameter)> {
+            let name = self.param.name().unwrap_or("param").to_string();
+            vec![(name, &self.param)]
+        }
+
         fn to_device(&mut self, device: Device) -> Result<(), NeuraRustError> {
             self.param.to_device(device)
         }
 
         fn to_dtype(&mut self, dtype: DType) -> Result<(), NeuraRustError> {
             self.param.to_dtype(dtype)
+        }
+
+        fn modules(&self) -> Vec<&dyn Module> {
+            vec![self]
         }
     }
 
@@ -173,6 +203,43 @@ mod tests {
 
         module.to_dtype(DType::F32)?;
         assert_eq!(module.parameters()[0].dtype(), DType::F32, "DType should remain F32");
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_module_named_parameters() -> Result<(), NeuraRustError> {
+        let tensor = zeros(&[1])?;
+        let named_param = Parameter::new(tensor.clone(), Some("custom_mock_name".to_string()));
+        let module_named = MockModule { param: named_param };
+        let named_params1 = module_named.named_parameters();
+        assert_eq!(named_params1.len(), 1);
+        assert_eq!(named_params1[0].0, "custom_mock_name");
+        assert_eq!(named_params1[0].1.name(), Some("custom_mock_name"));
+
+        let unnamed_param = Parameter::new_unnamed(tensor);
+        let module_unnamed = MockModule { param: unnamed_param };
+        let named_params2 = module_unnamed.named_parameters();
+        assert_eq!(named_params2.len(), 1);
+        assert_eq!(named_params2[0].0, "param"); // Default name
+        assert_eq!(named_params2[0].1.name(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mock_module_children_and_modules() -> Result<(), NeuraRustError> {
+        let module = MockModule::new(DType::F32)?;
+
+        let children = module.children();
+        assert!(children.is_empty(), "MockModule (leaf) should have no children");
+
+        let named_children = module.named_children();
+        assert!(named_children.is_empty(), "MockModule (leaf) should have no named children");
+
+        let modules = module.modules();
+        assert_eq!(modules.len(), 1, "MockModule (leaf) should return itself in modules()");
+        // Pour vérifier que c'est bien self, on peut comparer les adresses, mais c'est un peu délicat avec &dyn Module.
+        // On peut se contenter de vérifier le type si possible, ou indirectement via parameters.
+        assert_eq!(modules[0].parameters().len(), 1, "The module in modules() should be the MockModule itself");
         Ok(())
     }
 } 

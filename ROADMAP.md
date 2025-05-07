@@ -143,18 +143,17 @@
             *   [✅] Add/Update `rustdoc` for `Parameter`, including the name field and its usage.
         *   **Step 1.B.6: Define Basic `Module` Trait & Introspection**
             *   [✅] Define `trait Module` with a `forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError>` method.
-            *   [ ] Define `parameters(&self) -> Vec<&Parameter>` method in the `Module` trait.
-                *   [ ] This method should collect and return references to all `Parameter`s owned by the module and its submodules (recursively).
-            *   [ ] Define `named_parameters(&self) -> Vec<(String, &Parameter)>` method in the `Module` trait.
-                *   [ ] This method should collect and return references to all `Parameter`s along with their names (e.g., "linear1.weight", "bias").
-                *   [ ] Implement logic to generate unique and hierarchical names for parameters within nested modules.
+            *   [✅] Define `parameters(&self) -> Vec<&Parameter>` method in the `Module` trait.
+            *   [✅] Define `named_parameters(&self) -> Vec<(String, &Parameter)>` method in the `Module` trait.
+            *   [ ] This method should collect and return references to all `Parameter`s along with their names (e.g., "linear1.weight", "bias").
+            *   [ ] Implement logic to generate unique and hierarchical names for parameters within nested modules.
             *   [ ] Define `children(&self) -> Vec<&dyn Module>` method in the `Module` trait.
                 *   [ ] This method should return direct child modules.
             *   [ ] Define `named_children(&self) -> Vec<(String, &dyn Module)>` method in the `Module` trait.
                 *   [ ] This method should return direct child modules along with their attribute names.
             *   [ ] Define `modules(&self) -> Vec<&dyn Module>` method in the `Module` trait.
                 *   [ ] This method should return an iterator over all modules in the tree (self + all descendants), depth-first.
-            *   [ ] Implement these introspection methods for `nn::Linear` (parameters, named_parameters, modules; children would be empty).
+            *   [✅] Implement these introspection methods for `nn::Linear` (parameters, named_parameters, modules; children would be empty).
             *   [ ] Implement these introspection methods for `SimpleMLP` (example in `basic_mlp_cpu.rs`).
             *   [✅] Add/Update `rustdoc` for the `Module` trait and its methods, explaining their purpose and usage.
         *   **Step 1.B.7: Implement `nn::Linear` Layer**
