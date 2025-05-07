@@ -134,12 +134,12 @@
             *   [✅] Add `rustdoc` for the `nn::init` module and functions.
         *   **Step 1.B.5: Define `Parameter` Wrapper & Enhancements**
             *   [✅] Define `struct Parameter(Tensor)`.
-            *   [ ] Add `name: Option<String>` field to `Parameter` struct.
-                *   [ ] Update constructor `Parameter::new(data: Tensor, name: Option<String>)` or add `Parameter::new_with_name()`.
-                *   [ ] Ensure the name is accessible (e.g., via a method `name() -> Option<&str>`).
+            *   [✅] Add `name: Option<String>` field to `Parameter` struct.
+                *   [✅] Update constructor `Parameter::new(data: Tensor, name: Option<String>)` or add `Parameter::new_with_name()`.
+                *   [✅] Ensure the name is accessible (e.g., via a method `name() -> Option<&str>`).
             *   [✅] Implement `new(Tensor)` setting `requires_grad = true` (adapt for optional name).
             *   [✅] Implement `Deref`/`DerefMut` to access the underlying `Tensor`.
-            *   [ ] Add tests specifically for the name functionality (creation with name, retrieval).
+            *   [✅] Add tests specifically for the name functionality (creation with name, retrieval).
             *   [✅] Add/Update `rustdoc` for `Parameter`, including the name field and its usage.
         *   **Step 1.B.6: Define Basic `Module` Trait & Introspection**
             *   [✅] Define `trait Module` with a `forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError>` method.

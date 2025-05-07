@@ -24,15 +24,15 @@ pub struct Linear {
 
 impl Linear {
     pub fn new(in_features: usize, out_features: usize, bias_flag: bool, dtype: DType) -> Result<Self, NeuraRustError> {
-        let mut weights = {
+        let mut weights_tensor = {
             let shape_weights_vec = vec![out_features, in_features];
             match dtype {
                 DType::F32 => crate::tensor::zeros(&shape_weights_vec)?,
                 DType::F64 => crate::tensor::zeros_f64(&shape_weights_vec)?,
             }
         };
-        kaiming_uniform_(&mut weights)?;
-        let weights = Parameter::new(weights);
+        kaiming_uniform_(&mut weights_tensor)?;
+        let weights = Parameter::new(weights_tensor, Some("weight".to_string()));
 
         let bias = if bias_flag {
             let shape_bias_vec = vec![1, out_features];
@@ -41,7 +41,7 @@ impl Linear {
                 DType::F64 => crate::tensor::zeros_f64(&shape_bias_vec)?,
             };
             zeros_(&mut bias_tensor)?;
-            Some(Parameter::new(bias_tensor))
+            Some(Parameter::new(bias_tensor, Some("bias".to_string())))
         } else {
             None
         };

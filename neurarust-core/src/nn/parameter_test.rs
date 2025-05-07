@@ -9,7 +9,7 @@ mod tests {
     fn test_parameter_creation_f32_zeros() -> Result<(), NeuraRustError> {
         // Utiliser la fonction zeros() qui retourne un Tensor F32 par défaut
         let tensor = zeros(&[2, 2])?;
-        let param = Parameter::new(tensor);
+        let param = Parameter::new_unnamed(tensor);
         assert!(param.requires_grad());
         assert_eq!(param.shape(), &[2, 2]);
         assert_eq!(param.dtype(), DType::F32);
@@ -25,7 +25,7 @@ mod tests {
         // Simplifions: créons avec DType F64 directement si la fonction existe.
         // MAJ: `ones_f64` existe dans `create.rs` et est ré-exporté.
         let tensor = ones_f64(&[2, 3])?; 
-        let param = Parameter::new(tensor);
+        let param = Parameter::new_unnamed(tensor);
         assert!(param.requires_grad());
         assert_eq!(param.shape(), &[2, 3]);
         assert_eq!(param.dtype(), DType::F64);
@@ -35,7 +35,7 @@ mod tests {
     #[test]
     fn test_parameter_set_requires_grad() -> Result<(), NeuraRustError> {
         let tensor = zeros(&[2])?;
-        let param = Parameter::new(tensor);
+        let param = Parameter::new_unnamed(tensor);
         assert!(param.requires_grad(), "Parameter should require grad by default");
         let _ = param.set_requires_grad(false);
         assert!(!param.requires_grad(), "Parameter should not require grad after setting false");
@@ -48,7 +48,7 @@ mod tests {
     fn test_parameter_data_access() -> Result<(), NeuraRustError> {
         // Utiliser full() pour F32
         let tensor = full(&[2, 2], 42.0f32)?;
-        let param = Parameter::new(tensor);
+        let param = Parameter::new_unnamed(tensor);
         // Utiliser get_f32_data() via Deref<Target=Tensor>
         assert_eq!(param.get_f32_data()?, vec![42.0, 42.0, 42.0, 42.0]);
         Ok(())
@@ -57,7 +57,7 @@ mod tests {
     #[test]
     fn test_parameter_grad_access_and_manipulation() -> Result<(), NeuraRustError> {
         let tensor_orig = ones(&[2, 2])?;
-        let param = Parameter::new(tensor_orig);
+        let param = Parameter::new_unnamed(tensor_orig);
         param.set_requires_grad(true)?;
 
         assert!(param.grad().is_none());
@@ -86,5 +86,71 @@ mod tests {
         Ok(())
     }
 
-    // TODO: Ajouter des tests pour to_device et to_dtype quand Parameter les implémentera.
+    // TODO: Ajouter des tests pour to_device quand Parameter les implémentera.
+
+    #[test]
+    fn test_parameter_creation_with_name() -> Result<(), NeuraRustError> {
+        let tensor = zeros(&[2, 2])?;
+        let param_name = "test_weight".to_string();
+        let param = Parameter::new(tensor, Some(param_name.clone()));
+        
+        assert!(param.requires_grad());
+        assert_eq!(param.shape(), &[2, 2]);
+        assert_eq!(param.name(), Some(param_name.as_str()));
+        Ok(())
+    }
+
+    #[test]
+    fn test_parameter_creation_without_name_new() -> Result<(), NeuraRustError> {
+        let tensor = zeros(&[2, 2])?;
+        let param = Parameter::new(tensor, None);
+        
+        assert!(param.requires_grad());
+        assert_eq!(param.shape(), &[2, 2]);
+        assert_eq!(param.name(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parameter_creation_unnamed_constructor() -> Result<(), NeuraRustError> {
+        let tensor = ones(&[3, 1])?;
+        let param = Parameter::new_unnamed(tensor);
+        
+        assert!(param.requires_grad());
+        assert_eq!(param.shape(), &[3, 1]);
+        assert_eq!(param.name(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parameter_name_method() -> Result<(), NeuraRustError> {
+        let tensor = zeros(&[1])?;
+        let name1 = "bias".to_string();
+        let param1 = Parameter::new(tensor.clone(), Some(name1.clone()));
+        assert_eq!(param1.name(), Some(name1.as_str()));
+
+        let param2 = Parameter::new_unnamed(tensor);
+        assert_eq!(param2.name(), None);
+        Ok(())
+    }
+
+    #[test]
+    fn test_parameter_to_dtype_preserves_name() -> Result<(), NeuraRustError> {
+        let tensor_f32 = zeros(&[2, 2])?;
+        let param_name = "dtype_param".to_string();
+        let mut param = Parameter::new(tensor_f32, Some(param_name.clone()));
+        
+        param.to_dtype(DType::F64)?;
+        
+        assert_eq!(param.dtype(), DType::F64);
+        assert_eq!(param.name(), Some(param_name.as_str()));
+        assert!(param.requires_grad()); // Should still require grad
+
+        let mut param_unnamed = Parameter::new_unnamed(zeros(&[1,1])?);
+        param_unnamed.to_dtype(DType::F64)?;
+        assert_eq!(param_unnamed.name(), None);
+        assert_eq!(param_unnamed.dtype(), DType::F64);
+
+        Ok(())
+    }
 } 

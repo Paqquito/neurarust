@@ -37,7 +37,7 @@ mod tests {
         let mut linear = Linear::new(3, 2, false, DType::F32)?;
         let new_weights_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
         let new_weights_tensor = from_vec_f32(new_weights_data.clone(), vec![2, 3])?;
-        linear.weights = Parameter::new(new_weights_tensor);
+        linear.weights = Parameter::new_unnamed(new_weights_tensor);
         assert_eq!(linear.weights.get_f32_data()?, new_weights_data);
         assert!(linear.weights.requires_grad());
         Ok(())
@@ -49,7 +49,7 @@ mod tests {
         assert!(linear.bias.is_some());
         let new_bias_data = vec![10.0, 20.0];
         let new_bias_tensor = from_vec_f64(new_bias_data.clone(), vec![1, 2])?;
-        linear.bias = Some(Parameter::new(new_bias_tensor));
+        linear.bias = Some(Parameter::new_unnamed(new_bias_tensor));
         assert!(linear.bias.is_some());
         let bias_param = linear.bias.as_ref().unwrap();
         assert_eq!(bias_param.get_f64_data()?, new_bias_data);
@@ -65,8 +65,8 @@ mod tests {
         
         let weights_data = vec![1.0, 0.0, -1.0, 0.0, 1.0, 0.0];
         let bias_data = vec![0.5, -0.5];
-        linear.weights = Parameter::new(from_vec_f32(weights_data, vec![2, 3])?);
-        linear.bias = Some(Parameter::new(from_vec_f32(bias_data, vec![1, 2])?));
+        linear.weights = Parameter::new_unnamed(from_vec_f32(weights_data, vec![2, 3])?);
+        linear.bias = Some(Parameter::new_unnamed(from_vec_f32(bias_data, vec![1, 2])?));
         
         let output = linear.forward(&input)?;
         
@@ -80,7 +80,7 @@ mod tests {
         let input = from_vec_f64(vec![1.0, -1.0], vec![1, 2])?;
         let mut linear = Linear::new(2, 3, false, DType::F64)?;
         let weights_data = vec![1.0, 2.0, 3.0, 4.0, 5.0, 6.0];
-        linear.weights = Parameter::new(from_vec_f64(weights_data, vec![3, 2])?);
+        linear.weights = Parameter::new_unnamed(from_vec_f64(weights_data, vec![3, 2])?);
 
         let output = linear.forward(&input)?;
 
@@ -102,7 +102,7 @@ mod tests {
 
         let func = |params: &[Tensor]| -> Result<Tensor, NeuraRustError> {
             let mut temp_linear = Linear::new(3, 2, true, DType::F32)?;
-            temp_linear.weights = Parameter::new(params[0].clone());
+            temp_linear.weights = Parameter::new_unnamed(params[0].clone());
             temp_linear.bias = linear.bias.clone();
             let output = temp_linear.forward(&input)?;
             linear_loss_fn(&output)

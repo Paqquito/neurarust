@@ -103,7 +103,7 @@ mod tests {
                 DType::F32 => zeros(&[1])?,
                 DType::F64 => zeros_f64(&[1])?,
             };
-            Ok(Self { param: Parameter::new(tensor) })
+            Ok(Self { param: Parameter::new_unnamed(tensor) })
         }
     }
 
