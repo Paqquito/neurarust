@@ -387,7 +387,7 @@
             *   [✅] Constructor: `new(params: impl Iterator<Item = Arc<Mutex<Parameter>>>, lr: f32, lr_decay: f32, weight_decay: f32, initial_accumulator_value: f32, eps: f32)`.
             *   [✅] Implement `step()` logic.
             *   [✅] Manage sum of squared gradients accumulator per parameter.
-            *   [ ] Add tests and `rustdoc`.
+            *   [✅] Add tests and `rustdoc`.
         *   **Step 2.A.6: Learning Rate Schedulers**
             *   🎯 **Goal:** Implement common learning rate scheduling policies.
             *   [ ] Define `trait LRScheduler`:

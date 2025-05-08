@@ -30,12 +30,10 @@ pub enum OptimizerState {
         momentum_buffers: HashMap<usize, Tensor>,
     },
     /// State specific to the Adam optimizer.
-    Adam { 
-        // Adaptez selon la structure réelle de l'état Adam
-        // state: HashMap<String, crate::optim::adam::AdamStateInternal>, // Si AdamState est interne à adam.rs
-        // iterations: u64,
-        // lr: f32, 
-        // ... autres hyperparams d'Adam à sauvegarder
+    Adam {
+        // Clé: Nom du paramètre ou ID temporaire
+        state: HashMap<String, AdamParamState>,
+        iterations: u64,
     },
     /// State specific to the RmsProp optimizer.
     RmsProp {
@@ -48,6 +46,12 @@ pub enum OptimizerState {
         centered: bool,
         iterations: u64,
     },
+    /// State specific to the Adagrad optimizer.
+    Adagrad {
+        // Vecteur externe: groupe, Vecteur interne: paramètre dans le groupe
+        state_sum_gradient_squares: Vec<Vec<Tensor>>,
+        steps: Vec<usize>,
+    },
     /// A generic placeholder state for optimizers without specific state yet
     /// or for initialization.
     Placeholder,
@@ -57,4 +61,9 @@ impl Default for OptimizerState {
     fn default() -> Self {
         OptimizerState::Placeholder
     }
+}
+
+#[derive(Default, Clone, Debug)]
+pub struct AdamParamState {
+    // ... existing code ...
 } 

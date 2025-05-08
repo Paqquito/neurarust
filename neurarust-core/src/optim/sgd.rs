@@ -46,7 +46,7 @@ impl SgdOptimizer {
         nesterov: bool,
     ) -> Self {
         let params_vec: Vec<Arc<Mutex<Parameter>>> = params.into_iter().collect();
-        let default_param_group = ParamGroup::new(params_vec, lr, group_weight_decay);
+        let default_param_group = ParamGroup::new(params_vec, lr, group_weight_decay, 0.0);
         
         SgdOptimizer {
             param_groups: vec![default_param_group],
