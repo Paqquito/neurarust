@@ -21,11 +21,58 @@ pub struct RmsPropHyperParams {
     pub centered: bool,
 }
 
-#[derive(Debug, Clone)]
+#[derive(Debug)]
 pub struct RmsPropParamState {
     pub square_avg: Tensor,
     pub grad_avg: Option<Tensor>,
     pub momentum_buffer: Option<Tensor>,
+}
+
+impl Clone for RmsPropParamState {
+    fn clone(&self) -> Self {
+        let new_square_avg = match self.square_avg.dtype() {
+            DType::F32 => Tensor::new(
+                self.square_avg.get_f32_data().expect("Failed to get F32 data for square_avg clone"),
+                self.square_avg.shape(),
+            ).expect("Failed to create new F32 Tensor for square_avg clone"),
+            DType::F64 => Tensor::new_f64(
+                self.square_avg.get_f64_data().expect("Failed to get F64 data for square_avg clone"),
+                self.square_avg.shape(),
+            ).expect("Failed to create new F64 Tensor for square_avg clone"),
+        };
+
+        let new_grad_avg = self.grad_avg.as_ref().map(|ga| {
+            match ga.dtype() {
+                DType::F32 => Tensor::new(
+                    ga.get_f32_data().expect("Failed to get F32 data for grad_avg clone"),
+                    ga.shape(),
+                ).expect("Failed to create new F32 Tensor for grad_avg clone"),
+                DType::F64 => Tensor::new_f64(
+                    ga.get_f64_data().expect("Failed to get F64 data for grad_avg clone"),
+                    ga.shape(),
+                ).expect("Failed to create new F64 Tensor for grad_avg clone"),
+            }
+        });
+
+        let new_momentum_buffer = self.momentum_buffer.as_ref().map(|mb| {
+            match mb.dtype() {
+                DType::F32 => Tensor::new(
+                    mb.get_f32_data().expect("Failed to get F32 data for momentum_buffer clone"),
+                    mb.shape(),
+                ).expect("Failed to create new F32 Tensor for momentum_buffer clone"),
+                DType::F64 => Tensor::new_f64(
+                    mb.get_f64_data().expect("Failed to get F64 data for momentum_buffer clone"),
+                    mb.shape(),
+                ).expect("Failed to create new F64 Tensor for momentum_buffer clone"),
+            }
+        });
+
+        RmsPropParamState {
+            square_avg: new_square_avg,
+            grad_avg: new_grad_avg,
+            momentum_buffer: new_momentum_buffer,
+        }
+    }
 }
 
 #[derive(Debug)]

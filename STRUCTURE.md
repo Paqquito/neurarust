@@ -109,6 +109,8 @@
 │   │   │   ├── optimizer_state.rs
 │   │   │   ├── optimizer_trait.rs
 │   │   │   ├── param_group.rs
+│   │   │   ├── rmsprop.rs
+│   │   │   ├── rmsprop_test.rs
 │   │   │   ├── sgd.rs
 │   │   │   └── sgd_test.rs
 │   │   ├── tensor
@@ -171,4 +173,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-25 directories, 147 files
+25 directories, 149 files
