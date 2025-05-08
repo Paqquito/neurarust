@@ -369,16 +369,16 @@
             *   [✅] Add `rustdoc`. (Basic doc comments added, formal rustdoc pass can follow)
         *   **Step 2.A.4: Implement RMSprop Optimizer**
             *   🎯 **Goal:** Implement the RMSprop optimizer.
-            *   [ ] Create `struct RmsPropOptimizer` implementing `Optimizer`.
-            *   [ ] Constructor: `new(params: impl Iterator<Item = Arc<Mutex<Parameter>>>, lr: f32, alpha: f32, eps: f32, weight_decay: f32, momentum: f32, centered: bool)`.
-            *   [ ] Implement `step()` logic:
-                *   [ ] Update squared gradient average: `sq_avg = alpha * sq_avg + (1-alpha) * grad^2`.
-                *   [ ] (Optional, if `centered`) Maintain average gradient: `grad_avg = alpha * grad_avg + (1-alpha) * grad`.
-                *   [ ] (Optional, if `centered`) Update denominator: `denom = sqrt(sq_avg - grad_avg^2 + eps)`.
-                *   [ ] (Else) Update denominator: `denom = sqrt(sq_avg + eps)`.
-                *   [ ] Parameter update: `p = p - lr * grad / denom`.
-                *   [ ] Implement momentum and weight decay if specified.
-            *   [ ] Manage squared gradient average buffers (and optionally gradient average buffers) in optimizer state.
+            *   [✅] Create `struct RmsPropOptimizer` implementing `Optimizer`.
+            *   [✅] Constructor: `new(params: impl Iterator<Item = Arc<Mutex<Parameter>>>, lr: f32, alpha: f32, eps: f32, weight_decay: f32, momentum: f32, centered: bool)`.
+            *   [✅] Implement `step()` logic:
+                *   [✅] Update squared gradient average: `sq_avg = alpha * sq_avg + (1-alpha) * grad^2`.
+                *   [✅] (Optional, if `centered`) Maintain average gradient: `grad_avg = alpha * grad_avg + (1-alpha) * grad`.
+                *   [✅] (Optional, if `centered`) Update denominator: `denom = sqrt(sq_avg - grad_avg^2 + eps)`.
+                *   [✅] (Else) Update denominator: `denom = sqrt(sq_avg + eps)`.
+                *   [✅] Parameter update: `p = p - lr * grad / denom`.
+                *   [✅] Implement momentum and [ ] weight decay if specified.
+            *   [✅] Manage squared gradient average buffers (and optionally gradient average buffers) in optimizer state.
             *   [ ] Add tests: basic step, momentum, weight decay, centered, state saving/loading.
             *   [ ] Add `rustdoc`.
         *   **Step 2.A.5: (Optional) Implement Adagrad Optimizer**

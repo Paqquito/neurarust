@@ -46,6 +46,7 @@
 │   │   │   │   ├── add_test.rs
 │   │   │   │   ├── div.rs
 │   │   │   │   ├── div_test.rs
+│   │   │   │   ├── max_elemwise.rs
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── mul.rs
 │   │   │   │   ├── mul_test.rs
@@ -58,6 +59,7 @@
 │   │   │   ├── comparison
 │   │   │   │   ├── equal.rs
 │   │   │   │   ├── equal_test.rs
+│   │   │   │   ├── ge.rs
 │   │   │   │   └── mod.rs
 │   │   │   ├── dtype
 │   │   │   │   ├── cast.rs
@@ -169,4 +171,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-25 directories, 145 files
+25 directories, 147 files

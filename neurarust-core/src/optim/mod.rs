@@ -17,6 +17,9 @@ pub mod sgd;
 // Declare the new adam module
 pub mod adam;
 
+// Add these lines for RMSprop
+pub mod rmsprop;
+
 // Re-export key items for easier access
 pub use optimizer_state::OptimizerState;
 pub use param_group::ParamGroup;
@@ -27,6 +30,9 @@ pub use sgd::SgdOptimizer;
 
 // Re-export AdamOptimizer
 pub use adam::AdamOptimizer;
+
+// Add this line for RMSprop
+pub use rmsprop::*;
 
 // Declare test module conditionally
 #[cfg(test)]
