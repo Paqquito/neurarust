@@ -22,6 +22,8 @@ pub trait ParamGroupInterface {
     fn lr(&self) -> f32;
     /// Définit le taux d'apprentissage.
     fn set_lr(&mut self, lr: f32);
+    /// Retourne les noms des paramètres.
+    fn param_names(&self) -> Vec<String>;
 }
 // --- Fin des Placeholders ---
 
@@ -275,14 +277,14 @@ impl<O: OptimizerInterface> LRScheduler<O> for ReduceLROnPlateau<O> {
 
 /// Implements the StepLR learning rate scheduler.
 ///
-/// Decays the learning rate of each parameter group by gamma every `step_size` epochs.
+/// Decays the learning rate of each parameter group by gamma every step_size epochs.
 #[derive(Debug)]
 pub struct StepLR<O: OptimizerInterface> {
     optimizer: O,
     step_size: usize,
     gamma: f32,
-    last_epoch: usize, // To keep track of the number of steps or epochs
-    _base_lrs: Vec<f32>, // To store initial learning rates for resetting or calculations (prefix with _)
+    last_epoch: usize, // To keep track of the number of steps or epochs, 0-indexed.
+    _base_lrs: Vec<f32>, // To store initial learning rates
 }
 
 impl<O: OptimizerInterface> StepLR<O> {
@@ -290,61 +292,80 @@ impl<O: OptimizerInterface> StepLR<O> {
     ///
     /// # Arguments
     ///
-    /// * `optimizer` - The optimizer.
+    /// * `optimizer` - Wrapped optimizer.
     /// * `step_size` - Period of learning rate decay.
-    /// * `gamma` - Multiplicative factor of learning rate decay.
+    /// * `gamma` - Multiplicative factor of learning rate decay. Default: 0.1.
     ///
     /// # Panics
     ///
     /// Panics if `step_size` is 0.
     pub fn new(optimizer: O, step_size: usize, gamma: f32) -> Self {
         if step_size == 0 {
-            panic!("StepLR: step_size cannot be zero.");
+            panic!("StepLR: step_size must be greater than 0.");
         }
-        let base_lrs = optimizer
-            .param_groups()
-            .iter()
-            .map(|pg| pg.lr())
-            .collect();
-
+        // Store initial LRs. In PyTorch, LRScheduler class does this in its constructor.
+        let base_lrs: Vec<f32> = optimizer.param_groups().iter().map(|pg| pg.lr()).collect();
+        
         StepLR {
             optimizer,
             step_size,
             gamma,
-            last_epoch: 0,
-            _base_lrs: base_lrs, // updated field name
+            last_epoch: 0, // PyTorch's last_epoch is -1 at init, step() increments it first.
+                           // Let's make last_epoch the count of steps taken, starting at 0 after the first step.
+                           // So, when new() is called, no steps taken yet. First call to step() will make it 1.
+                           // Or, simpler: last_epoch = 0 initially. After first step, last_epoch = 1.
+                           // LR calculation: base_lr * gamma^(floor(last_epoch / step_size))
+                           // If last_epoch is number of calls to step():
+                           // Call 0: last_epoch = 0. exponent = 0. lr = base_lr.
+                           // Call 1 (step_size=3): last_epoch=1. exp=0. lr=base_lr
+                           // Call 2 (step_size=3): last_epoch=2. exp=0. lr=base_lr
+                           // Call 3 (step_size=3): last_epoch=3. exp=1. lr=base_lr*gamma
+                           // This seems correct if last_epoch is number of steps *taken*.
+                           // PyTorch actually increments last_epoch *before* get_lr() in its step method.
+                           // So if last_epoch = 0, after first step() call, it becomes 1, then get_lr() is called.
+                           // For consistency with PyTorch's model, let's start last_epoch at 0 representing number of steps *completed*.
+                           // And step() will effectively calculate for last_epoch+1 or simply update based on current last_epoch.
+            _base_lrs: base_lrs,
         }
     }
 }
 
 impl<O: OptimizerInterface> LRScheduler<O> for StepLR<O> {
     fn step(&mut self, _epoch: Option<usize>, _metrics: Option<f32>) -> Result<(), NeuraRustError> {
-        // Si l'époque est fournie, nous l'utilisons. Sinon, nous incrémentons notre compteur interne.
-        // La roadmap mentionne "step(&mut self, epoch: Option<usize>, metrics: Option<f32>)"
-        // PyTorch met à jour last_epoch basé sur les appels à step, pas sur la valeur de l'epoch passée.
-        // Nous allons suivre une approche similaire: incrémenter last_epoch à chaque appel.
-        // L'argument `epoch` peut être utilisé par d'autres schedulers, ou pour un reset.
-
         self.last_epoch += 1;
 
-        if self.last_epoch % self.step_size == 0 {
-            // Appliquer la décroissance du LR
-            for (_i, pg) in self.optimizer.param_groups_mut().iter_mut().enumerate() {
-                // On pourrait se baser sur pg.lr() * self.gamma ou sur base_lrs * gamma^n
-                // PyTorch semble multiplier le lr courant.
-                let new_lr = pg.lr() * self.gamma;
-                pg.set_lr(new_lr);
-            }
+        // Le calcul du LR se base sur last_epoch et les _base_lrs.
+        // Si last_epoch / step_size est différent de (last_epoch-1) / step_size, alors un "pas" a été franchi.
+        // Cependant, il est plus simple de recalculer le LR à chaque fois basé sur la formule.
+        // La condition if n'est nécessaire que si on veut optimiser pour ne pas appeler set_lr si le lr ne change pas.
+        // Pour l'instant, recalculons et réappliquons toujours, c'est plus simple.
+
+        // Vérifier si un pas de step_size a été franchi depuis la dernière mise à jour de LR.
+        // Ex: step_size = 3. last_epoch = 1,2 -> no change. last_epoch = 3 -> change.
+        // PyTorch le fait en calculant la valeur cible du LR et en la comparant à l'actuelle,
+        // ou plus simplement, get_lr() calcule toujours la valeur correcte pour self.last_epoch.
+        
+        // Calculer le facteur d'échelle basé sur le nombre de pas complets de step_size
+        let num_steps_taken = self.last_epoch / self.step_size;
+        let scale_factor = self.gamma.powi(num_steps_taken as i32);
+
+        let param_groups = self.optimizer.param_groups_mut();
+        if self._base_lrs.len() != param_groups.len() {
+            // Cela ne devrait pas arriver si l'optimizer n'est pas modifié après la création du scheduler
+            return Err(NeuraRustError::ConfigurationError(
+                "StepLR: Number of base_lrs and param_groups mismatch. Optimizer structure changed?".to_string()
+            ));
+        }
+
+        for (pg, base_lr) in param_groups.iter_mut().zip(&self._base_lrs) {
+            let new_lr = base_lr * scale_factor;
+            pg.set_lr(new_lr);
         }
         Ok(())
     }
 
     fn get_last_lr(&self) -> Vec<f32> {
-        self.optimizer
-            .param_groups()
-            .iter()
-            .map(|pg| pg.lr())
-            .collect()
+        self.optimizer.param_groups().iter().map(|pg| pg.lr()).collect()
     }
 
     fn optimizer(&self) -> &O {
@@ -358,15 +379,14 @@ impl<O: OptimizerInterface> LRScheduler<O> for StepLR<O> {
 
 /// Implements the MultiStepLR learning rate scheduler.
 ///
-/// Decays the learning rate of each parameter group by gamma once the number of epoch
-/// reaches one of the milestones.
+/// Decays the learning rate of each parameter group by gamma once the epoch reaches one of the milestones.
 #[derive(Debug)]
 pub struct MultiStepLR<O: OptimizerInterface> {
     optimizer: O,
-    milestones: Vec<usize>,
+    milestones: Vec<usize>, // Sorted list of epoch indices at which to decay LR.
     gamma: f32,
-    last_epoch: usize,
-    // _base_lrs: Vec<f32>, // Peut être utile si on veut un comportement différent ou pour reset.
+    last_epoch: usize,      // Number of times step() has been called.
+    _base_lrs: Vec<f32>,
 }
 
 impl<O: OptimizerInterface> MultiStepLR<O> {
@@ -374,34 +394,28 @@ impl<O: OptimizerInterface> MultiStepLR<O> {
     ///
     /// # Arguments
     ///
-    /// * `optimizer` - The optimizer.
-    /// * `milestones` - A list of epoch indices. Must be increasing.
-    /// * `gamma` - Multiplicative factor of learning rate decay.
+    /// * `optimizer` - Wrapped optimizer.
+    /// * `milestones` - List of epoch indices. Must be increasing.
+    /// * `gamma` - Multiplicative factor of learning rate decay. Default: 0.1.
     ///
     /// # Panics
     ///
-    /// Panics if `milestones` is not sorted in increasing order.
+    /// Panics if `milestones` is not sorted in strictly increasing order.
     pub fn new(optimizer: O, mut milestones: Vec<usize>, gamma: f32) -> Self {
-        // S'assurer que les milestones sont triés pour une vérification efficace.
-        // On pourrait aussi retirer les doublons si nécessaire.
-        let mut sorted_milestones = milestones.clone();
-        sorted_milestones.sort_unstable();
-        if milestones != sorted_milestones {
-            // Ou on pourrait choisir de les trier automatiquement et d'émettre un warning.
-            // Pour l'instant, exigeons qu'ils soient déjà triés pour être stricts.
-            panic!("MultiStepLR: milestones must be sorted in increasing order.");
-        }
-        // Retirer les doublons pour éviter des décroissances multiples à la même époque si l'utilisateur les a fournis.
+        // Vérifier si les jalons sont triés. Si ce n'est pas le cas, paniquer.
+        // Ou, on pourrait les trier et les dédoublonner, comme le fait PyTorch.
+        // PyTorch: sorts and dedups milestones. Let's do that for robustness.
+        milestones.sort_unstable();
         milestones.dedup();
 
-        // let base_lrs = optimizer.param_groups().iter().map(|pg| pg.lr()).collect();
+        let base_lrs: Vec<f32> = optimizer.param_groups().iter().map(|pg| pg.lr()).collect();
 
         MultiStepLR {
             optimizer,
             milestones,
             gamma,
             last_epoch: 0,
-            // _base_lrs: base_lrs,
+            _base_lrs: base_lrs,
         }
     }
 }
@@ -410,23 +424,45 @@ impl<O: OptimizerInterface> LRScheduler<O> for MultiStepLR<O> {
     fn step(&mut self, _epoch: Option<usize>, _metrics: Option<f32>) -> Result<(), NeuraRustError> {
         self.last_epoch += 1;
 
-        // Vérifier si l'epoch actuelle est un milestone
-        // La méthode `binary_search` est efficace sur un Vec trié.
-        if self.milestones.binary_search(&self.last_epoch).is_ok() {
-            for pg in self.optimizer.param_groups_mut().iter_mut() {
-                let new_lr = pg.lr() * self.gamma;
-                pg.set_lr(new_lr);
-            }
+        // Compte combien de milestones ont été atteints ou dépassés par last_epoch.
+        // self.milestones est trié.
+        // Example: milestones = [2, 5, 8], last_epoch = 1 -> count = 0
+        //          milestones = [2, 5, 8], last_epoch = 2 -> count = 1 (m=2)
+        //          milestones = [2, 5, 8], last_epoch = 3 -> count = 1
+        //          milestones = [2, 5, 8], last_epoch = 5 -> count = 2 (m=2, m=5)
+        let num_milestones_passed = self.milestones.iter().filter(|&&m| m <= self.last_epoch).count();
+        // Alternative plus efficace avec partition_point (Rust 1.52+)
+        // let num_milestones_passed = self.milestones.partition_point(|&m| m < self.last_epoch);
+        // Si un milestone est EXACTEMENT self.last_epoch, il doit être compté.
+        // Donc, `m <= self.last_epoch` est correct. `partition_point` trouve l'index du premier élément > X (ou == X si X existe).
+        // `self.milestones.partition_point(|&m| m <= self.last_epoch)` donnerait l'index *après* tous les milestones <= last_epoch, qui est le compte.
+        // Let's use partition_point for efficiency if available, otherwise filter().count().
+        // As of current Rust stable, partition_point is available.
+        
+        // Correction: PyTorch's MultiStepLR applies gamma when current epoch *is in* milestones. 
+        // Not a cumulative power. It means last_lr * gamma if self.last_epoch is in milestones.
+        // No, their get_lr is: `gamma ** bisect_right(self.milestones, self.last_epoch)`
+        // `bisect_right` est équivalent à `partition_point` (compte les éléments <= X).
+        // Donc, c'est bien une puissance du nombre de milestones passés.
+
+        let scale_factor = self.gamma.powi(num_milestones_passed as i32);
+
+        let param_groups = self.optimizer.param_groups_mut();
+        if self._base_lrs.len() != param_groups.len() {
+            return Err(NeuraRustError::ConfigurationError(
+                "MultiStepLR: Number of base_lrs and param_groups mismatch. Optimizer structure changed?".to_string()
+            ));
+        }
+
+        for (pg, base_lr) in param_groups.iter_mut().zip(&self._base_lrs) {
+            let new_lr = base_lr * scale_factor;
+            pg.set_lr(new_lr);
         }
         Ok(())
     }
 
     fn get_last_lr(&self) -> Vec<f32> {
-        self.optimizer
-            .param_groups()
-            .iter()
-            .map(|pg| pg.lr())
-            .collect()
+        self.optimizer.param_groups().iter().map(|pg| pg.lr()).collect()
     }
 
     fn optimizer(&self) -> &O {
@@ -439,422 +475,5 @@ impl<O: OptimizerInterface> LRScheduler<O> for MultiStepLR<O> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::error::NeuraRustError;
-
-    // --- Mock Optimizer et ParamGroup pour les tests ---
-    #[derive(Debug)]
-    struct MockParamGroup {
-        lr: f32,
-    }
-
-    impl ParamGroupInterface for MockParamGroup {
-        fn lr(&self) -> f32 {
-            self.lr
-        }
-        fn set_lr(&mut self, lr: f32) {
-            self.lr = lr;
-        }
-    }
-
-    #[derive(Debug)]
-    struct MockOptimizer {
-        param_groups: Vec<MockParamGroup>,
-    }
-
-    impl OptimizerInterface for MockOptimizer {
-        type ParamGroup = MockParamGroup;
-
-        fn param_groups_mut(&mut self) -> &mut [Self::ParamGroup] {
-            &mut self.param_groups
-        }
-
-        fn param_groups(&self) -> &[Self::ParamGroup] {
-            &self.param_groups
-        }
-    }
-
-    impl MockOptimizer {
-        fn new(lrs: Vec<f32>) -> Self {
-            MockOptimizer {
-                param_groups: lrs.into_iter().map(|lr| MockParamGroup { lr }).collect(),
-            }
-        }
-    }
-    // --- Fin des Mocks ---
-
-    #[test]
-    fn test_step_lr_new() {
-        let optimizer = MockOptimizer::new(vec![0.1, 0.01]);
-        let scheduler = StepLR::new(optimizer, 3, 0.1);
-        assert_eq!(scheduler.step_size, 3);
-        assert_eq!(scheduler.gamma, 0.1);
-        assert_eq!(scheduler.last_epoch, 0);
-        assert_eq!(scheduler._base_lrs, vec![0.1, 0.01]); // updated field name in test
-    }
-
-    #[test]
-    #[should_panic(expected = "StepLR: step_size cannot be zero.")]
-    fn test_step_lr_new_panic_on_zero_step_size() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        StepLR::new(optimizer, 0, 0.1); // Doit paniquer
-    }
-
-    #[test]
-    fn test_step_lr_basic_decay() -> Result<(), NeuraRustError> {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        let mut scheduler = StepLR::new(optimizer, 2, 0.5);
-
-        // Step 1: epoch 1, no decay
-        scheduler.step(Some(1), None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![0.1]);
-        assert_eq!(scheduler.last_epoch, 1);
-
-        // Step 2: epoch 2, decay should happen (0.1 * 0.5 = 0.05)
-        scheduler.step(Some(2), None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![0.05]);
-        assert_eq!(scheduler.last_epoch, 2);
-
-        // Step 3: epoch 3, no decay
-        scheduler.step(Some(3), None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![0.05]);
-        assert_eq!(scheduler.last_epoch, 3);
-
-        // Step 4: epoch 4, decay should happen (0.05 * 0.5 = 0.025)
-        scheduler.step(Some(4), None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![0.025]);
-        assert_eq!(scheduler.last_epoch, 4);
-
-        Ok(())
-    }
-
-    #[test]
-    fn test_step_lr_multiple_param_groups() -> Result<(), NeuraRustError> {
-        let optimizer = MockOptimizer::new(vec![1.0, 0.5]);
-        let mut scheduler = StepLR::new(optimizer, 1, 0.1);
-
-        // Step 1: decay should happen (1.0*0.1=0.1, 0.5*0.1=0.05)
-        scheduler.step(Some(1), None)?;
-        let lrs = scheduler.get_last_lr();
-        assert!((lrs[0] - 0.1).abs() < f32::EPSILON);
-        assert!((lrs[1] - 0.05).abs() < f32::EPSILON);
-        assert_eq!(scheduler.last_epoch, 1);
-
-        // Step 2: decay again (0.1*0.1=0.01, 0.05*0.1=0.005)
-        scheduler.step(Some(2), None)?;
-        let lrs2 = scheduler.get_last_lr();
-        assert!((lrs2[0] - 0.01).abs() < f32::EPSILON);
-        assert!((lrs2[1] - 0.005).abs() < f32::EPSILON);
-        assert_eq!(scheduler.last_epoch, 2);
-        Ok(())
-    }
-
-    #[test]
-    fn test_step_lr_get_optimizer_refs() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        let mut scheduler = StepLR::new(optimizer, 2, 0.5);
-
-        // Accès immuable
-        let _opt_ref = scheduler.optimizer();
-        // Accès mutable
-        scheduler.optimizer_mut().param_groups_mut()[0].set_lr(0.99);
-        assert_eq!(scheduler.get_last_lr(), vec![0.99]);
-    }
-}
-
-#[cfg(test)]
-mod multistep_lr_tests { // Nouveau module de test pour éviter les conflits de nom de mock
-    use super::*; // Accède à LRScheduler, MultiStepLR, etc.
-    use crate::error::NeuraRustError;
-    // Réutiliser les mocks définis dans le module de test de StepLR ou les redéfinir si nécessaire.
-    // Pour la propreté, et si les mocks sont identiques, il serait mieux de les extraire
-    // dans un module helper de test commun au sein de lr_scheduler.rs ou optim/mod.rs.
-    // Pour l'instant, je vais les copier ici pour que ce bloc soit autonome.
-
-    // --- Mock Optimizer et ParamGroup pour les tests (copié) ---
-    #[derive(Debug, Clone)] // Ajout de Clone pour certains tests
-    struct MockParamGroup {
-        lr: f32,
-    }
-
-    impl ParamGroupInterface for MockParamGroup {
-        fn lr(&self) -> f32 {
-            self.lr
-        }
-        fn set_lr(&mut self, lr: f32) {
-            self.lr = lr;
-        }
-    }
-
-    #[derive(Debug, Clone)] // Ajout de Clone
-    struct MockOptimizer {
-        param_groups: Vec<MockParamGroup>,
-    }
-
-    impl OptimizerInterface for MockOptimizer {
-        type ParamGroup = MockParamGroup;
-
-        fn param_groups_mut(&mut self) -> &mut [Self::ParamGroup] {
-            &mut self.param_groups
-        }
-
-        fn param_groups(&self) -> &[Self::ParamGroup] {
-            &self.param_groups
-        }
-    }
-
-    impl MockOptimizer {
-        fn new(lrs: Vec<f32>) -> Self {
-            MockOptimizer {
-                param_groups: lrs.into_iter().map(|lr| MockParamGroup { lr }).collect(),
-            }
-        }
-    }
-    // --- Fin des Mocks (copié) ---
-
-    #[test]
-    fn test_multistep_lr_new() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        let milestones = vec![2, 5, 8];
-        let scheduler = MultiStepLR::new(optimizer, milestones.clone(), 0.1);
-        assert_eq!(scheduler.milestones, milestones);
-        assert_eq!(scheduler.gamma, 0.1);
-        assert_eq!(scheduler.last_epoch, 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "MultiStepLR: milestones must be sorted in increasing order.")]
-    fn test_multistep_lr_new_panic_unsorted_milestones() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        MultiStepLR::new(optimizer, vec![5, 2, 8], 0.1); // Non trié
-    }
-    
-    #[test]
-    fn test_multistep_lr_new_deduplicates_milestones() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        let scheduler = MultiStepLR::new(optimizer, vec![2, 2, 3, 5, 5, 5, 8], 0.1);
-        assert_eq!(scheduler.milestones, vec![2, 3, 5, 8]);
-    }
-
-    #[test]
-    fn test_multistep_lr_basic_decay() -> Result<(), NeuraRustError> {
-        let optimizer = MockOptimizer::new(vec![1.0]);
-        let mut scheduler = MultiStepLR::new(optimizer, vec![2, 4], 0.1);
-
-        // Epoch 1: last_epoch = 1. No decay.
-        scheduler.step(None, None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![1.0]);
-
-        // Epoch 2: last_epoch = 2. Milestone! Decay: 1.0 * 0.1 = 0.1
-        scheduler.step(None, None)?;
-        assert!((scheduler.get_last_lr()[0] - 0.1).abs() < f32::EPSILON);
-
-        // Epoch 3: last_epoch = 3. No decay.
-        scheduler.step(None, None)?;
-        assert!((scheduler.get_last_lr()[0] - 0.1).abs() < f32::EPSILON);
-
-        // Epoch 4: last_epoch = 4. Milestone! Decay: 0.1 * 0.1 = 0.01
-        scheduler.step(None, None)?;
-        assert!((scheduler.get_last_lr()[0] - 0.01).abs() < f32::EPSILON);
-
-        // Epoch 5: last_epoch = 5. No decay.
-        scheduler.step(None, None)?;
-        assert!((scheduler.get_last_lr()[0] - 0.01).abs() < f32::EPSILON);
-        Ok(())
-    }
-
-    #[test]
-    fn test_multistep_lr_multiple_param_groups() -> Result<(), NeuraRustError> {
-        let optimizer = MockOptimizer::new(vec![1.0, 0.5]);
-        let mut scheduler = MultiStepLR::new(optimizer, vec![1, 3], 0.1);
-
-        // Epoch 1: Milestone! Decay.
-        // LR1: 1.0 * 0.1 = 0.1
-        // LR2: 0.5 * 0.1 = 0.05
-        scheduler.step(None, None)?;
-        let lrs1 = scheduler.get_last_lr();
-        assert!((lrs1[0] - 0.1).abs() < f32::EPSILON);
-        assert!((lrs1[1] - 0.05).abs() < f32::EPSILON);
-
-        // Epoch 2: No decay.
-        scheduler.step(None, None)?;
-        let lrs2 = scheduler.get_last_lr();
-        assert!((lrs2[0] - 0.1).abs() < f32::EPSILON);
-        assert!((lrs2[1] - 0.05).abs() < f32::EPSILON);
-
-        // Epoch 3: Milestone! Decay.
-        // LR1: 0.1 * 0.1 = 0.01
-        // LR2: 0.05 * 0.1 = 0.005
-        scheduler.step(None, None)?;
-        let lrs3 = scheduler.get_last_lr();
-        assert!((lrs3[0] - 0.01).abs() < f32::EPSILON);
-        assert!((lrs3[1] - 0.005).abs() < f32::EPSILON);
-        Ok(())
-    }
-
-    #[test]
-    fn test_multistep_lr_no_milestones() -> Result<(), NeuraRustError> {
-        let optimizer = MockOptimizer::new(vec![1.0]);
-        let mut scheduler = MultiStepLR::new(optimizer, vec![], 0.1); // No milestones
-
-        scheduler.step(None, None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![1.0]);
-        scheduler.step(None, None)?;
-        assert_eq!(scheduler.get_last_lr(), vec![1.0]);
-        Ok(())
-    }
-
-    #[test]
-    fn test_multistep_lr_milestone_at_zero_or_one() -> Result<(), NeuraRustError> {
-        // Test milestone at epoch 1 (last_epoch becomes 1)
-        let optimizer1 = MockOptimizer::new(vec![1.0]);
-        let mut scheduler1 = MultiStepLR::new(optimizer1, vec![1], 0.1);
-        scheduler1.step(None, None)?;
-        assert!((scheduler1.get_last_lr()[0] - 0.1).abs() < f32::EPSILON);
-
-        // Test milestone at epoch 0 behavior (last_epoch starts at 0, increments to 1 on first step)
-        // So a milestone at 0 effectively means decay on the first step too.
-        // Our current logic means last_epoch is 1 on the first step, so milestone 0 won't be hit.
-        // Let's test current behavior for milestone 0 (effectively ignored unless last_epoch starts at -1)
-        let optimizer0 = MockOptimizer::new(vec![1.0]);
-        let mut scheduler0 = MultiStepLR::new(optimizer0, vec![0, 1], 0.1); // includes 0
-        scheduler0.step(None, None)?;
-        assert!((scheduler0.get_last_lr()[0] - 0.1).abs() < f32::EPSILON, "Decay should happen at epoch 1");
-        Ok(())
-    }
-}
-
-#[cfg(test)]
-mod reduce_lr_plateau_tests { // Nouveau module de test
-    use super::*; // Accède à LRScheduler, ReduceLROnPlateau, Enums, etc.
-    use crate::error::NeuraRustError;
-    // Réutiliser ou redéfinir les mocks...
-
-    // --- Mock Optimizer et ParamGroup pour les tests (copié) ---
-    #[derive(Debug, Clone)]
-    struct MockParamGroup {
-        lr: f32,
-    }
-
-    impl ParamGroupInterface for MockParamGroup {
-        fn lr(&self) -> f32 {
-            self.lr
-        }
-        fn set_lr(&mut self, lr: f32) {
-            self.lr = lr;
-        }
-    }
-
-    #[derive(Debug, Clone)]
-    struct MockOptimizer {
-        param_groups: Vec<MockParamGroup>,
-    }
-
-    impl OptimizerInterface for MockOptimizer {
-        type ParamGroup = MockParamGroup;
-
-        fn param_groups_mut(&mut self) -> &mut [Self::ParamGroup] {
-            &mut self.param_groups
-        }
-
-        fn param_groups(&self) -> &[Self::ParamGroup] {
-            &self.param_groups
-        }
-    }
-
-    impl MockOptimizer {
-        fn new(lrs: Vec<f32>) -> Self {
-            MockOptimizer {
-                param_groups: lrs.into_iter().map(|lr| MockParamGroup { lr }).collect(),
-            }
-        }
-    }
-    // --- Fin des Mocks (copié) ---
-
-    #[test]
-    fn test_reduce_lr_plateau_new_defaults() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        let scheduler = ReduceLROnPlateau::new(
-            optimizer,
-            ReduceLROnPlateauMode::Min,
-            None, None, None, None, None, None, None
-        );
-        assert_eq!(scheduler.mode, ReduceLROnPlateauMode::Min);
-        assert_eq!(scheduler.factor, 0.1);
-        assert_eq!(scheduler.patience, 10);
-        assert_eq!(scheduler.threshold, 1e-4);
-        assert_eq!(scheduler.threshold_mode, ReduceLROnPlateauThresholdMode::Rel);
-        assert_eq!(scheduler.cooldown, 0);
-        assert_eq!(scheduler.min_lr, 0.0);
-        assert_eq!(scheduler.eps, 1e-8);
-        assert_eq!(scheduler.best, f32::INFINITY);
-        assert_eq!(scheduler.num_bad_epochs, 0);
-        assert_eq!(scheduler.cooldown_counter, 0);
-        assert_eq!(scheduler.last_epoch, 0);
-    }
-
-    #[test]
-    #[should_panic(expected = "ReduceLROnPlateau: factor must be between 0.0 and 1.0.")]
-    fn test_reduce_lr_plateau_new_invalid_factor() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        ReduceLROnPlateau::new(
-            optimizer, ReduceLROnPlateauMode::Min, Some(1.5), None, None, None, None, None, None
-        );
-    }
-
-    #[test]
-    fn test_reduce_lr_plateau_step_requires_metric() {
-        let optimizer = MockOptimizer::new(vec![0.1]);
-        let mut scheduler = ReduceLROnPlateau::new(optimizer, ReduceLROnPlateauMode::Min, None, None, None, None, None, None, None);
-        let result = scheduler.step(None, None);
-        assert!(result.is_err());
-        match result {
-            Err(NeuraRustError::ConfigurationError(msg)) => {
-                assert!(msg.contains("requires a metric value"));
-            }
-            _ => panic!("Expected ConfigurationError"),
-        }
-    }
-
-    #[test]
-    fn test_reduce_lr_plateau_min_lr_clamp() -> Result<(), NeuraRustError> {
-        // Test spécifiquement le plafonnement à min_lr
-        let optimizer = MockOptimizer::new(vec![0.0125]); // Start just above min_lr
-        let mut scheduler = ReduceLROnPlateau::new(
-            optimizer, // Passe par valeur, MockOptimizer implémente OptimizerInterface
-            ReduceLROnPlateauMode::Min,
-            Some(0.5),    // factor
-            Some(0),      // patience (reduce immediately on bad epoch)
-            Some(1e-4),   // threshold
-            None,         // threshold_mode (Rel)
-            Some(0),      // cooldown
-            Some(0.01),   // min_lr
-            Some(1e-9),   // eps (très petit)
-        );
-
-        // Simuler une première époque pour établir un "best"
-        scheduler.step(None, Some(10.0))?;
-        assert_eq!(scheduler.best, 10.0);
-        assert_eq!(scheduler.get_last_lr(), vec![0.0125]);
-
-        // Simuler une mauvaise époque, patience=0 -> réduction immédiate
-        // Expected: new_lr = (0.0125 * 0.5).max(0.01) = 0.00625.max(0.01) = 0.01
-        scheduler.step(None, Some(11.0))?;
-        let current_lr = scheduler.get_last_lr()[0];
-        assert!((current_lr - 0.01).abs() < 1e-7, "LR should clamp to 0.01");
-
-        // Simuler une autre mauvaise époque, devrait rester à min_lr
-        scheduler.step(None, Some(12.0))?;
-        let current_lr_after_clamp = scheduler.get_last_lr()[0];
-        assert!((current_lr_after_clamp - 0.01).abs() < 1e-7, "LR should stay clamped to 0.01");
-
-        Ok(())
-    }
-
-    // Supprimer ou modifier l'ancien test `test_reduce_lr_plateau_min_mode_decay`
-    // pour éviter la redondance ou la confusion.
-    // Pour l'instant, je le laisse mais il faudra peut-être le fusionner/supprimer.
-
-    // ... reste des tests ...
-} 
+#[path = "lr_scheduler_tests.rs"]
+mod tests; 
