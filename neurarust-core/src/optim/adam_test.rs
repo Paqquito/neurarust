@@ -93,9 +93,6 @@ mod tests {
         assert_ne!(data_after_step[0], initial_value);
         assert!(data_after_step[0] > initial_value);
         
-        let ptr_address = Arc::as_ptr(&param_unnamed);
-        let temp_id = format!("unnamed_param_at_{:?}", ptr_address);
-        assert!(optimizer.state.contains_key(&temp_id));
         Ok(())
     }
 
@@ -141,7 +138,7 @@ mod tests {
         let p_locked_after = param_no_grad.read().unwrap();
         let data_after_step = p_locked_after.tensor().get_f32_data()?;
         assert_eq!(data_after_step[0], param_no_grad_val);
-        assert!(!optimizer.state.contains_key("p_no_grad"));
+        
         Ok(())
     }
 

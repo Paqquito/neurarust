@@ -16,9 +16,13 @@ pub mod sgd;
 
 // Declare the new adam module
 pub mod adam;
+#[cfg(test)]
+mod adam_test;
 
 // Add these lines for RMSprop
 pub mod rmsprop;
+#[cfg(test)]
+mod rmsprop_test;
 
 // Re-export key items for easier access
 pub use optimizer_state::OptimizerState;

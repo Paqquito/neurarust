@@ -377,9 +377,9 @@
                 *   [✅] (Optional, if `centered`) Update denominator: `denom = sqrt(sq_avg - grad_avg^2 + eps)`.
                 *   [✅] (Else) Update denominator: `denom = sqrt(sq_avg + eps)`.
                 *   [✅] Parameter update: `p = p - lr * grad / denom`.
-                *   [✅] Implement momentum and [ ] weight decay if specified.
+                *   [✅] Implement momentum and [✅] weight decay if specified. (Weight decay logic is in, momentum field exists)
             *   [✅] Manage squared gradient average buffers (and optionally gradient average buffers) in optimizer state.
-            *   [ ] Add tests: basic step, momentum, weight decay, centered, state saving/loading.
+            *   [✅] Add tests: basic step, [ ] momentum, [✅] weight decay, [ ] centered, [ ] state saving/loading.
             *   [ ] Add `rustdoc`.
         *   **Step 2.A.5: (Optional) Implement Adagrad Optimizer**
             *   🎯 **Goal:** Implement the Adagrad optimizer.

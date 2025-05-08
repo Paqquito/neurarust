@@ -118,23 +118,16 @@ impl Optimizer for RmsPropOptimizer {
                 None => format!("unnamed_param_at_{:?}", Arc::as_ptr(&param_arc)),
             };
 
-            if param_locked.grad().is_none() {
+            if param_locked.grad().is_none() || !param_locked.requires_grad() {
                 continue;
             }
 
             let grad_tensor = param_locked.grad().as_ref().unwrap().clone();
             
-            let effective_grad = if self.weight_decay != 0.0 {
-                if self.iterations == 1 && param_locked.requires_grad() {
-                    eprintln!(
-                        "Warning: Weight decay (L2 penalty) for RMSprop is not fully implemented for param '{}'. Original gradient will be used.",
-                        param_name
-                    );
-                }
-                grad_tensor.clone()
-            } else {
-                grad_tensor.clone()
-            };
+            let param_data = &param_locked.tensor;
+            let wd_val_tensor = full_like_with_val(param_data, self.weight_decay)?;
+            let wd_term = mul_op(param_data, &wd_val_tensor)?;
+            let effective_grad = add_op(&grad_tensor, &wd_term)?;
 
             let state_entry = self.state.entry(param_name.clone()).or_insert_with(|| {
                 RmsPropParamState {
