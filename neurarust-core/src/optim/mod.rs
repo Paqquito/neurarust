@@ -48,4 +48,12 @@ pub use adagrad::AdagradOptimizer;
 #[cfg(test)]
 mod sgd_test;
 #[cfg(test)]
-mod adagrad_test; 
+mod adagrad_test;
+
+// Ajout du nouveau module
+pub mod lr_scheduler;
+
+// Exportation du trait LRScheduler
+pub use lr_scheduler::LRScheduler;
+// Décommenter si les traits placeholder doivent être accessibles globalement pour les tests initiaux
+// pub use lr_scheduler::{OptimizerInterface, ParamGroupInterface}; 

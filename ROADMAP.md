@@ -398,11 +398,11 @@
                 *   [ ] Decays LR of each parameter group by gamma every `step_size` epochs.
             *   [ ] Implement `MultiStepLR`: `new(optimizer, milestones, gamma)`.
                 *   [ ] Decays LR by gamma once the number of epoch reaches one of the milestones.
-            *   [ ] Implement `ReduceLROnPlateau`: `new(optimizer, mode, factor, patience, threshold, ...)`.
-                *   [ ] Reduces LR when a monitored metric has stopped improving.
+            *   [✅] Implement `ReduceLROnPlateau`: `new(optimizer, mode, factor, patience, threshold, ...)`.
+                *   [✅] Reduces LR when a monitored metric has stopped improving.
             *   [ ] Integrate LR schedulers with the training loop example.
-            *   [ ] Add tests for each scheduler policy and their interaction with optimizers.
-            *   [ ] Add `rustdoc`.
+            *   [ ] Add tests for each scheduler policy and their interaction with optimizers. (Partially for ReduceLROnPlateau)
+            *   [ ] Add `rustdoc`. (Partially for ReduceLROnPlateau)
         *   **Step 2.A.7: Parameter Groups Support in Optimizers**
             *   🎯 **Goal:** Allow different hyperparameters (e.g., learning rate, weight decay) for different sets of parameters.
             *   [ ] Refine optimizer constructors to accept `Vec<ParamGroup>` or an iterator of `Parameter`s that get grouped by default.
