@@ -18,7 +18,9 @@
 
 // Declare comparison operations
 pub mod equal;
+pub mod ge;
 // Add others like greater, less, etc. later
 
 // Re-export the operation functions
-pub use equal::equal_op; 
+pub use equal::equal_op;
+pub use ge::ge_op; 

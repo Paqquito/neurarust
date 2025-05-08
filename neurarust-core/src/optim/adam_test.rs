@@ -8,6 +8,7 @@ mod tests {
     use crate::optim::Optimizer;
     use crate::tensor::Tensor; 
     use std::sync::{Arc, RwLock};
+    use approx::assert_relative_eq;
 
     // Helper to create a named parameter for testing
     fn create_named_param(name: &str, data: Vec<f32>, shape: Vec<usize>) -> Arc<RwLock<Parameter>> {
@@ -160,6 +161,81 @@ mod tests {
 
         let p_locked_after = param.read().unwrap();
         assert!(p_locked_after.grad().is_none()); 
+        Ok(())
+    }
+
+    #[test]
+    fn test_amsgrad_logic() -> Result<(), NeuraRustError> {
+        let initial_value = 1.0f32;
+        let param_arc = create_named_param("p_amsgrad", vec![initial_value], vec![1]);
+
+        // Optimizer instances (these will maintain their own internal state across steps)
+        let mut optim_adam = AdamOptimizer::new(vec![param_arc.clone()], 0.1, 0.9, 0.9, 1e-8, 0.0, false)?;
+        let mut optim_amsgrad = AdamOptimizer::new(vec![param_arc.clone()], 0.1, 0.9, 0.9, 1e-8, 0.0, true)?; // amsgrad=true
+
+        // --- Helper to set param value ---
+        let set_param_value = |p_arc: &Arc<RwLock<Parameter>>, value: f32| -> Result<(), NeuraRustError> {
+            let mut p_guard = p_arc.write().unwrap();
+            let mut tensor_guard = p_guard.tensor_mut().write_data();
+            let buffer_mut = Arc::make_mut(&mut tensor_guard.buffer);
+            let data_slice_mut = buffer_mut.try_get_cpu_f32_mut()?;
+            if data_slice_mut.is_empty() {
+                return Err(NeuraRustError::ShapeMismatch { operation: "set_param_value".to_string(), expected: "non-empty slice".to_string(), actual: "empty slice".to_string() });
+            }
+            data_slice_mut[0] = value;
+            Ok(())
+        };
+        
+        // --- Helper to set grad ---
+        let set_grad_val = |p_arc: &Arc<RwLock<Parameter>>, grad_val: f32| -> Result<(), NeuraRustError> {
+            let mut p_locked = p_arc.write().unwrap();
+            let grad_tensor = Tensor::new(vec![grad_val], vec![1])?;
+            p_locked.tensor_mut().clear_grad();
+            p_locked.tensor_mut().acc_grad(grad_tensor)?;
+            Ok(())
+        };
+
+        // --- Step 1: High gradient ---
+        // Adam's Step 1
+        set_param_value(&param_arc, initial_value)?;
+        set_grad_val(&param_arc, 10.0)?;
+        optim_adam.step()?;
+        let val_after_adam_s1 = param_arc.read().unwrap().tensor().item_f32()?;
+
+        // AMSGrad's Step 1
+        set_param_value(&param_arc, initial_value)?;
+        set_grad_val(&param_arc, 10.0)?;
+        optim_amsgrad.step()?;
+        let val_after_amsgrad_s1 = param_arc.read().unwrap().tensor().item_f32()?;
+
+        assert_relative_eq!(val_after_adam_s1, val_after_amsgrad_s1, epsilon = 1e-6);
+        assert!(val_after_adam_s1 < initial_value, "Adam S1 should decrease value. Got: {}, Initial: {}", val_after_adam_s1, initial_value);
+
+        // --- Step 2: Low gradient ---
+        // Adam's Step 2 (starts from val_after_adam_s1)
+        set_param_value(&param_arc, val_after_adam_s1)?;
+        set_grad_val(&param_arc, 0.1)?;
+        optim_adam.step()?; // optim_adam uses its state from its step 1
+        let val_after_adam_s2 = param_arc.read().unwrap().tensor().item_f32()?;
+
+        // AMSGrad's Step 2 (starts from val_after_amsgrad_s1)
+        set_param_value(&param_arc, val_after_amsgrad_s1)?;
+        set_grad_val(&param_arc, 0.1)?;
+        optim_amsgrad.step()?; // optim_amsgrad uses its state from its step 1 (with v_max set)
+        let val_after_amsgrad_s2 = param_arc.read().unwrap().tensor().item_f32()?;
+
+        // --- Verification ---
+        let change_adam = val_after_adam_s2 - val_after_adam_s1;
+        let change_amsgrad = val_after_amsgrad_s2 - val_after_amsgrad_s1;
+
+        assert!(change_amsgrad > change_adam,
+                "AMSGrad change ({}) should be greater (less negative) than Adam change ({}). Adam S1: {}, AMSGrad S1: {}, Adam S2: {}, AMSGrad S2: {}",
+                change_amsgrad, change_adam, val_after_adam_s1, val_after_amsgrad_s1, val_after_adam_s2, val_after_amsgrad_s2);
+
+        assert!(val_after_amsgrad_s2 > val_after_adam_s2,
+                "AMSGrad final value ({}) should be greater than Adam final value ({}).",
+                val_after_amsgrad_s2, val_after_adam_s2);
+
         Ok(())
     }
 } 

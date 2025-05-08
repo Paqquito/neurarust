@@ -13,6 +13,7 @@ use crate::ops::arithmetic::add::add_op;
 use crate::ops::arithmetic::div::div_op;
 use crate::ops::arithmetic::mul::{mul_op, mul_op_scalar};
 use crate::ops::arithmetic::pow::pow_op;
+use crate::ops::arithmetic::max_elemwise::max_elemwise_op; // Import pour AMSGrad
 
 /// Represents the state for a single parameter in the Adam optimizer.
 #[derive(Default, Clone, Debug)]
@@ -21,6 +22,8 @@ struct AdamState {
     m: Option<Tensor>,
     /// Second moment vector (exponential moving average of squared gradients).
     v: Option<Tensor>,
+    /// Maximum value of v_hat seen so far (for AMSGrad).
+    v_max: Option<Tensor>, 
 }
 
 /// Adam and AdamW Optimizer.
@@ -213,15 +216,27 @@ impl Optimizer for AdamOptimizer {
                  }
             };
 
+            // --- AMSGrad Logic --- 
+            let v_hat_for_update = if self.amsgrad {
+                let v_max_prev = state_entry.v_max.clone().unwrap_or_else(|| v_hat.clone()); // Use v_hat if v_max is None
+                
+                let v_max_t = max_elemwise_op(&v_max_prev, &v_hat)?; 
+                
+                state_entry.v_max = Some(v_max_t.clone()); // Store the new max
+                v_max_t // Use this for the denominator calculation
+            } else {
+                v_hat // Standard Adam: use v_hat directly
+            };
+
             // sqrt_v_hat = v_hat ^ 0.5
             let sqrt_v_hat = match param_dtype {
                  DType::F32 => {
                     let exponent_tensor = full(&[], 0.5f32)?;
-                    pow_op(&v_hat, &exponent_tensor)?
+                    pow_op(&v_hat_for_update, &exponent_tensor)?
                  },
                  DType::F64 => {
                     let exponent_tensor = full_f64(&[], 0.5f64)?;
-                    pow_op(&v_hat, &exponent_tensor)?
+                    pow_op(&v_hat_for_update, &exponent_tensor)?
                  }
             };
             

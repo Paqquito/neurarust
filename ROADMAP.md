@@ -363,7 +363,7 @@
                 *   [✅] Compute bias-corrected second raw moment estimate (`v_hat_t`).
                 *   [✅] Update parameters: `p = p - lr * m_hat_t / (sqrt(v_hat_t) + eps)`.
                 *   [✅] Implement AdamW variant (decoupled weight decay: `p = p * (1 - lr * weight_decay)` applied *before* main Adam update, or directly applied to parameter outside gradient modification). (Implemented by direct application to parameter)
-                *   [ ] (Optional) Implement AMSGrad variant. (Field present, logic TBD)
+                *   [✅] (Optional) Implement AMSGrad variant. (Field present, logic TBD) // Logic and tests are now complete
             *   [✅] Manage first and second moment buffers (`m` and `v` per parameter) and step counter in optimizer state.
             *   [✅] Add tests: basic Adam step, bias correction, weight decay (AdamW), state saving/loading. (Core Adam logic tested; state_dict TBD)
             *   [✅] Add `rustdoc`. (Basic doc comments added, formal rustdoc pass can follow)
