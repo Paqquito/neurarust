@@ -246,5 +246,13 @@ pub enum NeuraRustError {
     #[error("{0}")]
     ArithmeticError(String),
 
+    /// Error related to optimizer configuration or state.
+    #[error("Optimizer error: {0}")]
+    OptimizerError(String),
+
+    /// Error related to invalid configuration parameters.
+    #[error("Configuration error: {0}")]
+    ConfigurationError(String),
+
     // Add more specific errors as needed
 }

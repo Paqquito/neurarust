@@ -101,10 +101,14 @@
 │   │   │       ├── transpose_test.rs
 │   │   │       └── utils.rs
 │   │   ├── optim
+│   │   │   ├── adam.rs
+│   │   │   ├── adam_test.rs
 │   │   │   ├── mod.rs
 │   │   │   ├── optimizer_state.rs
 │   │   │   ├── optimizer_trait.rs
-│   │   │   └── param_group.rs
+│   │   │   ├── param_group.rs
+│   │   │   ├── sgd.rs
+│   │   │   └── sgd_test.rs
 │   │   ├── tensor
 │   │   │   ├── accessors.rs
 │   │   │   ├── autograd_methods.rs
@@ -165,4 +169,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-25 directories, 141 files
+25 directories, 145 files
