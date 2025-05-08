@@ -341,17 +341,17 @@
             *   [✅] Add `rustdoc` for the trait and supporting structs.
         *   **Step 2.A.2: Implement SGD Optimizer**
             *   🎯 **Goal:** Implement the Stochastic Gradient Descent optimizer with common features.
-            *   [ ] Create `struct SgdOptimizer` implementing `Optimizer`.
-            *   [ ] Constructor: `new(params: impl Iterator<Item = Arc<Mutex<Parameter>>>, lr: f32, momentum: f32, weight_decay: f32, nesterov: bool)`.
-            *   [ ] Implement `step()` logic:
-                *   [ ] Basic gradient descent: `p = p - lr * grad`.
-                *   [ ] Momentum: `buf = momentum * buf + grad; p = p - lr * buf`.
-                *   [ ] Weight decay (L2 penalty): `grad = grad + weight_decay * p` before other updates.
-                *   [ ] Nesterov momentum: `grad_adjusted = grad + momentum * buf; p = p - lr * grad_adjusted` (requires careful handling of `buf` update).
-            *   [ ] Implement `zero_grad()` by iterating through parameters and calling `param.clear_grad()`.
-            *   [ ] Manage momentum buffers (one per parameter, stored in optimizer state).
-            *   [ ] Add tests: basic step, momentum, weight decay, Nesterov, state saving/loading.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Create `struct SgdOptimizer` implementing `Optimizer`.
+            *   [✅] Constructor: `new(params: impl Iterator<Item = Arc<Mutex<Parameter>>>, lr: f32, momentum: f32, weight_decay: f32, nesterov: bool)`.
+            *   [✅] Implement `step()` logic:
+                *   [✅] Basic gradient descent: `p = p - lr * grad`.
+                *   [✅] Momentum: `buf = momentum * buf + grad; p = p - lr * buf`.
+                *   [✅] Weight decay (L2 penalty): `grad = grad + weight_decay * p` before other updates.
+                *   [✅] Nesterov momentum: `grad_adjusted = grad + momentum * buf; p = p - lr * grad_adjusted` (requires careful handling of `buf` update).
+            *   [✅] Implement `zero_grad()` by iterating through parameters and calling `param.clear_grad()`.
+            *   [✅] Manage momentum buffers (one per parameter, stored in optimizer state).
+            *   [✅] Add tests: basic step, momentum, weight decay, Nesterov, state saving/loading.
+            *   [✅] Add `rustdoc`.
         *   **Step 2.A.3: Implement Adam/AdamW Optimizer**
             *   🎯 **Goal:** Implement the Adam and AdamW optimizers.
             *   [ ] Create `struct AdamOptimizer` implementing `Optimizer`.

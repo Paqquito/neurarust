@@ -23,6 +23,10 @@ rand_distr = "0.4" # For specific random distributions (randn)
 # Keep approx here too if tests directly use it
 # approx = "0.5"
 
+[features]
+default = []
+gpu = [] # Déclare la fonctionnalité 'gpu'
+
 [[example]]
 name = "basic_mlp_cpu"
 path = "../examples/basic_mlp_cpu.rs"

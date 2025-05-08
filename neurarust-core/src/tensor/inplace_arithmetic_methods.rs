@@ -6,6 +6,7 @@ use crate::{
     // tensor::iter_utils::{NdArrayBroadcastingIter, NdArrayBroadcastingIterF64}, // Unused
     // tensor::utils::{broadcast_shapes, index_to_coord}, // Unused
     ops::traits::numeric::NeuraNumeric,
+    buffer::{Buffer, CpuBuffer}, // Correct import for Buffer types
     // super::inplace_ops::{
     //     add::add_impl,
     //     add_scalar::add_scalar_impl,
@@ -19,7 +20,7 @@ use crate::{
     //     sub_scalar::sub_scalar_impl,
     // },
 };
-// use std::sync::Arc; // Unused
+use std::sync::Arc; // Unused
 // use std::ops::{Deref, DerefMut}; // Unused
 
 // The module `inplace_ops` is declared in `tensor/mod.rs`
@@ -688,6 +689,167 @@ impl Tensor {
         crate::tensor::inplace_ops::fill::perform_fill_inplace(self, value)?;
 
         Ok(self)
+    }
+
+    /// Performs an in-place subtraction of another tensor from this tensor, 
+    /// **without** autograd checks. For optimizer use.
+    /// Implements Copy-on-Write (CoW) if the underlying buffer is shared.
+    /// 
+    /// `self = self - other`
+    /// Both tensors must be contiguous and have the same data type and shape.
+    /// 
+    /// # Arguments
+    /// * `other`: The tensor to subtract from this tensor.
+    /// 
+    /// # Errors
+    /// Returns `NeuraRustError` if tensors are not contiguous, or if data types or shapes mismatch.
+    pub fn direct_sub_inplace(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
+        if !self.is_contiguous() || !other.is_contiguous() {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "direct_sub_inplace requires both tensors to be contiguous.".to_string(),
+            ));
+        }
+
+        if self.dtype() != other.dtype() {
+            return Err(NeuraRustError::DataTypeMismatch {
+                expected: self.dtype(),
+                actual: other.dtype(),
+                operation: "direct_sub_inplace".to_string(),
+            });
+        }
+
+        if self.shape() != other.shape() {
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: format!("{:?}", self.shape()),
+                actual: format!("{:?}", other.shape()),
+                operation: "direct_sub_inplace".to_string(),
+            });
+        }
+
+        let mut self_tensor_data_guard = self.data.write().map_err(|e| NeuraRustError::LockError { 
+            lock_type: "write".to_string(), 
+            reason: format!("Failed to lock self.data in direct_sub_inplace: {}", e) 
+        })?;
+
+        let other_tensor_data_guard = other.data.read().map_err(|e| NeuraRustError::LockError { 
+            lock_type: "read".to_string(), 
+            reason: format!("Failed to lock other.data in direct_sub_inplace: {}", e) 
+        })?;
+        
+        let self_buffer_internal_mut = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+        let other_buffer_ref = &*other_tensor_data_guard.buffer;
+
+        match (self_buffer_internal_mut, other_buffer_ref) {
+            (Buffer::Cpu(self_cpu_buf), Buffer::Cpu(other_cpu_buf)) => {
+                match (self_cpu_buf, other_cpu_buf) {
+                    (CpuBuffer::F32(self_f32_arc), CpuBuffer::F32(other_f32_arc)) => {
+                        let self_vec_mut = Arc::make_mut(self_f32_arc);
+                        let other_vec = &**other_f32_arc;
+                        for (s_val, o_val) in self_vec_mut.iter_mut().zip(other_vec.iter()) {
+                            *s_val -= *o_val;
+                        }
+                    }
+                    (CpuBuffer::F64(self_f64_arc), CpuBuffer::F64(other_f64_arc)) => {
+                        let self_vec_mut = Arc::make_mut(self_f64_arc);
+                        let other_vec = &**other_f64_arc;
+                        for (s_val, o_val) in self_vec_mut.iter_mut().zip(other_vec.iter()) {
+                            *s_val -= *o_val;
+                        }
+                    }
+                    _ => return Err(NeuraRustError::DataTypeMismatch {
+                        expected: self.dtype(),
+                        actual: other.dtype(),
+                        operation: "direct_sub_inplace CPU buffer type mismatch".to_string(),
+                    }),
+                }
+            }
+            #[cfg(feature = "gpu")]
+            (Buffer::Gpu(self_gpu_buf), Buffer::Gpu(other_gpu_buf)) => {
+                // ... GPU implementation ...
+            }
+            #[cfg(feature = "gpu")]
+            (Buffer::Gpu {..}, _) | (_, Buffer::Gpu {..}) => {
+                return Err(NeuraRustError::MixedDeviceOperation(
+                    "In-place operations require tensors to be on the same device.".to_string(),
+                ));
+            }
+            _ => unreachable!("Unsupported buffer combination reached in direct_sub_inplace"),
+        }
+        Ok(())
+    }
+
+    /// Performs an in-place scalar multiplication, **without** autograd checks.
+    /// Implements Copy-on-Write (CoW).
+    pub fn direct_mul_scalar_f32_inplace(&mut self, scalar: f32) -> Result<(), NeuraRustError> {
+        if !self.is_contiguous() {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "direct_mul_scalar_f32_inplace requires the tensor to be contiguous.".to_string(),
+            ));
+        }
+        if self.dtype() != DType::F32 {
+            return Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: self.dtype(),
+                operation: "direct_mul_scalar_f32_inplace".to_string(),
+            });
+        }
+
+        let mut self_tensor_data_guard = self.data.write().map_err(|e| NeuraRustError::LockError { 
+            lock_type: "write".to_string(), 
+            reason: format!("Failed to lock self.data in direct_mul_scalar_f32_inplace: {}", e) 
+        })?;
+
+        let self_buffer_internal_mut = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+
+        match self_buffer_internal_mut {
+            Buffer::Cpu(CpuBuffer::F32(self_f32_arc)) => {
+                let self_vec_mut = Arc::make_mut(self_f32_arc);
+                for val in self_vec_mut.iter_mut() {
+                    *val *= scalar;
+                }
+            }
+            _ => return Err(NeuraRustError::InternalError(
+                "Buffer type mismatch in direct_mul_scalar_f32_inplace despite dtype check.".to_string()
+            )),
+        }
+        Ok(())
+    }
+
+    /// Performs an in-place scalar multiplication, **without** autograd checks.
+    /// Implements Copy-on-Write (CoW).
+    pub fn direct_mul_scalar_f64_inplace(&mut self, scalar: f64) -> Result<(), NeuraRustError> {
+        if !self.is_contiguous() {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "direct_mul_scalar_f64_inplace requires the tensor to be contiguous.".to_string(),
+            ));
+        }
+        if self.dtype() != DType::F64 {
+            return Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: self.dtype(),
+                operation: "direct_mul_scalar_f64_inplace".to_string(),
+            });
+        }
+
+        let mut self_tensor_data_guard = self.data.write().map_err(|e| NeuraRustError::LockError { 
+            lock_type: "write".to_string(), 
+            reason: format!("Failed to lock self.data in direct_mul_scalar_f64_inplace: {}", e) 
+        })?;
+
+        let self_buffer_internal_mut = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+
+        match self_buffer_internal_mut {
+            Buffer::Cpu(CpuBuffer::F64(self_f64_arc)) => {
+                let self_vec_mut = Arc::make_mut(self_f64_arc);
+                for val in self_vec_mut.iter_mut() {
+                    *val *= scalar;
+                }
+            }
+            _ => return Err(NeuraRustError::InternalError(
+                "Buffer type mismatch in direct_mul_scalar_f64_inplace despite dtype check.".to_string()
+            )),
+        }
+        Ok(())
     }
 }
 

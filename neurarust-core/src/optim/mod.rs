@@ -11,7 +11,17 @@ pub mod optimizer_state;
 pub mod param_group;
 pub mod optimizer_trait;
 
+// Declare the new sgd module
+pub mod sgd;
+
 // Re-export key items for easier access
 pub use optimizer_state::OptimizerState;
 pub use param_group::ParamGroup;
-pub use optimizer_trait::Optimizer; 
+pub use optimizer_trait::Optimizer;
+
+// Re-export SgdOptimizer
+pub use sgd::SgdOptimizer;
+
+// Declare test module conditionally
+#[cfg(test)]
+mod sgd_test; 
