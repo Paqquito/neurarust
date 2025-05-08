@@ -24,6 +24,9 @@ pub mod rmsprop;
 #[cfg(test)]
 mod rmsprop_test;
 
+// Add this line for Adagrad
+pub mod adagrad;
+
 // Re-export key items for easier access
 pub use optimizer_state::OptimizerState;
 pub use param_group::ParamGroup;
@@ -36,8 +39,13 @@ pub use sgd::SgdOptimizer;
 pub use adam::AdamOptimizer;
 
 // Add this line for RMSprop
-pub use rmsprop::*;
+pub use rmsprop::RmsPropOptimizer;
+
+// Add this line for Adagrad
+pub use adagrad::AdagradOptimizer;
 
 // Declare test module conditionally
 #[cfg(test)]
-mod sgd_test; 
+mod sgd_test;
+#[cfg(test)]
+mod adagrad_test; 

@@ -103,6 +103,8 @@
 │   │   │       ├── transpose_test.rs
 │   │   │       └── utils.rs
 │   │   ├── optim
+│   │   │   ├── adagrad.rs
+│   │   │   ├── adagrad_test.rs
 │   │   │   ├── adam.rs
 │   │   │   ├── adam_test.rs
 │   │   │   ├── mod.rs
@@ -173,4 +175,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-25 directories, 149 files
+25 directories, 151 files
