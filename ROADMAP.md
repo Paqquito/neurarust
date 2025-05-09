@@ -451,14 +451,14 @@
             *   [✅] Add `rustdoc`.
         *   **Step 2.B.3: Implement `TensorDataset`**
             *   🎯 **Goal:** A dataset for one or more tensors, where the first dimension is the batch dimension.
-            *   [ ] Create `struct TensorDataset` implementing `Dataset`.
-                *   [ ] `Item` type would be `Vec<Tensor>` (one slice from each input tensor).
-            *   [ ] Constructor: `new(tensors: Vec<Tensor>)`.
-                *   [ ] Validate that all input tensors have the same length in their first dimension.
-            *   [ ] Implement `get` to return a `Vec<Tensor>` where each tensor is a slice of the original tensors at the given index (using `Tensor::slice` or a similar mechanism to get the i-th item along dim 0).
-            *   [ ] Implement `len` based on the first dimension of the input tensors.
-            *   [ ] Add tests: creation with single/multiple tensors, validation of lengths, `get` correctness (shape and data of slices), `len`.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Create `struct TensorDataset` implementing `Dataset`.
+                *   [✅] `Item` type would be `Vec<Tensor>` (one slice from each input tensor).
+            *   [✅] Constructor: `new(tensors: Vec<Tensor>)`.
+                *   [✅] Validate that all input tensors have the same length in their first dimension.
+            *   [✅] Implement `get` to return a `Vec<Tensor>` where each tensor is a slice of the original tensors at the given index (using `Tensor::slice` or a similar mechanism to get the i-th item along dim 0).
+            *   [✅] Implement `len` based on the first dimension of the input tensors.
+            *   [✅] Add tests: creation with single/multiple tensors, validation of lengths, `get` correctness (shape and data of slices), `len`.
+            *   [✅] Add `rustdoc`.
         *   **Step 2.B.4: Define `Sampler` Trait and Basic Samplers**
             *   🎯 **Goal:** Abstract index generation for `DataLoader` to allow custom sampling strategies.
             *   [ ] Define `trait Sampler: Send + Sync`:
