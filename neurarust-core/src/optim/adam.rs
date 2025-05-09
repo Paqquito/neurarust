@@ -115,14 +115,18 @@ impl Optimizer for AdamOptimizer {
                 if param_locked.grad().is_none() { continue; }
                 let grad = param_locked.grad().as_ref().unwrap().clone(); 
                 let param_dtype = grad.dtype();
-                let param_name = param_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_{:?}", Arc::as_ptr(param_arc)));
+                
+                // Utiliser le nom du paramètre pour l'affichage/debug s'il existe, sinon un ID.
+                let _display_name = param_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_param_at_{:p}", Arc::as_ptr(param_arc)));
+                // Utiliser l'adresse du Arc comme clé unique pour l'état de l'optimiseur.
+                let state_key = format!("{:p}", Arc::as_ptr(param_arc));
                 
                 let mut grad_decayed = grad.clone();
                 if weight_decay != 0.0 {
                     grad_decayed = add_op(&grad_decayed, &mul_op_scalar(&param_locked.tensor, weight_decay)?)?;
                 }
                 
-                let state_entry = self.state.entry(param_name.clone()).or_insert_with(AdamParamState::default);
+                let state_entry = self.state.entry(state_key.clone()).or_insert_with(AdamParamState::default);
     
                 let m_prev = state_entry.m.clone().unwrap_or_else(|| zeros_like(&grad_decayed).unwrap());
                 let term1_m = mul_op_scalar(&m_prev, beta1)?;
@@ -167,8 +171,12 @@ impl Optimizer for AdamOptimizer {
                 
                 let update_num = mul_op_scalar(&m_hat, lr)?;
                 let update = div_op(&update_num, &denom)?;
+
     
-                let update_inplace = crate::ops::arithmetic::neg::neg_op(&update)?;
+                let contiguous_update = update.contiguous()?;
+
+                
+                let update_inplace = crate::ops::arithmetic::neg::neg_op(&contiguous_update)?;
                 
                 let current_tensor = param_locked.tensor.clone();
                 let updated_tensor = add_op(&current_tensor, &update_inplace)?;

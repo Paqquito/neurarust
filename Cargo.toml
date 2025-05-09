@@ -18,3 +18,8 @@ resolver = "2"
 # [features]
 # default = ["neurarust-core/default"]
 # cuda = ["neurarust-core/cuda"] # Example of propagating a feature
+
+# Les sections [[example]] ont été supprimées car non autorisées dans un manifeste virtuel.
+# Cargo découvrira automatiquement les exemples dans le dossier `examples/`.
+
+# Pour les futurs exemples GPU (décommenter et ajuster)

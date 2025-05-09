@@ -42,15 +42,29 @@ impl Tensor {
     ///
     /// # Errors
     /// Returns `NeuraRustError::LockError` if the internal lock cannot be acquired.
-    pub fn set_requires_grad(&self, requires_grad: bool) -> Result<(), NeuraRustError> {
+    pub fn set_requires_grad(&self, requires_grad_arg: bool) -> Result<(), NeuraRustError> {
         let mut guard = self.data.write().map_err(|_| NeuraRustError::LockError {
             lock_type: "write".to_string(),
             reason: "Failed to lock TensorData for set_requires_grad".to_string(),
         })?;
-        if requires_grad && guard.grad_fn.is_some() {
-            eprintln!("Warning: Setting requires_grad=true on a non-leaf tensor. Gradients will not accumulate here during backward(). Did you mean to use .detach()?");
+
+        // Only warn if we are changing requires_grad from false to true on a non-leaf tensor.
+        // If it's a non-leaf tensor that already requires_grad, a redundant call to set_requires_grad(true)
+        // will not trigger the warning.
+        if guard.grad_fn.is_some() && requires_grad_arg && !guard.requires_grad {
+            eprintln!(
+                "Warning: Setting requires_grad=true on a non-leaf tensor that previously did not require grad. \
+                 Gradients may not accumulate as expected for this tensor during backward(). \
+                 Consider using .detach() if you intend to create a new leaf tensor, \
+                 or ensure this tensor is a leaf if it's a parameter."
+            );
         }
-        guard.requires_grad = requires_grad;
+
+        guard.requires_grad = requires_grad_arg;
+        // If a tensor no longer requires grad, its current grad (if any) should be cleared.
+        if !requires_grad_arg {
+            guard.grad = None;
+        }
         Ok(())
     }
 

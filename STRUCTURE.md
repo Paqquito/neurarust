@@ -3,16 +3,17 @@
 ├── Cargo.toml
 ├── CODE_OF_CONDUCT.md
 ├── CONTRIBUTING.md
-├── examples
-│   ├── basic_mlp_cpu_inplace_optim.rs
-│   ├── basic_mlp_cpu_manual_inplace.rs
-│   ├── basic_mlp_cpu_param_groups.rs
-│   └── basic_mlp_cpu.rs
 ├── Goals copy.md
 ├── Goals.md
 ├── LICENSE
 ├── neurarust-core
 │   ├── Cargo.toml
+│   ├── examples
+│   │   ├── advanced_training_techniques.rs
+│   │   ├── basic_mlp_cpu_inplace_optim.rs
+│   │   ├── basic_mlp_cpu_manual_inplace.rs
+│   │   ├── basic_mlp_cpu_param_groups.rs
+│   │   └── basic_mlp_cpu.rs
 │   ├── src
 │   │   ├── autograd
 │   │   │   ├── backward_op.rs
@@ -185,4 +186,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-26 directories, 160 files
+26 directories, 161 files

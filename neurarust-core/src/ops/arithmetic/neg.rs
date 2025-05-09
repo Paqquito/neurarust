@@ -34,7 +34,8 @@ impl BackwardOp for NegBackward {
     ///
     /// This method simply negates the incoming gradient (`grad_output`).
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        let input_grad = neg_op(grad_output)?; // Reuse neg_op
+        let contiguous_grad_output = grad_output.contiguous()?;
+        let input_grad = neg_op(&contiguous_grad_output)?;
         Ok(vec![input_grad])
     }
 
@@ -72,77 +73,98 @@ fn neg_kernel<T: NeuraNumeric>(input_data: &[T]) -> Vec<T> {
 /// - The tensor is not on the CPU (`DeviceMismatch`).
 /// - The tensor's `DType` is not F32 or F64 (`UnsupportedOperation`).
 /// - An internal error occurs.
-pub fn neg_op(input: &Tensor) -> Result<Tensor, NeuraRustError> {
-    let input_guard = input.read_data();
-
-    // --- Get autograd context --- 
-    let requires_grad = input_guard.requires_grad;
-    // Clone the Arc needed for the backward pass *before* dropping the guard
-    let input_data_arc_opt = if requires_grad { 
-        Some(Arc::clone(&input.data)) // Clone the Arc from the input Tensor
-    } else { 
-        None 
-    };
-
-    // --- Forward Computation --- 
-    // Check device
-    if input_guard.device != StorageDevice::CPU {
-        return Err(NeuraRustError::DeviceMismatch {
-            operation: "neg_op".to_string(),
-            expected: StorageDevice::CPU,
-            actual: input_guard.device, 
-        });
-    }
-
-    // Check contiguity (required for simple buffer access via offset/numel)
-    if !input_guard.is_contiguous() {
+pub fn neg_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
+    if !a.is_contiguous() {
         return Err(NeuraRustError::UnsupportedOperation(format!(
-            "neg_op (refactored) currently requires contiguous input tensor. Found strides: {:?}", 
-            input_guard.strides
+            "neg_op requires contiguous input tensor. Found strides: {:?} for shape {:?}",
+            a.strides(), a.shape()
         )));
     }
 
-    // Prepare shape and buffer details from guard
-    let output_shape = input_guard.shape.clone();
-    let offset = input_guard.offset;
-    let numel = input_guard.numel(); // Safe because we checked for contiguity
-    let buffer_arc = Arc::clone(input_guard.buffer()); // Clone Arc to buffer
+    let a_data_guard = a.data.read().map_err(|e| NeuraRustError::LockError {
+        lock_type: "read".to_string(),
+        reason: format!("Failed to lock tensor data in neg_op: {}", e),
+    })?;
 
-    // Match DType and compute
-    let output_tensor = match input_guard.dtype {
+    if a_data_guard.device != StorageDevice::CPU {
+        return Err(NeuraRustError::DeviceMismatch {
+            operation: "neg_op".to_string(),
+            expected: StorageDevice::CPU,
+            actual: a_data_guard.device,
+        });
+    }
+    
+    let output_shape = a_data_guard.shape.clone();
+    let offset = a_data_guard.offset;
+    let numel: usize = output_shape.iter().product();
+
+    let new_data_buffer: Buffer = match a_data_guard.dtype {
         DType::F32 => {
-            match &*buffer_arc {
+            match &*a_data_guard.buffer {
                 Buffer::Cpu(CpuBuffer::F32(data_arc)) => {
-                    let data_slice = &data_arc[offset .. offset + numel];
-                    let output_data = neg_kernel::<f32>(data_slice);
-                    Tensor::new(output_data, output_shape)?
+                    if offset + numel > data_arc.len() {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "neg_op F32: offset + numel ({}+{}={}) exceeds buffer len ({}) for shape {:?} and strides {:?}",
+                            offset, numel, offset + numel, data_arc.len(), &output_shape, a.strides()
+                        )));
+                    }
+                    let data_slice = &data_arc[offset..offset + numel];
+                    Buffer::Cpu(CpuBuffer::F32(neg_kernel::<f32>(data_slice).into()))
                 }
                 _ => return Err(NeuraRustError::InternalError("Buffer type mismatch for F32 DType in neg_op".to_string())),
             }
         }
         DType::F64 => {
-             match &*buffer_arc {
+            match &*a_data_guard.buffer {
                 Buffer::Cpu(CpuBuffer::F64(data_arc)) => {
-                    let data_slice = &data_arc[offset .. offset + numel];
-                    let output_data = neg_kernel::<f64>(data_slice);
-                    Tensor::new_f64(output_data, output_shape)?
+                     if offset + numel > data_arc.len() {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "neg_op F64: offset + numel ({}+{}={}) exceeds buffer len ({}) for shape {:?} and strides {:?}",
+                            offset, numel, offset + numel, data_arc.len(), &output_shape, a.strides()
+                        )));
+                    }
+                    let data_slice = &data_arc[offset..offset + numel];
+                    Buffer::Cpu(CpuBuffer::F64(neg_kernel::<f64>(data_slice).into()))
                 }
                 _ => return Err(NeuraRustError::InternalError("Buffer type mismatch for F64 DType in neg_op".to_string())),
             }
         }
     };
     
-    // Drop the read guard explicitly *after* extracting all needed info
-    drop(input_guard); 
+    let new_strides = if output_shape.is_empty() {
+        vec![]
+    } else {
+        let mut strides = vec![0; output_shape.len()];
+        strides[output_shape.len() - 1] = 1;
+        for i in (0..output_shape.len() - 1).rev() {
+            strides[i] = strides[i + 1] * output_shape[i + 1];
+        }
+        strides
+    };
 
-    // --- Autograd Handling ---
-    if requires_grad {
-        let grad_fn = NegBackward { a_node: input_data_arc_opt }; // Pass the cloned Arc
-        // Call set_grad_fn with only the grad_fn Arc
+    let new_tensor_data = TensorData {
+        buffer: Arc::new(new_data_buffer),
+        shape: output_shape.clone(),
+        strides: new_strides,
+        offset: 0,
+        dtype: a_data_guard.dtype,
+        device: a_data_guard.device,
+        requires_grad: a.requires_grad(),
+        grad: None,
+        grad_fn: None,
+    };
+
+    let output_tensor = Tensor {
+        data: Arc::new(RwLock::new(new_tensor_data)),
+    };
+
+    if a.requires_grad() {
+        let grad_fn = NegBackward { a_node: Some(Arc::clone(&a.data)) };
         output_tensor.set_grad_fn(Some(Arc::new(grad_fn)))?;
-        // Explicitly set requires_grad on the output tensor
-        output_tensor.set_requires_grad(true)?; 
+        output_tensor.set_requires_grad(true)?;
     }
+    
+    drop(a_data_guard);
 
     Ok(output_tensor)
 }

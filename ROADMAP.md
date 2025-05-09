@@ -423,14 +423,14 @@
             *   [✅] Add `rustdoc` and usage examples (e.g., in training loop comments). // rustdoc added, examples for 2.A.9
         *   **Step 2.A.9: Create Optimizer and Scheduler Example**
             *   🎯 **Goal:** Demonstrate the usage of various optimizers, LR schedulers, and gradient clipping in a training context.
-            *   [ ] Create a new example file (e.g., `examples/advanced_training_techniques.rs`).
-            *   [ ] Adapt the `SimpleMLP` model or a similar small model.
-            *   [ ] Demonstrate usage of SGD and Adam/AdamW.
-            *   [ ] Demonstrate usage of at least one LR Scheduler (e.g., `StepLR`).
-            *   [ ] Demonstrate usage of gradient clipping (`clip_grad_norm_`).
-            *   [ ] Show how to configure parameter groups with different learning rates.
-            *   [ ] Ensure the example runs and shows loss decreasing or a similar success metric.
-            *   [ ] Add to `Cargo.toml` and document the example.
+            *   [✅] Create a new example file (e.g., `examples/advanced_training_techniques.rs`).
+            *   [✅] Adapt the `SimpleMLP` model or a similar small model.
+            *   [✅] Demonstrate usage of SGD and Adam/AdamW.
+            *   [✅] Demonstrate usage of at least one LR Scheduler (e.g., `StepLR`).
+            *   [✅] Demonstrate usage of gradient clipping (`clip_grad_norm_`).
+            *   [✅] Show how to configure parameter groups with different learning rates.
+            *   [✅] Ensure the example runs and shows loss decreasing or a similar success metric.
+            *   [✅] Add to `Cargo.toml` and document the example.
 
 *   **Sub-Phase 2.B: Data Loading (`neurarust-data` or dedicated module in core):**
     *   🎯 **Goal:** Implement basic data loading, batching, and shuffling capabilities with flexible sampling.
