@@ -410,7 +410,7 @@
             *   [✅] Ensure `step()` and `zero_grad()` iterate through all parameter groups and apply respective hyperparameters.
             *   [✅] Ensure LR Schedulers can handle multiple parameter groups, adjusting LRs accordingly.
             *   [✅] Add tests for optimizers and schedulers with multiple parameter groups. (Tested for SGD, Adagrad)
-            *   [ ] Update training loop example to demonstrate usage of parameter groups (e.g., different LR for biases).
+            *   [✅] Update training loop example to demonstrate usage of parameter groups (e.g., different LR for biases).
         *   **Step 2.A.8: Gradient Clipping Utilities**
             *   🎯 **Goal:** Provide functions to clip parameter gradients to stabilize training.
             *   [ ] Implement `clip_grad_value_(parameters: impl Iterator<Item = &mut Parameter>, clip_value: f32)`.

@@ -245,9 +245,8 @@ fn main() -> Result<(), NeuraRustError> {
         let y_pred = mlp.forward(&x_data)?;
         let loss = loss_fn.calculate(&y_pred, &y_data)?;
         
-        if epoch % 2 == 0 || epoch == num_epochs - 1 {
-            println!("Epoch: {}, Loss: {:?}", epoch, loss.get_f32_data()?);
-        }
+        // Affichage à chaque epoch
+        println!("Epoch: {}, Loss: {:?}", epoch, loss.get_f32_data()?);
 
         // --- Remise à zéro des gradients avant la passe arrière ---
         // mlp.parameters() retourne Vec<Arc<RwLock<Parameter>>>

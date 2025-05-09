@@ -36,3 +36,18 @@ required-features = [] # Ensure it can be run without special features for now
 name = "basic_mlp_cpu_inplace_optim"
 path = "../examples/basic_mlp_cpu_inplace_optim.rs"
 required-features = []
+
+[[example]]
+name = "basic_mlp_cpu_param_groups"
+path = "../examples/basic_mlp_cpu_param_groups.rs"
+
+[[example]]
+name = "basic_mlp_cpu_manual_inplace"
+path = "../examples/basic_mlp_cpu_manual_inplace.rs"
+required-features = []
+
+# Potential future examples for neurarust-core (if they primarily use core features)
+# Note: Paths would be relative to neurarust-core, so e.g., "../../examples/new_core_example.rs"
+# [[example]]
+# name = "new_core_example"
+# path = "../examples/new_core_example.rs"

@@ -128,22 +128,20 @@ fn main() -> Result<(), NeuraRustError> {
         // Mettre à jour le learning rate
         scheduler.step(Some(epoch as u64), None)?;
 
-        // Afficher la perte et le LR 
-        if (epoch + 1) % 2 == 0 {
-            let current_lr = scheduler.get_last_lr(); 
-            match loss.item_f32() { // Utiliser item_f32 pour obtenir Result<f32>
-                Ok(loss_value) => {
-                    println!(
-                        "Epoch [{}/{}], Loss: {:.4}, LR: {:?}", // Utiliser {:.4} ou :? pour f32
-                        epoch + 1,
-                        num_epochs,
-                        loss_value, // Pas besoin de .unwrap() ici, le format :? fonctionne
-                        current_lr
-                    );
-                },
-                Err(e) => {
-                    eprintln!("Impossible d'extraire la valeur de la perte à l'epoch {}: {:?}. Shape de la perte: {:?}", epoch, e, loss.shape());
-                }
+        // Afficher la perte et le LR à chaque epoch
+        let current_lr = scheduler.get_last_lr(); 
+        match loss.item_f32() { // Utiliser item_f32 pour obtenir Result<f32>
+            Ok(loss_value) => {
+                println!(
+                    "Epoch [{}/{}], Loss: {:.4}, LR: {:?}", // Utiliser {:.4} ou :? pour f32
+                    epoch + 1,
+                    num_epochs,
+                    loss_value, // Pas besoin de .unwrap() ici, le format :? fonctionne
+                    current_lr
+                );
+            },
+            Err(e) => {
+                eprintln!("Impossible d'extraire la valeur de la perte à l'epoch {}: {:?}. Shape de la perte: {:?}", epoch, e, loss.shape());
             }
         }
     }

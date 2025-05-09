@@ -1,6 +1,20 @@
 [workspace]
 members = [
     "neurarust-core",
-    # D'autres crates comme neurarust-nn viendront ici
+    # "neurarust-data", # Uncomment when this crate is added
+    # "neurarust-vision", # Uncomment when this crate is added
 ]
-resolver = "2" 
+resolver = "2"
+
+[workspace.dependencies]
+# Common dependencies for all crates in the workspace
+# log = "0.4"
+# thiserror = "1.0"
+
+# Note: Specific dependencies like `approx` or `rand` if only used by neurarust-core
+# should stay within neurarust-core/Cargo.toml's [dependencies] or [dev-dependencies].
+
+# If you have features that need to be enabled across the workspace, define them here.
+# [features]
+# default = ["neurarust-core/default"]
+# cuda = ["neurarust-core/cuda"] # Example of propagating a feature

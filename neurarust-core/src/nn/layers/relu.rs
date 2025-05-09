@@ -8,7 +8,7 @@ use std::sync::{Arc, RwLock};
 /// Layer that applies the Rectified Linear Unit (ReLU) activation function.
 ///
 /// This layer does not have any learnable parameters.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct ReLU {}
 
 impl ReLU {
