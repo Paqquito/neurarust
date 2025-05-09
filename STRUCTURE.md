@@ -113,6 +113,8 @@
 │   │   │   ├── adagrad_test.rs
 │   │   │   ├── adam.rs
 │   │   │   ├── adam_test.rs
+│   │   │   ├── grad_clipping.rs
+│   │   │   ├── grad_clipping_test.rs
 │   │   │   ├── lr_scheduler.rs
 │   │   │   ├── lr_scheduler_tests.rs
 │   │   │   ├── mod.rs
@@ -183,4 +185,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-26 directories, 158 files
+26 directories, 160 files

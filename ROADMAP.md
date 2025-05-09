@@ -413,14 +413,14 @@
             *   [✅] Update training loop example to demonstrate usage of parameter groups (e.g., different LR for biases).
         *   **Step 2.A.8: Gradient Clipping Utilities**
             *   🎯 **Goal:** Provide functions to clip parameter gradients to stabilize training.
-            *   [ ] Implement `clip_grad_value_(parameters: impl Iterator<Item = &mut Parameter>, clip_value: f32)`.
-                *   [ ] Iterates through parameters and clips their gradients in-place: `grad.clamp_(-clip_value, clip_value)`.
-            *   [ ] Implement `clip_grad_norm_(parameters: impl Iterator<Item = &mut Parameter>, max_norm: f32, norm_type: f32)`.
-                *   [ ] Calculates the total norm of all gradients concatenated: `total_norm = (sum(g.pow(norm_type)) for g in all_grads).pow(1.0/norm_type)`.
-                *   [ ] If `total_norm > max_norm`, scales all gradients: `grad = grad * (max_norm / total_norm)`.
-            *   [ ] Ensure these functions correctly handle `Option<Tensor>` for gradients.
-            *   [ ] Add tests for both clipping methods with various inputs and norm types.
-            *   [ ] Add `rustdoc` and usage examples (e.g., in training loop comments).
+            *   [✅] Implement `clip_grad_value_(parameters: impl Iterator<Item = &mut Parameter>, clip_value: f32)`.
+                *   [✅] Iterates through parameters and clips their gradients in-place: `grad.clamp_(-clip_value, clip_value)`.
+            *   [✅] Implement `clip_grad_norm_(parameters: impl Iterator<Item = &mut Parameter>, max_norm: f32, norm_type: f32)`.
+                *   [✅] Calculates the total norm of all gradients concatenated: `total_norm = (sum(g.pow(norm_type)) for g in all_grads).pow(1.0/norm_type)`.
+                *   [✅] If `total_norm > max_norm`, scales all gradients: `grad = grad * (max_norm / total_norm)`.
+            *   [✅] Ensure these functions correctly handle `Option<Tensor>` for gradients.
+            *   [✅] Add tests for both clipping methods with various inputs and norm types.
+            *   [✅] Add `rustdoc` and usage examples (e.g., in training loop comments). // rustdoc added, examples for 2.A.9
         *   **Step 2.A.9: Create Optimizer and Scheduler Example**
             *   🎯 **Goal:** Demonstrate the usage of various optimizers, LR schedulers, and gradient clipping in a training context.
             *   [ ] Create a new example file (e.g., `examples/advanced_training_techniques.rs`).

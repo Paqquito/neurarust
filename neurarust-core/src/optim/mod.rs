@@ -57,3 +57,6 @@ pub mod lr_scheduler;
 pub use lr_scheduler::LRScheduler;
 // Décommenter si les traits placeholder doivent être accessibles globalement pour les tests initiaux
 // pub use lr_scheduler::{OptimizerInterface, ParamGroupInterface}; 
+
+pub mod grad_clipping;
+pub use grad_clipping::*; 
