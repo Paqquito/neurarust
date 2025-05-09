@@ -1,3 +1,5 @@
+// neurarust-data/src/datasets/traits.rs
+
 use neurarust_core::NeuraRustError;
 
 /// Represents a dataset that can be iterated over and accessed by index.

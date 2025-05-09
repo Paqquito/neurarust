@@ -185,14 +185,26 @@
 ├── neurarust-data
 │   ├── Cargo.toml
 │   └── src
-│       ├── dataset.rs
+│       ├── datasets
+│       │   ├── mod.rs
+│       │   ├── tensor_dataset.rs
+│       │   ├── tensor_dataset_test.rs
+│       │   ├── traits.rs
+│       │   ├── vec_dataset.rs
+│       │   └── vec_dataset_test.rs
 │       ├── lib.rs
-│       ├── sampler.rs
-│       ├── tensor_dataset.rs
-│       └── vec_dataset.rs
+│       └── samplers
+│           ├── mod.rs
+│           ├── random_sampler.rs
+│           ├── random_sampler_test.rs
+│           ├── sequential_sampler.rs
+│           ├── sequential_sampler_test.rs
+│           ├── subset_random_sampler.rs
+│           ├── subset_random_sampler_test.rs
+│           └── traits.rs
 ├── README.md
 ├── ROADMAP.md
 ├── STRUCTURE.md
 └── text.txt
 
-29 directories, 167 files
+31 directories, 177 files

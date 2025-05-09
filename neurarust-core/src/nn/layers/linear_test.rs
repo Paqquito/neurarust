@@ -3,7 +3,7 @@ mod tests {
     use crate::tensor::{Tensor, from_vec_f32, from_vec_f64, ones};
     use crate::types::DType;
     use crate::error::NeuraRustError;
-    use crate::nn::{Linear};
+    use crate::nn::Linear;
     use crate::nn::module::Module;
     use crate::autograd::grad_check::{check_grad, GradCheckError};
     use crate::utils::testing::{check_tensor_near, check_tensor_near_f64};
