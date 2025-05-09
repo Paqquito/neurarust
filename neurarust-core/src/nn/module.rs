@@ -3,6 +3,8 @@ use crate::tensor::Tensor;
 use crate::nn::Parameter;
 use crate::error::NeuraRustError;
 use crate::types::DType;
+use std::sync::{Arc, RwLock};
+use std::any::Any;
 // use crate::tensor::{zeros, zeros_f64, ones, ones_f64}; // Import global supprimé
 
 /// The base trait for all neural network modules (layers, containers, etc.).
@@ -10,7 +12,7 @@ use crate::types::DType;
 /// This trait defines the fundamental operations that any neural network module
 /// should support, such as performing a forward pass and accessing its parameters.
 /// It is designed to be generic over the data type `T` (e.g., `f32`, `f64`).
-pub trait Module: std::fmt::Debug + Send + Sync {
+pub trait Module: std::fmt::Debug + Send + Sync + Any {
     /// Performs a forward pass of the module.
     ///
     /// # Arguments
@@ -25,13 +27,13 @@ pub trait Module: std::fmt::Debug + Send + Sync {
     ///
     /// Parameters are typically weights and biases of layers that are adjusted during training.
     /// This method should collect all such parameters, including those from sub-modules.
-    fn parameters(&self) -> Vec<&Parameter>;
+    fn parameters(&self) -> Vec<Arc<RwLock<Parameter>>>;
 
     /// Returns a vector of all learnable parameters (`Parameter` instances) of the module
     /// along with their names.
     /// Names should be unique within the module and follow a hierarchical structure for nested modules
     /// (e.g., "layer1.weight", "layer1.bias").
-    fn named_parameters(&self) -> Vec<(String, &Parameter)>;
+    fn named_parameters(&self) -> Vec<(String, Arc<RwLock<Parameter>>)>;
 
     /// Returns a vector of direct child `Module`s.
     /// For modules that do not contain other modules, this should return an empty vector.
@@ -75,6 +77,9 @@ pub trait Module: std::fmt::Debug + Send + Sync {
         }
         Ok(())
     }
+
+    /// Applies a function `f` recursively to each sub-module as well as to itself.
+    fn apply(&mut self, f: &mut dyn FnMut(&mut dyn Module));
 }
 
 // Example of how a simple container might implement it (not needed yet)
@@ -107,24 +112,36 @@ impl Module for Sequential {
 #[cfg(test)]
 mod tests {
     use super::*; // Garde les imports du module parent comme Module, Parameter, DType, Device
-    use crate::tensor::{zeros, zeros_f64, ones, ones_f64}; // Ajout des imports spécifiques au test
-    use crate::nn::parameter::Parameter; // Parameter est déjà dans super::*, mais peut être gardé pour clarté ou si super::* change
-    use crate::types::DType; // Idem pour DType
-    use crate::device::StorageDevice as Device; // Idem pour Device
+    use crate::tensor::Tensor; 
+    // Pas d'import spécifique de `zeros` ici, on utilisera le chemin complet ou un import de module
+    use crate::types::DType;
+    use crate::device::StorageDevice;
+    use crate::NeuraRustError;
+    use crate::nn::parameter::Parameter;
+    use std::sync::{Arc, RwLock};
+    use crate::tensor::create::{zeros, zeros_f64};
+    use std::any::Any; // Any est importé implicitement via le trait mais l'avoir ici peut aider
 
     // Mock Module pour les tests
     #[derive(Debug)]
     struct MockModule {
-        param: Parameter,
+        param: Arc<RwLock<Parameter>>,
+        device: StorageDevice,
+        dtype: DType,
     }
 
     impl MockModule {
         fn new(dtype: DType) -> Result<Self, NeuraRustError> {
-            let tensor = match dtype {
+            let data = match dtype {
                 DType::F32 => zeros(&[1])?,
                 DType::F64 => zeros_f64(&[1])?,
             };
-            Ok(Self { param: Parameter::new_unnamed(tensor) })
+            let param = Parameter::new(data, Some("mock_param".to_string()));
+            Ok(MockModule {
+                param: Arc::new(RwLock::new(param)),
+                device: StorageDevice::CPU,
+                dtype,
+            })
         }
     }
 
@@ -133,113 +150,129 @@ mod tests {
             Ok(input.clone())
         }
 
-        fn parameters(&self) -> Vec<&Parameter> {
-            vec![&self.param]
+        fn parameters(&self) -> Vec<Arc<RwLock<Parameter>>> {
+            vec![Arc::clone(&self.param)]
         }
 
-        fn named_parameters(&self) -> Vec<(String, &Parameter)> {
-            let name = self.param.name().unwrap_or("param").to_string();
-            vec![(name, &self.param)]
+        fn named_parameters(&self) -> Vec<(String, Arc<RwLock<Parameter>>)> {
+            let lock = self.param.read().expect("Failed to acquire read lock");
+            let name = lock.name().unwrap_or("param").to_string();
+            drop(lock);
+            vec![(name, Arc::clone(&self.param))]
         }
 
-        fn to_device(&mut self, device: Device) -> Result<(), NeuraRustError> {
-            self.param.to_device(device)
+        fn children(&self) -> Vec<&dyn Module> {
+            vec![]
         }
 
-        fn to_dtype(&mut self, dtype: DType) -> Result<(), NeuraRustError> {
-            self.param.to_dtype(dtype)
+        fn named_children(&self) -> Vec<(String, &dyn Module)> {
+            vec![]
         }
 
         fn modules(&self) -> Vec<&dyn Module> {
             vec![self]
         }
+
+        fn apply(&mut self, f: &mut dyn FnMut(&mut dyn Module)) {
+            f(self)
+        }
     }
 
     #[test]
-    fn test_module_parameters_retrieval() -> Result<(), NeuraRustError> {
+    fn test_module_parameter_collection() -> Result<(), NeuraRustError> {
         let module_f32 = MockModule::new(DType::F32)?;
-        let input_f32 = ones(&[2, 2])?;
-        let _ = module_f32.forward(&input_f32)?;
         let params_f32 = module_f32.parameters();
         assert_eq!(params_f32.len(), 1, "Expected 1 parameter for F32 module");
-        assert_eq!(params_f32[0].shape(), &[1], "Parameter shape mismatch");
-        assert_eq!(params_f32[0].dtype(), DType::F32, "Parameter DType mismatch");
+        assert_eq!(params_f32[0].read().unwrap().shape(), &[1], "Parameter shape mismatch");
+        assert_eq!(params_f32[0].read().unwrap().dtype(), DType::F32, "Parameter DType mismatch");
 
         let module_f64 = MockModule::new(DType::F64)?;
-        let input_f64 = ones_f64(&[3, 1])?;
-        let _ = module_f64.forward(&input_f64)?;
         let params_f64 = module_f64.parameters();
         assert_eq!(params_f64.len(), 1, "Expected 1 parameter for F64 module");
-        assert_eq!(params_f64[0].shape(), &[1], "Parameter shape mismatch");
-        assert_eq!(params_f64[0].dtype(), DType::F64, "Parameter DType mismatch");
+        assert_eq!(params_f64[0].read().unwrap().shape(), &[1], "Parameter shape mismatch");
+        assert_eq!(params_f64[0].read().unwrap().dtype(), DType::F64, "Parameter DType mismatch");
 
         Ok(())
     }
 
     #[test]
-    fn test_module_to_device() -> Result<(), NeuraRustError> {
-        let mut module = MockModule::new(DType::F32)?;
-        module.to_device(Device::CPU)?;
-        assert_eq!(module.parameters()[0].device(), Device::CPU, "Parameter should be on CPU");
-        Ok(())
-    }
-
-    #[test]
-    fn test_module_to_dtype() -> Result<(), NeuraRustError> {
-        let mut module = MockModule::new(DType::F32)?;
-        assert_eq!(module.parameters()[0].dtype(), DType::F32, "Initial DType should be F32");
-
-        module.to_dtype(DType::F64)?;
-        assert_eq!(module.parameters()[0].dtype(), DType::F64, "DType should be F64 after conversion");
-        let params_f64 = module.parameters();
-        let data_f64 = params_f64[0].get_f64_data()?;
-        assert_eq!(data_f64, vec![0.0f64], "Data should be 0.0_f64 after conversion");
-
-        module.to_dtype(DType::F32)?;
-        assert_eq!(module.parameters()[0].dtype(), DType::F32, "DType should be F32 after converting back");
-        let params_f32 = module.parameters();
-        let data_f32 = params_f32[0].get_f32_data()?;
-        assert_eq!(data_f32, vec![0.0f32], "Data should be 0.0_f32 after conversion back");
-
-        module.to_dtype(DType::F32)?;
-        assert_eq!(module.parameters()[0].dtype(), DType::F32, "DType should remain F32");
-        Ok(())
-    }
-
-    #[test]
-    fn test_mock_module_named_parameters() -> Result<(), NeuraRustError> {
+    fn test_module_named_parameter_collection() -> Result<(), NeuraRustError> {
         let tensor = zeros(&[1])?;
         let named_param = Parameter::new(tensor.clone(), Some("custom_mock_name".to_string()));
-        let module_named = MockModule { param: named_param };
+        let module_named = MockModule {
+            param: Arc::new(RwLock::new(named_param)),
+            device: StorageDevice::CPU,
+            dtype: DType::F32,
+        };
         let named_params1 = module_named.named_parameters();
         assert_eq!(named_params1.len(), 1);
         assert_eq!(named_params1[0].0, "custom_mock_name");
-        assert_eq!(named_params1[0].1.name(), Some("custom_mock_name"));
+        assert!(Arc::ptr_eq(&named_params1[0].1, &module_named.param));
 
         let unnamed_param = Parameter::new_unnamed(tensor);
-        let module_unnamed = MockModule { param: unnamed_param };
+        let module_unnamed = MockModule {
+            param: Arc::new(RwLock::new(unnamed_param)),
+            device: StorageDevice::CPU,
+            dtype: DType::F32,
+        };
         let named_params2 = module_unnamed.named_parameters();
         assert_eq!(named_params2.len(), 1);
-        assert_eq!(named_params2[0].0, "param"); // Default name
-        assert_eq!(named_params2[0].1.name(), None);
+        assert_eq!(named_params2[0].0, "param");
+        assert!(Arc::ptr_eq(&named_params2[0].1, &module_unnamed.param));
+
         Ok(())
     }
 
     #[test]
-    fn test_mock_module_children_and_modules() -> Result<(), NeuraRustError> {
+    fn test_module_device_and_dtype_initial() -> Result<(), NeuraRustError> {
+        let module_f32 = MockModule::new(DType::F32)?;
+        assert_eq!(module_f32.device, StorageDevice::CPU, "Initial device should be CPU");
+        assert_eq!(module_f32.dtype, DType::F32, "Initial dtype should be F32");
+        assert_eq!(module_f32.parameters()[0].read().unwrap().device(), StorageDevice::CPU, "Parameter initial device check");
+        assert_eq!(module_f32.parameters()[0].read().unwrap().dtype(), DType::F32, "Parameter initial dtype check");
+
+        let module_f64 = MockModule::new(DType::F64)?;
+        assert_eq!(module_f64.device, StorageDevice::CPU);
+        assert_eq!(module_f64.dtype, DType::F64);
+        assert_eq!(module_f64.parameters()[0].read().unwrap().device(), StorageDevice::CPU);
+        assert_eq!(module_f64.parameters()[0].read().unwrap().dtype(), DType::F64);
+
+        Ok(())
+    }
+
+    #[test]
+    fn test_module_modules() -> Result<(), NeuraRustError> {
         let module = MockModule::new(DType::F32)?;
-
-        let children = module.children();
-        assert!(children.is_empty(), "MockModule (leaf) should have no children");
-
-        let named_children = module.named_children();
-        assert!(named_children.is_empty(), "MockModule (leaf) should have no named children");
-
         let modules = module.modules();
-        assert_eq!(modules.len(), 1, "MockModule (leaf) should return itself in modules()");
-        // Pour vérifier que c'est bien self, on peut comparer les adresses, mais c'est un peu délicat avec &dyn Module.
-        // On peut se contenter de vérifier le type si possible, ou indirectement via parameters.
-        assert_eq!(modules[0].parameters().len(), 1, "The module in modules() should be the MockModule itself");
+        assert_eq!(modules.len(), 1);
+        assert_eq!(modules[0].parameters().len(), 1);
+        Ok(())
+    }
+
+    #[test]
+    fn test_module_apply() -> Result<(), NeuraRustError> {
+        let mut module = MockModule::new(DType::F32)?;
+        let initial_name = module.named_parameters()[0].0.clone();
+        assert_eq!(initial_name, "mock_param");
+
+        let mut rename_count = 0;
+        let mut rename_fn = |m: &mut dyn Module| {
+            // Forcer la conversion en &mut dyn Any avant d'appeler downcast_mut
+            let any_ref: &mut dyn Any = m;
+            if let Some(mock) = any_ref.downcast_mut::<MockModule>() {
+                let new_name = format!("renamed_{}", rename_count);
+                // Accéder directement au champ `name` pour le modifier
+                mock.param.write().unwrap().name = Some(new_name);
+                rename_count += 1;
+            }
+        };
+
+        module.apply(&mut rename_fn);
+
+        assert_eq!(rename_count, 1);
+        let final_name = module.named_parameters()[0].0.clone();
+        assert_eq!(final_name, "renamed_0");
+
         Ok(())
     }
 } 

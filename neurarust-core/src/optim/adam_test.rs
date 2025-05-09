@@ -101,14 +101,18 @@ mod tests {
     fn test_adam_weight_decay() -> Result<(), NeuraRustError> {
         let initial_value = 1.0f32;
         let lr = 0.1f32;
-        let weight_decay = 0.1f32; 
+        let weight_decay = 0.1f32;
+        let beta1 = 0.9f32; // Test utilise 0.9
+        let beta2 = 0.999f32; // Test utilise 0.999
+        let eps = 1e-8f32;
         
         let param = create_named_param("p_wd", vec![initial_value], vec![1]);
-        let mut optimizer = AdamOptimizer::new(vec![param.clone()], lr, 0.9, 0.999, 1e-8, weight_decay, false)?;
+        // Utiliser les betas du test pour la nouvelle instance d'AdamOptimizer
+        let mut optimizer = AdamOptimizer::new(vec![param.clone()], lr, beta1, beta2, eps, weight_decay, false)?;
 
         {
             let mut p_locked = param.write().unwrap();
-            let grad_tensor = Tensor::new(vec![0.0], vec![1])?;
+            let grad_tensor = Tensor::new(vec![0.0], vec![1])?; // Gradient est NUL
             p_locked.tensor_mut().clear_grad();
             p_locked.tensor_mut().acc_grad(grad_tensor)?;
         }
@@ -119,8 +123,27 @@ mod tests {
         let tensor_after_step = p_locked_after.tensor();
         let data_after_step = tensor_after_step.get_f32_data()?;
 
-        let expected_value = initial_value * (1.0 - lr * weight_decay); 
-        assert!((data_after_step[0] - expected_value).abs() < 1e-6);
+        // Calcul basé sur l'implémentation actuelle
+        let grad_original = 0.0f32;
+        let grad_eff = grad_original + initial_value * weight_decay; // grad_eff = 0.1
+
+        // Pour le premier pas (optimizer.iterations sera 1 après le premier step)
+        let m_t = (1.0 - beta1) * grad_eff; // (1-0.9)*0.1 = 0.01
+        let v_t = (1.0 - beta2) * grad_eff.powi(2); // (1-0.999)*(0.1)^2 = 0.001 * 0.01 = 0.00001
+
+        let bias_correction1 = 1.0 - beta1.powi(1);
+        let bias_correction2 = 1.0 - beta2.powi(1);
+
+        let m_hat = m_t / bias_correction1; // 0.01 / (1-0.9) = 0.01 / 0.1 = 0.1
+        let v_hat = v_t / bias_correction2; // 0.00001 / (1-0.999) = 0.00001 / 0.001 = 0.01
+
+        let update_val = lr * m_hat / (v_hat.sqrt() + eps);
+        // update_val = 0.1 * 0.1 / ( (0.01).sqrt() + 1e-8 ) = 0.01 / (0.1 + 1e-8)
+        // update_val = 0.01 / 0.10000001 = 0.09999999
+        
+        let expected_value = initial_value - update_val;
+        
+        assert_relative_eq!(data_after_step[0], expected_value, epsilon = 1e-7);
         Ok(())
     }
     

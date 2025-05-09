@@ -1,67 +1,27 @@
-use crate::error::NeuraRustError; // En supposant que NeuraRustError est dans crate::error
+use crate::error::NeuraRustError;
+use crate::optim::Optimizer;
+// use crate::optim::param_group::ParamGroup; // Tentative de suppression
+use std::fmt::Debug;
 
-// --- Placeholders --- 
-// Ces traits sont des substituts temporaires. Ils devront être remplacés par les
-// véritables définitions de l'Optimizer et de ParamGroup une fois que l'accès aux fichiers sera rétabli
-// ou que leurs structures exactes seront fournies. L'Optimizer devra permettre d'accéder
-// et de modifier les learning rates de ses groupes de paramètres.
+/// Base trait for all learning rate schedulers.
+pub trait LRScheduler<'a, O: Optimizer + ?Sized> {
+    /// Returns the last computed learning rate values for each parameter group.
+    fn get_last_lr(&self) -> Vec<f32>;
 
-/// Trait substitut pour un Optimizer.
-pub trait OptimizerInterface {
-    /// Type substitut pour un groupe de paramètres.
-    type ParamGroup: ParamGroupInterface + Send + Sync;
-    /// Retourne une tranche mutable des groupes de paramètres.
-    fn param_groups_mut(&mut self) -> &mut [Self::ParamGroup];
-    /// Retourne une tranche immuable des groupes de paramètres.
-    fn param_groups(&self) -> &[Self::ParamGroup];
-}
-
-/// Trait substitut pour un ParamGroup.
-pub trait ParamGroupInterface {
-    /// Obtient le taux d'apprentissage actuel.
-    fn lr(&self) -> f32;
-    /// Définit le taux d'apprentissage.
-    fn set_lr(&mut self, lr: f32);
-    /// Retourne les noms des paramètres.
-    fn param_names(&self) -> Vec<String>;
-}
-// --- Fin des Placeholders ---
-
-/// Définit l'interface pour les ordonnanceurs de taux d'apprentissage (Learning Rate Schedulers).
-///
-/// Les ordonnanceurs ajustent le taux d'apprentissage pendant l'entraînement
-/// en fonction d'un calendrier ou d'une politique définie.
-pub trait LRScheduler<O: OptimizerInterface> {
-    /// Effectue une étape dans le calendrier du taux d'apprentissage.
-    ///
-    /// Cette méthode doit être appelée après chaque époque d'entraînement, ou itération,
-    /// en fonction de la politique de l'ordonnanceur.
+    /// Performs a scheduler step.
     ///
     /// # Arguments
     ///
-    /// * `epoch` - Un numéro d'époque actuel optionnel. Certains ordonnanceurs l'utilisent.
-    /// * `metrics` - Une valeur métrique optionnelle (par exemple, la perte de validation). Utilisée par les
-    ///               ordonnanceurs comme `ReduceLROnPlateau`.
+    /// * `epoch`: The current epoch number (optional, used by some schedulers).
+    /// * `metrics`: A metric value (optional, used by schedulers like ReduceLROnPlateau).
     ///
-    /// # Retours
+    /// # Returns
     ///
-    /// * `Result<(), NeuraRustError>` - Ok si l'étape a réussi, ou une erreur.
-    fn step(&mut self, epoch: Option<usize>, metrics: Option<f32>) -> Result<(), NeuraRustError>;
+    /// `Ok(())` if the step was successful, or `NeuraRustError` on failure.
+    fn step(&mut self, epoch: Option<u64>, metrics: Option<f32>) -> Result<(), NeuraRustError>;
 
-    /// Retourne les derniers taux d'apprentissage calculés pour chaque groupe de paramètres.
-    ///
-    /// L'ordre des taux d'apprentissage dans le vecteur retourné doit correspondre
-    /// à l'ordre des groupes de paramètres dans l'optimiseur.
-    ///
-    /// # Retours
-    ///
-    /// * `Vec<f32>` - Un vecteur des derniers taux d'apprentissage.
-    fn get_last_lr(&self) -> Vec<f32>;
-
-    /// Retourne une référence à l'optimiseur associé à cet ordonnanceur.
+    // Nouvelles méthodes
     fn optimizer(&self) -> &O;
-
-    /// Retourne une référence mutable à l'optimiseur associé à cet ordonnanceur.
     fn optimizer_mut(&mut self) -> &mut O;
 }
 
@@ -83,8 +43,8 @@ pub enum ReduceLROnPlateauThresholdMode {
 ///
 /// Reduces learning rate when a metric has stopped improving.
 #[derive(Debug)]
-pub struct ReduceLROnPlateau<O: OptimizerInterface> {
-    optimizer: O,
+pub struct ReduceLROnPlateau<'a, O: Optimizer + ?Sized> {
+    optimizer: &'a mut O,
     mode: ReduceLROnPlateauMode,
     factor: f32,
     patience: usize,
@@ -99,10 +59,9 @@ pub struct ReduceLROnPlateau<O: OptimizerInterface> {
     num_bad_epochs: usize,
     cooldown_counter: usize,
     last_epoch: usize,
-    // _base_lrs: Vec<f32>, // Could be useful for min_lr per group
 }
 
-impl<O: OptimizerInterface> ReduceLROnPlateau<O> {
+impl<'a, O: Optimizer + ?Sized> ReduceLROnPlateau<'a, O> {
     /// Creates a new `ReduceLROnPlateau` scheduler.
     ///
     /// # Arguments
@@ -117,7 +76,7 @@ impl<O: OptimizerInterface> ReduceLROnPlateau<O> {
     /// * `min_lr` - A scalar or a list of scalars. A lower bound on the learning rate of all param groups or each group respectively. Default: 0.
     /// * `eps` - Minimal decay applied to lr. If the difference between new and old lr is smaller than eps, the update is ignored. Default: 1e-8.
     pub fn new(
-        optimizer: O,
+        optimizer: &'a mut O,
         mode: ReduceLROnPlateauMode,
         factor: Option<f32>,
         patience: Option<usize>,
@@ -151,7 +110,6 @@ impl<O: OptimizerInterface> ReduceLROnPlateau<O> {
             num_bad_epochs: 0,
             cooldown_counter: 0,
             last_epoch: 0,
-            // _base_lrs: optimizer.param_groups().iter().map(|pg| pg.lr()).collect(),
         }
     }
 
@@ -172,9 +130,9 @@ impl<O: OptimizerInterface> ReduceLROnPlateau<O> {
     }
 
     // Helper function to reduce learning rates
-    fn reduce_lr(&mut self, epoch: Option<usize>) {
-        for pg in self.optimizer.param_groups_mut().iter_mut() {
-            let old_lr = pg.lr();
+    fn reduce_lr(&mut self, _epoch: Option<usize>) {
+        for (i, pg) in self.optimizer.param_groups_mut().iter_mut().enumerate() {
+            let old_lr = pg.options.lr.expect(&format!("Learning rate not set for param group {}", i));
             let mut new_lr = old_lr * self.factor;
 
             let current_min_lr = self.min_lr;
@@ -191,15 +149,17 @@ impl<O: OptimizerInterface> ReduceLROnPlateau<O> {
 
             if old_lr - new_lr > self.eps {
                 pg.set_lr(new_lr);
-                if let Some(ep) = epoch {
+                if let Some(ep) = _epoch {
                     println!(
-                        "Epoch {}: reducing learning rate of group to {:.4e}.",
+                        "Epoch {}: reducing learning rate of group {} to {:.4e}.",
                         ep,
+                        i,
                         new_lr
                     );
                 } else {
                     println!(
-                        "Reducing learning rate of group to {:.4e}.",
+                        "Reducing learning rate of group {} to {:.4e}.",
+                        i,
                         new_lr
                     );
                 }
@@ -208,10 +168,21 @@ impl<O: OptimizerInterface> ReduceLROnPlateau<O> {
             }
         }
     }
+
+    fn get_current_lrs(&self) -> Vec<f32> {
+        self.optimizer
+            .param_groups()
+            .iter()
+            .map(|pg| pg.options.lr.unwrap_or_else(|| {
+                eprintln!("Warning: Learning rate not set for a param group, defaulting to 0.0");
+                0.0
+            }))
+            .collect()
+    }
 }
 
-impl<O: OptimizerInterface> LRScheduler<O> for ReduceLROnPlateau<O> {
-    fn step(&mut self, _epoch: Option<usize>, metrics: Option<f32>) -> Result<(), NeuraRustError> {
+impl<'a, O: Optimizer + ?Sized> LRScheduler<'a, O> for ReduceLROnPlateau<'a, O> {
+    fn step(&mut self, _epoch: Option<u64>, metrics: Option<f32>) -> Result<(), NeuraRustError> {
         let current_metric = match metrics {
             Some(m) => m,
             None => {
@@ -259,19 +230,15 @@ impl<O: OptimizerInterface> LRScheduler<O> for ReduceLROnPlateau<O> {
     }
 
     fn get_last_lr(&self) -> Vec<f32> {
-        self.optimizer
-            .param_groups()
-            .iter()
-            .map(|pg| pg.lr())
-            .collect()
+        self.get_current_lrs()
     }
 
     fn optimizer(&self) -> &O {
-        &self.optimizer
+        self.optimizer
     }
 
     fn optimizer_mut(&mut self) -> &mut O {
-        &mut self.optimizer
+        self.optimizer
     }
 }
 
@@ -279,15 +246,15 @@ impl<O: OptimizerInterface> LRScheduler<O> for ReduceLROnPlateau<O> {
 ///
 /// Decays the learning rate of each parameter group by gamma every step_size epochs.
 #[derive(Debug)]
-pub struct StepLR<O: OptimizerInterface> {
-    optimizer: O,
-    step_size: usize,
+pub struct StepLR<'a, O: Optimizer + ?Sized> {
+    optimizer: &'a mut O,
+    step_size: u64,
     gamma: f32,
-    last_epoch: usize, // To keep track of the number of steps or epochs, 0-indexed.
-    _base_lrs: Vec<f32>, // To store initial learning rates
+    last_epoch: i64,
+    base_lrs: Vec<f32>,
 }
 
-impl<O: OptimizerInterface> StepLR<O> {
+impl<'a, O: Optimizer + ?Sized> StepLR<'a, O> {
     /// Creates a new `StepLR` scheduler.
     ///
     /// # Arguments
@@ -299,81 +266,74 @@ impl<O: OptimizerInterface> StepLR<O> {
     /// # Panics
     ///
     /// Panics if `step_size` is 0.
-    pub fn new(optimizer: O, step_size: usize, gamma: f32) -> Self {
+    pub fn new(optimizer: &'a mut O, step_size: u64, gamma: f32) -> Self {
         if step_size == 0 {
             panic!("StepLR: step_size must be greater than 0.");
         }
-        // Store initial LRs. In PyTorch, LRScheduler class does this in its constructor.
-        let base_lrs: Vec<f32> = optimizer.param_groups().iter().map(|pg| pg.lr()).collect();
-        
+        if gamma <= 0.0 {
+            panic!("Factor gamma must be positive.");
+        }
+        let base_lrs: Vec<f32> = optimizer
+            .param_groups()
+            .iter()
+            .map(|pg| pg.options.lr.expect("Optimizer param group missing LR at StepLR init"))
+            .collect();
+
         StepLR {
             optimizer,
             step_size,
             gamma,
-            last_epoch: 0, // PyTorch's last_epoch is -1 at init, step() increments it first.
-                           // Let's make last_epoch the count of steps taken, starting at 0 after the first step.
-                           // So, when new() is called, no steps taken yet. First call to step() will make it 1.
-                           // Or, simpler: last_epoch = 0 initially. After first step, last_epoch = 1.
-                           // LR calculation: base_lr * gamma^(floor(last_epoch / step_size))
-                           // If last_epoch is number of calls to step():
-                           // Call 0: last_epoch = 0. exponent = 0. lr = base_lr.
-                           // Call 1 (step_size=3): last_epoch=1. exp=0. lr=base_lr
-                           // Call 2 (step_size=3): last_epoch=2. exp=0. lr=base_lr
-                           // Call 3 (step_size=3): last_epoch=3. exp=1. lr=base_lr*gamma
-                           // This seems correct if last_epoch is number of steps *taken*.
-                           // PyTorch actually increments last_epoch *before* get_lr() in its step method.
-                           // So if last_epoch = 0, after first step() call, it becomes 1, then get_lr() is called.
-                           // For consistency with PyTorch's model, let's start last_epoch at 0 representing number of steps *completed*.
-                           // And step() will effectively calculate for last_epoch+1 or simply update based on current last_epoch.
-            _base_lrs: base_lrs,
+            last_epoch: -1,
+            base_lrs,
         }
     }
 }
 
-impl<O: OptimizerInterface> LRScheduler<O> for StepLR<O> {
-    fn step(&mut self, _epoch: Option<usize>, _metrics: Option<f32>) -> Result<(), NeuraRustError> {
-        self.last_epoch += 1;
+impl<'a, O: Optimizer + ?Sized> LRScheduler<'a, O> for StepLR<'a, O> {
+    fn step(&mut self, epoch: Option<u64>, _metrics: Option<f32>) -> Result<(), NeuraRustError> {
+        let current_epoch_val = match epoch {
+            Some(e) => e as i64,
+            None => self.last_epoch + 1, // Avance l'epoch si non fournie
+        };
+        self.last_epoch = current_epoch_val;
 
-        // Le calcul du LR se base sur last_epoch et les _base_lrs.
-        // Si last_epoch / step_size est différent de (last_epoch-1) / step_size, alors un "pas" a été franchi.
-        // Cependant, il est plus simple de recalculer le LR à chaque fois basé sur la formule.
-        // La condition if n'est nécessaire que si on veut optimiser pour ne pas appeler set_lr si le lr ne change pas.
-        // Pour l'instant, recalculons et réappliquons toujours, c'est plus simple.
-
-        // Vérifier si un pas de step_size a été franchi depuis la dernière mise à jour de LR.
-        // Ex: step_size = 3. last_epoch = 1,2 -> no change. last_epoch = 3 -> change.
-        // PyTorch le fait en calculant la valeur cible du LR et en la comparant à l'actuelle,
-        // ou plus simplement, get_lr() calcule toujours la valeur correcte pour self.last_epoch.
-        
-        // Calculer le facteur d'échelle basé sur le nombre de pas complets de step_size
-        let num_steps_taken = self.last_epoch / self.step_size;
-        let scale_factor = self.gamma.powi(num_steps_taken as i32);
-
-        let param_groups = self.optimizer.param_groups_mut();
-        if self._base_lrs.len() != param_groups.len() {
-            // Cela ne devrait pas arriver si l'optimizer n'est pas modifié après la création du scheduler
-            return Err(NeuraRustError::ConfigurationError(
-                "StepLR: Number of base_lrs and param_groups mismatch. Optimizer structure changed?".to_string()
-            ));
-        }
-
-        for (pg, base_lr) in param_groups.iter_mut().zip(&self._base_lrs) {
-            let new_lr = base_lr * scale_factor;
-            pg.set_lr(new_lr);
+        if self.last_epoch >= 0 { // Ne rien faire si l'epoch est < 0 (avant le premier step)
+            // get_last_lr() calcule déjà les LRs corrects pour self.last_epoch
+            let lrs_to_apply = self.get_last_lr(); 
+            
+            let mut lrs_changed_in_optimizer = false;
+            for (i, pg) in self.optimizer.param_groups_mut().iter_mut().enumerate() {
+                if let Some(new_lr_for_group) = lrs_to_apply.get(i) {
+                    if pg.options.lr != Some(*new_lr_for_group) { 
+                        pg.options.lr = Some(*new_lr_for_group);
+                        lrs_changed_in_optimizer = true;
+                    }
+                }
+            }
+            if lrs_changed_in_optimizer {
+                 println!("[StepLR] Epoch {}: Applied learning rates to optimizer: {:?}", self.last_epoch, lrs_to_apply);
+            }
         }
         Ok(())
     }
 
     fn get_last_lr(&self) -> Vec<f32> {
-        self.optimizer.param_groups().iter().map(|pg| pg.lr()).collect()
+        if self.last_epoch == -1 {
+            return self.base_lrs.clone();
+        }
+        let exponent = (self.last_epoch as u64 / self.step_size) as i32;
+        self.base_lrs
+            .iter()
+            .map(|&base_lr| base_lr * self.gamma.powi(exponent))
+            .collect()
     }
 
     fn optimizer(&self) -> &O {
-        &self.optimizer
+        self.optimizer
     }
 
     fn optimizer_mut(&mut self) -> &mut O {
-        &mut self.optimizer
+        self.optimizer
     }
 }
 
@@ -381,15 +341,15 @@ impl<O: OptimizerInterface> LRScheduler<O> for StepLR<O> {
 ///
 /// Decays the learning rate of each parameter group by gamma once the epoch reaches one of the milestones.
 #[derive(Debug)]
-pub struct MultiStepLR<O: OptimizerInterface> {
-    optimizer: O,
-    milestones: Vec<usize>, // Sorted list of epoch indices at which to decay LR.
+pub struct MultiStepLR<'a, O: Optimizer + ?Sized> {
+    optimizer: &'a mut O,
+    milestones: Vec<u64>, // Sorted list of epoch indices at which to decay LR.
     gamma: f32,
-    last_epoch: usize,      // Number of times step() has been called.
-    _base_lrs: Vec<f32>,
+    last_epoch: i64,      // Modifié en i64, nombre de fois step() a été appelé.
+    base_lrs: Vec<f32>,
 }
 
-impl<O: OptimizerInterface> MultiStepLR<O> {
+impl<'a, O: Optimizer + ?Sized> MultiStepLR<'a, O> {
     /// Creates a new `MultiStepLR` scheduler.
     ///
     /// # Arguments
@@ -401,76 +361,73 @@ impl<O: OptimizerInterface> MultiStepLR<O> {
     /// # Panics
     ///
     /// Panics if `milestones` is not sorted in strictly increasing order.
-    pub fn new(optimizer: O, mut milestones: Vec<usize>, gamma: f32) -> Self {
-        // Vérifier si les jalons sont triés. Si ce n'est pas le cas, paniquer.
-        // Ou, on pourrait les trier et les dédoublonner, comme le fait PyTorch.
-        // PyTorch: sorts and dedups milestones. Let's do that for robustness.
+    pub fn new(optimizer: &'a mut O, mut milestones: Vec<u64>, gamma: f32) -> Self {
+        if gamma <= 0.0 {
+            panic!("Factor gamma must be positive.");
+        }
         milestones.sort_unstable();
-        milestones.dedup();
-
-        let base_lrs: Vec<f32> = optimizer.param_groups().iter().map(|pg| pg.lr()).collect();
+        milestones.dedup(); // Ajout de dedup
+        
+        let base_lrs: Vec<f32> = optimizer // Initialisation correcte de base_lrs
+            .param_groups()
+            .iter()
+            .map(|pg| pg.options.lr.expect("Optimizer param group missing LR at MultiStepLR init"))
+            .collect();
 
         MultiStepLR {
             optimizer,
             milestones,
             gamma,
-            last_epoch: 0,
-            _base_lrs: base_lrs,
+            last_epoch: -1, // Initialisé à -1
+            base_lrs,
         }
     }
 }
 
-impl<O: OptimizerInterface> LRScheduler<O> for MultiStepLR<O> {
-    fn step(&mut self, _epoch: Option<usize>, _metrics: Option<f32>) -> Result<(), NeuraRustError> {
-        self.last_epoch += 1;
-
-        // Compte combien de milestones ont été atteints ou dépassés par last_epoch.
-        // self.milestones est trié.
-        // Example: milestones = [2, 5, 8], last_epoch = 1 -> count = 0
-        //          milestones = [2, 5, 8], last_epoch = 2 -> count = 1 (m=2)
-        //          milestones = [2, 5, 8], last_epoch = 3 -> count = 1
-        //          milestones = [2, 5, 8], last_epoch = 5 -> count = 2 (m=2, m=5)
-        let num_milestones_passed = self.milestones.iter().filter(|&&m| m <= self.last_epoch).count();
-        // Alternative plus efficace avec partition_point (Rust 1.52+)
-        // let num_milestones_passed = self.milestones.partition_point(|&m| m < self.last_epoch);
-        // Si un milestone est EXACTEMENT self.last_epoch, il doit être compté.
-        // Donc, `m <= self.last_epoch` est correct. `partition_point` trouve l'index du premier élément > X (ou == X si X existe).
-        // `self.milestones.partition_point(|&m| m <= self.last_epoch)` donnerait l'index *après* tous les milestones <= last_epoch, qui est le compte.
-        // Let's use partition_point for efficiency if available, otherwise filter().count().
-        // As of current Rust stable, partition_point is available.
-        
-        // Correction: PyTorch's MultiStepLR applies gamma when current epoch *is in* milestones. 
-        // Not a cumulative power. It means last_lr * gamma if self.last_epoch is in milestones.
-        // No, their get_lr is: `gamma ** bisect_right(self.milestones, self.last_epoch)`
-        // `bisect_right` est équivalent à `partition_point` (compte les éléments <= X).
-        // Donc, c'est bien une puissance du nombre de milestones passés.
-
-        let scale_factor = self.gamma.powi(num_milestones_passed as i32);
-
-        let param_groups = self.optimizer.param_groups_mut();
-        if self._base_lrs.len() != param_groups.len() {
-            return Err(NeuraRustError::ConfigurationError(
-                "MultiStepLR: Number of base_lrs and param_groups mismatch. Optimizer structure changed?".to_string()
-            ));
+impl<'a, O: Optimizer + ?Sized> LRScheduler<'a, O> for MultiStepLR<'a, O> {
+    fn get_last_lr(&self) -> Vec<f32> {
+        if self.last_epoch == -1 { // Gestion de l'état initial
+            return self.base_lrs.clone();
         }
+        // self.last_epoch est maintenant 0, 1, 2...
+        let current_epoch_as_u64 = self.last_epoch as u64;
+        let num_decays = self.milestones.iter().filter(|&&m| m <= current_epoch_as_u64).count();
+        let scale_factor = self.gamma.powi(num_decays as i32);
+        self.base_lrs.iter().map(|&base_lr| base_lr * scale_factor).collect()
+    }
 
-        for (pg, base_lr) in param_groups.iter_mut().zip(&self._base_lrs) {
-            let new_lr = base_lr * scale_factor;
-            pg.set_lr(new_lr);
+    fn step(&mut self, epoch: Option<u64>, _metrics: Option<f32>) -> Result<(), NeuraRustError> {
+        let current_epoch_val = match epoch {
+            Some(e) => e as i64,
+            None => self.last_epoch + 1,
+        };
+        self.last_epoch = current_epoch_val;
+
+        if self.last_epoch >= 0 { // Appliquer seulement après le premier pas effectif
+            let lrs_to_apply = self.get_last_lr();
+            
+            let mut lrs_changed_in_optimizer = false;
+            for (i, pg) in self.optimizer.param_groups_mut().iter_mut().enumerate() {
+                if let Some(new_lr_for_group) = lrs_to_apply.get(i) {
+                    if pg.options.lr != Some(*new_lr_for_group) {
+                        pg.options.lr = Some(*new_lr_for_group);
+                        lrs_changed_in_optimizer = true;
+                    }
+                }
+            }
+            if lrs_changed_in_optimizer {
+                 println!("[MultiStepLR] Epoch {}: Applied learning rates to optimizer: {:?}", self.last_epoch, lrs_to_apply);
+            }
         }
         Ok(())
     }
 
-    fn get_last_lr(&self) -> Vec<f32> {
-        self.optimizer.param_groups().iter().map(|pg| pg.lr()).collect()
-    }
-
     fn optimizer(&self) -> &O {
-        &self.optimizer
+        self.optimizer
     }
 
     fn optimizer_mut(&mut self) -> &mut O {
-        &mut self.optimizer
+        self.optimizer
     }
 }
 

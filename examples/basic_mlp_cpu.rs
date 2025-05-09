@@ -35,6 +35,7 @@ use neurarust_core::NeuraRustError;
 use neurarust_core::types::DType; // Ajout de l'import pour DType
 use neurarust_core::tensor::create::randn; // Ajout de l'import pour randn
 use neurarust_core::nn::losses::mse::MSELoss; // Ajout de l'import pour MSELoss
+use std::sync::{Arc, RwLock};
 
 /// Un Multi-Layer Perceptron (MLP) simple avec une couche cachée.
 /// Architecture: Linear -> ReLU -> Linear
@@ -84,21 +85,20 @@ impl Module for SimpleMLP {
     }
 
     /// Retourne une liste des paramètres du module.
-    /// Actuellement, collecte les poids et les biais des couches linéaires.
-    fn parameters(&self) -> Vec<&Parameter> {
-        let mut params: Vec<&Parameter> = Vec::new();
+    fn parameters(&self) -> Vec<Arc<RwLock<Parameter>>> {
+        let mut params: Vec<Arc<RwLock<Parameter>>> = Vec::new();
         params.extend(self.linear1.parameters());
         params.extend(self.linear2.parameters());
         params
     }
 
-    fn named_parameters(&self) -> Vec<(String, &Parameter)> {
-        let mut params = Vec::new();
-        for (name, param) in self.linear1.named_parameters() {
-            params.push((format!("linear1.{}", name), param));
+    fn named_parameters(&self) -> Vec<(String, Arc<RwLock<Parameter>>)> {
+        let mut params: Vec<(String, Arc<RwLock<Parameter>>)> = Vec::new();
+        for (name, param_arc) in self.linear1.named_parameters() {
+            params.push((format!("linear1.{}", name), param_arc));
         }
-        for (name, param) in self.linear2.named_parameters() {
-            params.push((format!("linear2.{}", name), param));
+        for (name, param_arc) in self.linear2.named_parameters() {
+            params.push((format!("linear2.{}", name), param_arc));
         }
         params
     }
@@ -116,12 +116,15 @@ impl Module for SimpleMLP {
 
     fn modules(&self) -> Vec<&dyn Module> {
         let mut mods: Vec<&dyn Module> = vec![self as &dyn Module];
-        mods.push(&self.linear1 as &dyn Module);
-        mods.push(&self.linear2 as &dyn Module);
-        // Pour une structure de Module plus profonde, nous devrions appeler récursivement
-        // child.modules() et étendre la liste. Pour un SimpleMLP avec des Linear (feuilles),
-        // ceci est suffisant pour correspondre à la sémantique attendue (self + enfants directs).
+        mods.extend(self.linear1.modules());
+        mods.extend(self.linear2.modules());
         mods
+    }
+
+    fn apply(&mut self, f: &mut dyn FnMut(&mut dyn Module)) {
+        f(self);
+        self.linear1.apply(f);
+        self.linear2.apply(f);
     }
 }
 
@@ -196,131 +199,128 @@ fn main() -> Result<(), NeuraRustError> {
     println!("Fonction de perte MSELoss instanciée.");
 
     // Step 1.C.4: Implement zero_grad Mechanism
-
-    // Pour tester zero_grad, nous avons besoin d'un moyen de définir un grad initial.
-    // Dans un vrai scénario, le backward pass peuplerait les gradients.
-    // Ici, nous utilisons acc_grad sur le tensor du premier paramètre pour définir un gradient factice.
-    let first_weight_param = mlp.linear1.weight();
-    let shape = first_weight_param.tensor().shape().to_vec();
-    let numel = first_weight_param.tensor().numel();
-    let dummy_grad_data_vec = vec![0.5f32; numel];
-    let dummy_grad_tensor_for_test = Tensor::new(dummy_grad_data_vec, shape)?;
-    
-    first_weight_param.tensor().acc_grad(dummy_grad_tensor_for_test)?; // Utilise acc_grad pour initialiser
-
-    assert!(mlp.linear1.weight().tensor().grad().is_some(), "Le gradient du premier poids devrait être Some avant zero_grad");
+    let first_weight_param_arc = mlp.linear1.weight(); // Ceci est &Arc<RwLock<Parameter>>
+    {
+        let first_weight_param_guard = first_weight_param_arc.read().unwrap();
+        let shape = first_weight_param_guard.tensor.shape().to_vec();
+        let numel = first_weight_param_guard.tensor.numel();
+        let dummy_grad_data_vec = vec![0.5f32; numel];
+        let dummy_grad_tensor_for_test = Tensor::new(dummy_grad_data_vec, shape)?;
+        
+        // acc_grad est sur Tensor, donc on accède à .tensor
+        first_weight_param_guard.tensor.acc_grad(dummy_grad_tensor_for_test)?; 
+        assert!(first_weight_param_guard.tensor.grad().is_some(), "Le gradient du premier poids devrait être Some avant zero_grad");
+    }
     println!("Gradient factice assigné au premier paramètre via acc_grad.");
 
     // Appel de zero_grad sur tous les paramètres
-    mlp.linear1.weight_mut().zero_grad();
-    if let Some(bias) = mlp.linear1.bias_mut() {
-        bias.zero_grad();
+    // zero_grad est sur Parameter, accessible via write lock
+    mlp.linear1.weight_mut().write().unwrap().zero_grad();
+    if let Some(bias_arc) = mlp.linear1.bias_mut() {
+        bias_arc.write().unwrap().zero_grad();
     }
-    mlp.linear2.weight_mut().zero_grad();
-    if let Some(bias) = mlp.linear2.bias_mut() {
-        bias.zero_grad();
+    mlp.linear2.weight_mut().write().unwrap().zero_grad();
+    if let Some(bias_arc) = mlp.linear2.bias_mut() {
+        bias_arc.write().unwrap().zero_grad();
     }
-
     println!("Méthode zero_grad appelée sur tous les paramètres.");
 
     // Vérification
-    assert!(mlp.linear1.weight().tensor().grad().is_none(), "Le gradient du premier poids devrait être None après zero_grad");
-    if let Some(bias_param) = mlp.linear1.bias() { // Utilise l'accesseur non mutable pour la vérification
-        assert!(bias_param.tensor().grad().is_none(), "Le gradient du premier biais devrait être None après zero_grad");
+    assert!(mlp.linear1.weight().read().unwrap().tensor.grad().is_none(), "Le gradient du premier poids devrait être None après zero_grad");
+    if let Some(bias_param_arc) = mlp.linear1.bias() { 
+        assert!(bias_param_arc.read().unwrap().tensor.grad().is_none(), "Le gradient du premier biais devrait être None après zero_grad");
     }
-    assert!(mlp.linear2.weight().tensor().grad().is_none(), "Le gradient du second poids devrait être None après zero_grad");
-    if let Some(bias_param) = mlp.linear2.bias() { // Utilise l'accesseur non mutable pour la vérification
-        assert!(bias_param.tensor().grad().is_none(), "Le gradient du second biais devrait être None après zero_grad");
+    assert!(mlp.linear2.weight().read().unwrap().tensor.grad().is_none(), "Le gradient du second poids devrait être None après zero_grad");
+    if let Some(bias_param_arc) = mlp.linear2.bias() { 
+        assert!(bias_param_arc.read().unwrap().tensor.grad().is_none(), "Le gradient du second biais devrait être None après zero_grad");
     }
-
     println!("Gradients vérifiés et remis à zéro avec succès.");
 
     // Step 1.C.5: Implement Manual Training Loop
     let learning_rate = 0.01f32;
-    let num_epochs = 10; // Petit nombre pour l'exemple
-
+    let num_epochs = 10; 
     println!("\nDébut de la boucle d'entraînement...");
 
     for epoch in 0..num_epochs {
-        // --- Passe Avant ---
         let y_pred = mlp.forward(&x_data)?;
-
-        // --- Calcul de la Perte ---
         let loss = loss_fn.calculate(&y_pred, &y_data)?;
         
-        // Affichage de la perte (optionnel, mais utile)
-        // Assurez-vous que la perte est un scalaire ou peut être réduite à un scalaire
-        // MSELoss avec réduction "Mean" ou "Sum" devrait produire un tenseur scalaire.
-        match loss.item_f32() {
-            Ok(loss_value) => {
-                println!("Epoch: {}, Loss: {}", epoch, loss_value);
-            }
-            Err(e) => {
-                eprintln!("Impossible d'extraire la valeur de la perte à l'epoch {}: {:?}. Shape de la perte: {:?}", epoch, e, loss.shape());
-                // Peut-être que la perte n'est pas scalaire, ou autre problème.
-                // Pour l'instant, on continue.
-            }
+        if epoch % 2 == 0 || epoch == num_epochs - 1 {
+            println!("Epoch: {}, Loss: {:?}", epoch, loss.get_f32_data()?);
+        }
+
+        // --- Remise à zéro des gradients avant la passe arrière ---
+        // mlp.parameters() retourne Vec<Arc<RwLock<Parameter>>>
+        for param_arc in mlp.parameters() {
+            param_arc.write().unwrap().zero_grad();
         }
 
         // --- Passe Arrière ---
-        loss.backward(None)?; // Utilise None pour un gradient initial de 1.0 (pour les pertes scalaires)
+        loss.backward(None)?;
 
-        // --- Mise à Jour des Poids (Manuelle et Inefficace) ---
-        // Fonction helper temporaire pour la mise à jour manuelle d'un paramètre
-        fn update_parameter_manually(
-            param: &mut Parameter, 
-            learning_rate: f32,
-        ) -> Result<(), NeuraRustError> {
-            let tensor = param.tensor_mut(); // Obtient &mut Tensor du Parameter
-
-            if let Some(grad_tensor) = tensor.grad() { // grad() retourne Option<Tensor> (clone)
-                // S'assurer que les opérations se font sur des données F32
-                // Ceci est une simplification; une vraie implémentation gérerait les DTypes
-                let weight_data = tensor.get_f32_data()?;
-                let grad_data = grad_tensor.get_f32_data()?;
-
-                if weight_data.len() != grad_data.len() {
-                    return Err(NeuraRustError::ShapeMismatch {
-                        expected: format!("data len {}", weight_data.len()),
-                        actual: format!("grad data len {}", grad_data.len()),
-                        operation: "manual weight update (data length)".to_string(),
-                    });
-                }
-
-                let mut new_weight_data = Vec::with_capacity(weight_data.len());
-                for (w, g) in weight_data.iter().zip(grad_data.iter()) {
-                    new_weight_data.push(w - learning_rate * g);
-                }
-
-                let updated_tensor = Tensor::new(new_weight_data, tensor.shape().to_vec())?;
-                let detached_updated_tensor = updated_tensor.detach(); // Détacher pour ne pas affecter le graphe
-                
-                *tensor = detached_updated_tensor; // Remplace le Tensor interne du Parameter
-            }
-            Ok(())
+        // --- Mise à jour manuelle des poids ---
+        // update_parameter_manually attend &mut Parameter
+        update_parameter_manually(&mut mlp.linear1.weight_mut().write().unwrap(), learning_rate)?;
+        if let Some(bias_arc) = mlp.linear1.bias_mut() {
+            update_parameter_manually(&mut bias_arc.write().unwrap(), learning_rate)?;
         }
-
-        update_parameter_manually(mlp.linear1.weight_mut(), learning_rate)?;
-        if let Some(bias_param) = mlp.linear1.bias_mut() {
-            update_parameter_manually(bias_param, learning_rate)?;
-        }
-        update_parameter_manually(mlp.linear2.weight_mut(), learning_rate)?;
-        if let Some(bias_param) = mlp.linear2.bias_mut() {
-            update_parameter_manually(bias_param, learning_rate)?;
-        }
-
-        // --- Remise à Zéro des Gradients ---
-        mlp.linear1.weight_mut().zero_grad();
-        if let Some(bias) = mlp.linear1.bias_mut() {
-            bias.zero_grad();
-        }
-        mlp.linear2.weight_mut().zero_grad();
-        if let Some(bias) = mlp.linear2.bias_mut() {
-            bias.zero_grad();
+        update_parameter_manually(&mut mlp.linear2.weight_mut().write().unwrap(), learning_rate)?;
+        if let Some(bias_arc) = mlp.linear2.bias_mut() {
+            update_parameter_manually(&mut bias_arc.write().unwrap(), learning_rate)?;
         }
     }
+    println!("Entraînement terminé.");
 
-    println!("Boucle d'entraînement terminée.");
+    Ok(())
+}
 
+// Fonction d'aide pour la mise à jour manuelle (simplifiée)
+fn update_parameter_manually(
+    param: &mut Parameter, 
+    learning_rate: f32,
+) -> Result<(), NeuraRustError> {
+    let original_shape = param.tensor.shape(); 
+
+    let new_data_opt = { 
+        // Se ranger à l'avis du linter pour grad()
+        let grad_tensor_opt = param.tensor.grad(); 
+
+        if let Some(grad_tensor) = grad_tensor_opt {
+            let current_tensor_data_guard = param.tensor.read_data();
+            let current_data_slice = current_tensor_data_guard.buffer().try_get_cpu_f32()?;
+
+            if grad_tensor.dtype() != param.tensor.dtype() {
+                return Err(NeuraRustError::DataTypeMismatch {
+                    expected: param.tensor.dtype(),
+                    actual: grad_tensor.dtype(),
+                    operation: "manual gradient update (grad dtype check)".to_string(),
+                });
+            }
+
+            let grad_tensor_data_guard = grad_tensor.read_data();
+            let grad_data_slice = grad_tensor_data_guard.buffer().try_get_cpu_f32()?;
+
+            if current_data_slice.len() != grad_data_slice.len() {
+                return Err(NeuraRustError::ShapeMismatch {
+                    expected: format!("grad shape matching data shape {}", current_data_slice.len()),
+                    actual: format!("{}", grad_data_slice.len()),
+                    operation: "manual weight update".to_string(),
+                });
+            }
+            
+            let mut new_data_vec = Vec::with_capacity(current_data_slice.len());
+            for (val, g_val) in current_data_slice.iter().zip(grad_data_slice.iter()) {
+                new_data_vec.push(val - learning_rate * g_val);
+            }
+            Some(new_data_vec)
+        } else {
+            None 
+        }
+    }; 
+
+    if let Some(new_data) = new_data_opt {
+        param.tensor = Tensor::new(new_data, original_shape)?;
+        param.tensor.set_requires_grad(true)?;
+    }
     Ok(())
 } 

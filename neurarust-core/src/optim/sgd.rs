@@ -1,15 +1,21 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::collections::HashMap;
 use crate::nn::parameter::Parameter;
-use crate::optim::optimizer_trait::Optimizer;
-use crate::optim::param_group::ParamGroup;
+use crate::optim::Optimizer;
+use crate::optim::param_group::{ParamGroup /*, ParamGroupOptions*/};
 use crate::optim::optimizer_state::OptimizerState;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
-use std::ops::{Deref, DerefMut};
-use crate::types::DType;
 use std::sync::RwLock;
-use log;
+use crate::ops::arithmetic::add::add_op;
+use crate::ops::arithmetic::mul::mul_op_scalar;
+
+/// Represents the state for a single parameter in the SGD optimizer.
+#[derive(Default, Clone, Debug)]
+struct SgdState {
+    /// Momentum buffer.
+    momentum_buffer: Option<Tensor>,
+}
 
 /// Implements the Stochastic Gradient Descent (SGD) optimizer.
 ///
@@ -17,10 +23,7 @@ use log;
 #[derive(Debug)]
 pub struct SgdOptimizer {
     param_groups: Vec<ParamGroup>,
-    momentum: f32,
-    nesterov: bool,
-    // Les buffers suivants sont la source de vérité de l'état interne.
-    momentum_buffers: Arc<RwLock<HashMap<usize, Tensor>>>,
+    state: HashMap<String, SgdState>,
 }
 
 impl SgdOptimizer {
@@ -38,191 +41,101 @@ impl SgdOptimizer {
     /// To use multiple parameter groups with different learning rates or other
     /// hyperparameters, first create the optimizer with an empty iterator or an
     /// initial set of parameters, then use `add_param_group`.
-    pub fn new(
-        params: impl IntoIterator<Item = Arc<Mutex<Parameter>>>,
-        lr: f32,
-        momentum: f32,
-        group_weight_decay: f32,
-        nesterov: bool,
-    ) -> Self {
-        let params_vec: Vec<Arc<Mutex<Parameter>>> = params.into_iter().collect();
-        let default_param_group = ParamGroup::new(params_vec, lr, group_weight_decay, 0.0);
-        
-        SgdOptimizer {
-            param_groups: vec![default_param_group],
-            momentum,
-            nesterov,
-            momentum_buffers: Arc::new(RwLock::new(HashMap::new())),
+    pub fn new(params: Vec<Arc<RwLock<Parameter>>>, lr: f32, momentum: f32, dampening: f32, weight_decay: f32, nesterov: bool) -> Result<Self, NeuraRustError> {
+        if lr < 0.0 {
+            return Err(NeuraRustError::ConfigurationError("Invalid learning rate: {}".to_string()));
         }
+        if momentum < 0.0 {
+             return Err(NeuraRustError::ConfigurationError("Invalid momentum value: {}".to_string()));
+        }
+        if weight_decay < 0.0 {
+             return Err(NeuraRustError::ConfigurationError("Invalid weight_decay value: {}".to_string()));
+        }
+
+        // Créer le groupe de paramètres unique
+        let mut default_param_group = ParamGroup::new(params);
+        // Définir les options
+        default_param_group.options.lr = Some(lr);
+        default_param_group.options.momentum = Some(momentum);
+        default_param_group.options.dampening = Some(dampening);
+        default_param_group.options.weight_decay = Some(weight_decay);
+        default_param_group.options.nesterov = Some(nesterov);
+
+        Ok(SgdOptimizer {
+            param_groups: vec![default_param_group],
+            state: HashMap::new(),
+        })
     }
 }
 
 impl Optimizer for SgdOptimizer {
     fn step(&mut self) -> Result<(), NeuraRustError> {
-        for group in self.param_groups.iter() {
-            let lr = group.lr;
-            let weight_decay = group.weight_decay;
-            let momentum_val = self.momentum;
-            let nesterov = self.nesterov;
+        for group in &mut self.param_groups {
+            // Obtenir les options du groupe, avec des valeurs par défaut si non spécifiées
+            let lr = group.options.lr.ok_or(NeuraRustError::ConfigurationError("Missing LR in SGD group".to_string()))?;
+            let momentum = group.options.momentum.unwrap_or(0.0);
+            let dampening = group.options.dampening.unwrap_or(0.0);
+            let weight_decay = group.options.weight_decay.unwrap_or(0.0);
+            let nesterov = group.options.nesterov.unwrap_or(false);
 
-            for param_arc in group.params.iter() {
-                let param_id = Arc::as_ptr(param_arc) as usize;
-                let mut param = param_arc.lock().map_err(|e| {
-                    NeuraRustError::LockError {
-                        lock_type: "write".to_string(),
-                        reason: format!("Failed to lock parameter mutex in SGD step: {}", e),
-                    }
+            for param_arc in &group.params {
+                let mut param_locked = param_arc.write().map_err(|e| NeuraRustError::LockError {
+                    lock_type: "write".to_string(),
+                    reason: format!("Failed to lock param in SGD step: {}", e),
                 })?;
-
-                if !param.requires_grad() {
-                    continue;
-                }
-
-                let base_grad_opt = param.grad();
-                let base_grad = match base_grad_opt {
-                    Some(g) => {
-                        g
-                    }
-                    None => {
-                        continue;
-                    }
-                };
-
-                let param_dtype = param.dtype();
-                if base_grad.dtype() != param_dtype {
-                    return Err(NeuraRustError::DataTypeMismatch {
-                        expected: param_dtype,
-                        actual: base_grad.dtype(),
-                        operation: "Parameter and Gradient in SGD step".to_string(),
-                    });
-                }
-
-                let mut d_p = match base_grad.dtype() {
-                    DType::F32 => {
-                        let data = base_grad.get_f32_data().map_err(|e| {
-                            e
-                        })?;
-                        Tensor::new(data, base_grad.shape().to_vec()).map_err(|e| {
-                            e
-                        })?
-                    }
-                    DType::F64 => {
-                        let data = base_grad.get_f64_data().map_err(|e| {
-                            e
-                        })?;
-                        Tensor::new_f64(data, base_grad.shape().to_vec()).map_err(|e| {
-                            e
-                        })?
-                    }
-                };
-
-                if weight_decay != 0.0 {
-                    let param_tensor_ref: &Tensor = param.deref(); 
-                    let mut wd_term = match param_dtype {
-                        DType::F32 => {
-                            let data = param_tensor_ref.get_f32_data()?;
-                            Tensor::new(data, param_tensor_ref.shape().to_vec())?
-                        }
-                        DType::F64 => {
-                            let data = param_tensor_ref.get_f64_data()?;
-                            Tensor::new_f64(data, param_tensor_ref.shape().to_vec())?
-                        }
-                    };
-                    
-                    match param_dtype {
-                        DType::F32 => wd_term.direct_mul_scalar_f32_inplace(weight_decay as f32)?,
-                        DType::F64 => wd_term.direct_mul_scalar_f64_inplace(weight_decay as f64)?,
-                    }
-                    d_p.add_(&wd_term)?;
-                }
-
-                let final_update_value: Tensor;
-
-                if momentum_val != 0.0 {
-                    let final_val_from_momentum_branch: Tensor;
-                    {
-                        let mut buffers = match self.momentum_buffers.write() {
-                            Ok(guard) => {
-                                guard
-                            }
-                            Err(poisoned) => {
-                                log::warn!("RwLock for momentum_buffers was poisoned in step. Recovering writer guard.");
-                                poisoned.into_inner()
-                            }
-                        };
-
-                        let buffer = buffers.entry(param_id).or_insert_with(|| {
-                            crate::tensor::create::zeros_like(&d_p)
-                                .expect("Failed to create momentum buffer")
-                        });
-
-                        match param_dtype {
-                            DType::F32 => buffer.direct_mul_scalar_f32_inplace(momentum_val as f32)?,
-                            DType::F64 => buffer.direct_mul_scalar_f64_inplace(momentum_val as f64)?,
-                        }
-                        
-                        buffer.add_(&d_p)?;
-
-                        if nesterov {
-                            let mut nesterov_momentum_term = match buffer.dtype() {
-                                DType::F32 => Tensor::new(buffer.get_f32_data()?, buffer.shape().to_vec())?,
-                                DType::F64 => Tensor::new_f64(buffer.get_f64_data()?, buffer.shape().to_vec())?,
-                            };
-
-                            match param_dtype {
-                                DType::F32 => nesterov_momentum_term.direct_mul_scalar_f32_inplace(momentum_val as f32)?,
-                                DType::F64 => nesterov_momentum_term.direct_mul_scalar_f64_inplace(momentum_val as f64)?,
-                            }
-                            
-                            let mut nesterov_update = d_p.clone();
-
-                            nesterov_update.add_(&nesterov_momentum_term)?;
-                            
-                            final_val_from_momentum_branch = nesterov_update;
-                        } else {
-                            final_val_from_momentum_branch = buffer.clone();
-                        }
-                    }
-                    final_update_value = final_val_from_momentum_branch;
-                } else {
-                    final_update_value = d_p;
-                }
                 
-                let mut final_delta = match final_update_value.dtype() {
-                     DType::F32 => {
-                         let data = final_update_value.get_f32_data()?;
-                         Tensor::new(data, final_update_value.shape().to_vec())?
-                     }
-                     DType::F64 => {
-                         let data = final_update_value.get_f64_data()?;
-                         Tensor::new_f64(data, final_update_value.shape().to_vec())?
-                     }
-                 };
+                if param_locked.grad().is_none() { continue; }
+                let grad = param_locked.grad().unwrap().clone(); // grad() ne prend pas d'arg
 
-                match final_delta.dtype() {
-                    DType::F32 => final_delta.direct_mul_scalar_f32_inplace(lr as f32)?,
-                    DType::F64 => final_delta.direct_mul_scalar_f64_inplace(lr as f64)?,
+                let param_name = param_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_{:?}", Arc::as_ptr(param_arc)));
+
+                let mut grad_processed = grad.clone();
+
+                // Apply weight decay (L2 penalty)
+                if weight_decay != 0.0 {
+                    grad_processed = add_op(&grad_processed, &mul_op_scalar(&param_locked.tensor, weight_decay)?)?;
                 }
 
-                let param_tensor = param.deref_mut();
-                param_tensor.direct_sub_inplace(&final_delta)?;
+                // Apply momentum
+                if momentum != 0.0 {
+                    let state_entry = self.state.entry(param_name.clone()).or_insert_with(SgdState::default);
+                    
+                    if state_entry.momentum_buffer.is_none() {
+                        state_entry.momentum_buffer = Some(grad_processed.clone());
+                    } else {
+                        let buf = state_entry.momentum_buffer.as_mut().unwrap();
+                        // buf = buf * momentum + grad_processed * (1 - dampening)
+                        let buf_scaled = mul_op_scalar(buf, momentum)?;
+                        let grad_dampened = mul_op_scalar(&grad_processed, 1.0 - dampening)?;
+                        *buf = add_op(&buf_scaled, &grad_dampened)?;
+                    }
+
+                    if nesterov {
+                        // grad_processed = grad_processed + buf * momentum
+                        let buf_scaled_nesterov = mul_op_scalar(state_entry.momentum_buffer.as_ref().unwrap(), momentum)?;
+                        grad_processed = add_op(&grad_processed, &buf_scaled_nesterov)?;
+                    } else {
+                        grad_processed = state_entry.momentum_buffer.as_ref().unwrap().clone();
+                    }
+                }
+
+                // Perform the update: param = param - lr * grad_processed
+                let update_val = mul_op_scalar(&grad_processed, -lr)?;
+                let current_tensor = param_locked.tensor.clone();
+                let updated_tensor = add_op(&current_tensor, &update_val)?;
+                param_locked.tensor = updated_tensor;
             }
         }
         Ok(())
     }
 
     fn zero_grad(&mut self) {
-        for group in self.param_groups.iter_mut() {
-            for param_arc in group.params.iter_mut() {
-                match param_arc.lock() {
-                    Ok(param_guard) => {
-                        param_guard.clear_grad();
-                    }
-                    Err(poisoned) => {
-                        log::warn!("Mutex for parameter in SgdOptimizer::zero_grad was poisoned. Recovering.");
-                        let param_guard = poisoned.into_inner();
-                        param_guard.clear_grad();
-                    }
+        for group in &mut self.param_groups {
+            for param_arc in &group.params {
+                if let Ok(mut param_locked) = param_arc.write() {
+                    param_locked.zero_grad();
+                } else {
+                     eprintln!("Warning: Could not lock parameter to zero_grad in SGD.");
                 }
             }
         }
@@ -232,54 +145,23 @@ impl Optimizer for SgdOptimizer {
         self.param_groups.push(param_group);
     }
 
-    fn load_state_dict(&mut self, state_dict: &OptimizerState) -> Result<(), NeuraRustError> {
-        match state_dict {
-            OptimizerState::Sgd { momentum_buffers: incoming_buffers } => {
-                if self.momentum == 0.0 && !incoming_buffers.is_empty() {
-                   log::warn!("Loading SGD state with momentum buffers, but optimizer momentum is 0.");
-                }
-                 if self.momentum != 0.0 && incoming_buffers.is_empty() {
-                    log::warn!("Loading empty SGD state, but optimizer momentum is non-zero. Momentum buffers will be initialized on first step if not present here.");
-                 }
-                
-                let mut buffers_guard = match self.momentum_buffers.write() {
-                    Ok(guard) => guard,
-                    Err(poisoned) => {
-                        log::warn!("RwLock for momentum_buffers was poisoned during load_state_dict. Recovering write guard.");
-                        poisoned.into_inner()
-                    }
-                };
-                *buffers_guard = incoming_buffers.clone();
-                Ok(())
-            }
-            OptimizerState::Placeholder => {
-                 if self.momentum != 0.0 {
-                     log::warn!("Loading Placeholder state, but optimizer momentum is non-zero. Momentum buffers will be initialized on first step.");
-                 }
-                 match self.momentum_buffers.write() {
-                     Ok(mut guard) => guard.clear(),
-                     Err(poisoned) => {
-                         log::warn!("RwLock for momentum_buffers was poisoned during clear for Placeholder. Recovering and clearing.");
-                         poisoned.into_inner().clear();
-                     }
-                 }
-                 Ok(())
-            }
-            _ => Err(NeuraRustError::UnsupportedOperation(
-                "Attempted to load incompatible state into SgdOptimizer".to_string(),
-            )),
-        }
+    fn param_groups(&self) -> &[ParamGroup] {
+        &self.param_groups
+    }
+
+    fn param_groups_mut(&mut self) -> &mut [ParamGroup] {
+        &mut self.param_groups
+    }
+
+    fn load_state_dict(&mut self, _state_dict: &OptimizerState) -> Result<(), NeuraRustError> {
+        unimplemented!("SGD load_state_dict not implemented yet.")
     }
 
     fn state_dict(&self) -> Result<OptimizerState, NeuraRustError> {
-        let buffers_guard = match self.momentum_buffers.read() { 
-            Ok(guard) => guard,
-            Err(poisoned) => {
-                log::warn!("RwLock for momentum_buffers was poisoned during state_dict. Recovering read guard.");
-                poisoned.into_inner()
-            }
-        };
-        let cloned_buffers = buffers_guard.clone();
-        Ok(OptimizerState::Sgd { momentum_buffers: cloned_buffers })
+        unimplemented!("SGD state_dict not implemented yet.")
     }
-} 
+}
+
+#[cfg(test)]
+#[path = "sgd_test.rs"]
+mod tests; 

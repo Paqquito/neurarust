@@ -1,17 +1,10 @@
 use crate::tensor::Tensor;
 use std::collections::HashMap;
 
-// Import pour RmsPropParamState. Assurez-vous que RmsPropParamState est pub dans rmsprop.rs.
-// Pour l'instant, cette ligne est commentée pour éviter une erreur si rmsprop.rs n'est pas encore compilable
-// ou si RmsPropParamState n'est pas pub.
-// Si RmsPropParamState est bien pub et dans crate::optim::rmsprop, décommentez :
-// use crate::optim::rmsprop::{RmsPropParamState};
-
-// Alternative temporaire pour la compilation, si RmsPropParamState n'est pas accessible:
-// Remplacer `RmsPropParamState` dans la variante RmsProp par une structure locale ou () 
-// et ajuster rmsprop.rs en conséquence pour state_dict / load_state_dict.
-// Pour cet exemple, je vais assumer que RmsPropParamState sera rendu pub.
-use crate::optim::rmsprop::RmsPropParamState; 
+// Importer les types d'état publics
+use crate::optim::adagrad::AdagradState;
+use crate::optim::adam::AdamParamState;
+use crate::optim::rmsprop::RmsPropParamState; // Assumant que RmsPropParamState est pub
 
 /// Represents the state of an optimizer.
 ///
@@ -48,9 +41,7 @@ pub enum OptimizerState {
     },
     /// State specific to the Adagrad optimizer.
     Adagrad {
-        // Vecteur externe: groupe, Vecteur interne: paramètre dans le groupe
-        state_sum_gradient_squares: Vec<Vec<Tensor>>,
-        steps: Vec<usize>,
+        state: HashMap<String, AdagradState>, // Clé: nom du paramètre
     },
     /// A generic placeholder state for optimizers without specific state yet
     /// or for initialization.
@@ -61,9 +52,4 @@ impl Default for OptimizerState {
     fn default() -> Self {
         OptimizerState::Placeholder
     }
-}
-
-#[derive(Default, Clone, Debug)]
-pub struct AdamParamState {
-    // ... existing code ...
 } 

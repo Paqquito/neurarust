@@ -24,236 +24,128 @@
 //! `cargo run --example basic_mlp_cpu_inplace_optim`
 //!
 
-use neurarust_core::tensor::Tensor;
-use neurarust_core::nn::layers::linear::Linear;
-use neurarust_core::nn::module::Module;
-use neurarust_core::nn::parameter::Parameter;
-use neurarust_core::ops::activation::relu_op; // Opération ReLU
-use neurarust_core::NeuraRustError;
-use neurarust_core::types::DType; 
-use neurarust_core::tensor::create::randn; 
-use neurarust_core::nn::losses::mse::MSELoss; 
+use neurarust_core::{NeuraRustError, nn::layers::linear::Linear, nn::layers::ReLU, model::sequential::Sequential, nn::module::Module, nn::parameter::Parameter, types::DType, tensor::create::randn, nn::losses::mse::MSELoss, optim::Optimizer, optim::AdamOptimizer, optim::lr_scheduler::{StepLR, LRScheduler}, tensor::Tensor};
+use std::sync::{Arc, RwLock};
 
 /// Un Multi-Layer Perceptron (MLP) simple avec une couche cachée.
 /// Architecture: Linear -> ReLU -> Linear
-#[derive(Debug)] 
-pub struct SimpleMLP {
-    linear1: Linear,
-    linear2: Linear,
+#[derive(Debug)]
+struct SimpleMLP {
+    layers: Sequential,
 }
 
 impl SimpleMLP {
     /// Crée un nouveau SimpleMLP.
-    pub fn new(in_features: usize, hidden_features: usize, out_features: usize) -> Result<Self, NeuraRustError> {
-        let linear1 = Linear::new(in_features, hidden_features, true, DType::F32)?;
-        let linear2 = Linear::new(hidden_features, out_features, true, DType::F32)?;
-        Ok(SimpleMLP { linear1, linear2 })
+    fn new(input_size: usize, hidden_size: usize, output_size: usize) -> Result<Self, NeuraRustError> {
+        let mut layers = Sequential::new();
+        layers.add_module(
+            "linear1",
+            Box::new(Linear::new(input_size, hidden_size, true, DType::F32)?)
+        );
+        layers.add_module("relu1", Box::new(ReLU::new()));
+        layers.add_module(
+            "linear2",
+            Box::new(Linear::new(hidden_size, output_size, true, DType::F32)?)
+        );
+        Ok(SimpleMLP { layers })
     }
 }
 
 impl Module for SimpleMLP {
     /// Effectue une passe avant à travers le MLP.
     fn forward(&self, input: &Tensor) -> Result<Tensor, NeuraRustError> {
-        let x = self.linear1.forward(input)?;
-        let x = relu_op(&x)?;
-        self.linear2.forward(&x)
+        self.layers.forward(input)
     }
 
     /// Retourne une liste des paramètres clonés du module.
-    fn parameters(&self) -> Vec<&Parameter> {
-        let mut model_params: Vec<&Parameter> = Vec::new();
-        model_params.extend(self.linear1.parameters());
-        model_params.extend(self.linear2.parameters());
-        model_params
+    /// Modifié pour retourner le type attendu par les optimiseurs.
+    fn parameters(&self) -> Vec<Arc<RwLock<Parameter>>> {
+        self.layers.parameters()
     }
 
-    fn named_parameters(&self) -> Vec<(String, &Parameter)> {
-        let mut params = Vec::new();
-        for (name, param) in self.linear1.named_parameters() {
-            params.push((format!("linear1.{}", name), param));
-        }
-        for (name, param) in self.linear2.named_parameters() {
-            params.push((format!("linear2.{}", name), param));
-        }
-        params
+    fn named_parameters(&self) -> Vec<(String, Arc<RwLock<Parameter>>)> {
+        self.layers.named_parameters()
     }
 
     fn children(&self) -> Vec<&dyn Module> {
-        vec![&self.linear1, &self.linear2]
+        self.layers.children()
     }
 
     fn named_children(&self) -> Vec<(String, &dyn Module)> {
-        vec![
-            ("linear1".to_string(), &self.linear1 as &dyn Module),
-            ("linear2".to_string(), &self.linear2 as &dyn Module),
-        ]
+        self.layers.named_children()
     }
 
     fn modules(&self) -> Vec<&dyn Module> {
-        let mut mods: Vec<&dyn Module> = vec![self as &dyn Module];
-        mods.push(&self.linear1 as &dyn Module);
-        mods.push(&self.linear2 as &dyn Module);
+        let mut mods = vec![self as &dyn Module];
+        mods.extend(self.layers.modules());
         mods
+    }
+
+    fn apply(&mut self, f: &mut dyn FnMut(&mut dyn Module)) {
+        self.layers.apply(f);
     }
 }
 
-
 fn main() -> Result<(), NeuraRustError> {
-    let mut mlp = SimpleMLP::new(10, 20, 5)?;
-    println!("SimpleMLP (pour optim in-place) créé avec succès !");
+    // La variable device n'est pas utilisée dans cet exemple pour le moment.
+    // let device = StorageDevice::CPU;
+    let mlp = SimpleMLP::new(10, 20, 5)?;
+    println!("SimpleMLP créé avec succès !");
 
-    // Affichage des paramètres nommés pour vérification
-    let named_params = mlp.named_parameters();
-    println!("Paramètres nommés dans le MLP (in-place optim):");
-    for (name, _param) in &named_params {
-        println!("- {}", name);
-    }
-    assert_eq!(named_params.len(), 4); // Devrait aussi être 4
+    let mut optimizer = AdamOptimizer::new(
+        mlp.parameters(),
+        0.001, // lr
+        0.9,   // beta1
+        0.999, // beta2
+        1e-8, // eps
+        0.01, // weight_decay
+        false, // amsgrad
+    )?;
 
-    // Test de children()
-    let children = mlp.children();
-    println!("Nombre d'enfants directs dans le MLP (in-place optim): {}", children.len());
-    assert_eq!(children.len(), 2);
+    let mut scheduler = StepLR::new(&mut optimizer, 5, 0.5); 
 
-    // Test de named_children()
-    let named_children = mlp.named_children();
-    println!("Enfants nommés dans le MLP (in-place optim):");
-    for (name, _module) in &named_children {
-        println!("- {}", name);
-    }
-    assert_eq!(named_children.len(), 2);
-    assert!(named_children.iter().any(|(name, _)| name == "linear1"));
-    assert!(named_children.iter().any(|(name, _)| name == "linear2"));
-
-    // Test de modules()
-    let modules = mlp.modules();
-    println!("Nombre total de modules (self + descendants) dans le MLP (in-place optim): {}", modules.len());
-    assert_eq!(modules.len(), 3);
-
-    let input_tensor = randn(vec![1, 10])?;
-    let _output = mlp.forward(&input_tensor)?; // Vérifier que forward passe
-
-    let batch_size = 4;
-    let input_features = 10;
-    let output_features = 5;
-
-    let x_data = randn(vec![batch_size, input_features])?;
-    let y_data = randn(vec![batch_size, output_features])?;
-
+    println!("\nDébut de la boucle d'entraînement...");
     let loss_fn = MSELoss::new("mean");
-
-    // Remise à zéro initiale des gradients (bonne pratique avant la boucle)
-    mlp.linear1.weight_mut().zero_grad();
-    if let Some(b) = mlp.linear1.bias_mut() { b.zero_grad(); }
-    mlp.linear2.weight_mut().zero_grad();
-    if let Some(b) = mlp.linear2.bias_mut() { b.zero_grad(); }
-    
-    let learning_rate = 0.01f32; // Apprentissage pour F32
     let num_epochs = 10;
-
-    println!("\nDébut de la boucle d'entraînement avec optimiseur in-place...");
-
     for epoch in 0..num_epochs {
-        // --- Passe Avant ---
+        // Simuler un batch de données
+        let x_data = randn(vec![4, 10])?; 
+        let y_data = randn(vec![4, 5])?;  
+
+        // Passe avant
         let y_pred = mlp.forward(&x_data)?;
 
-        // --- Calcul de la Perte ---
+        // Calcul de la perte
         let loss = loss_fn.calculate(&y_pred, &y_data)?;
-        
-        match loss.item_f32() {
-            Ok(loss_value) => {
-                println!("Epoch: {}, Loss: {}", epoch, loss_value);
-            }
-            Err(e) => {
-                eprintln!("Impossible d'extraire la valeur de la perte à l'epoch {}: {:?}. Shape de la perte: {:?}", epoch, e, loss.shape());
-            }
-        }
 
-        // --- Passe Arrière ---
+        // Passe arrière
         loss.backward(None)?;
 
-        // --- Mise à Jour des Poids (Utilisant les opérations in-place) ---
-        // Accès direct aux paramètres mutables et mise à jour
+        // Accéder à l'optimiseur via le scheduler
+        scheduler.optimizer_mut().zero_grad();
+        scheduler.optimizer_mut().step()?;
 
-        // Paramètres de linear1
-        if let Some(grad_tensor) = mlp.linear1.weight().tensor().grad() {
-            let update_value = match grad_tensor.dtype() {
-                DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
-                _ => return Err(NeuraRustError::DataTypeMismatch {
-                    expected: DType::F32,
-                    actual: grad_tensor.dtype(),
-                    operation: "Optimizer step (linear1 weight mul_op_scalar)".to_string(),
-                }),
-            };
-            let weight_param_tensor = mlp.linear1.weight_mut().tensor_mut();
-            let detached_weight_data = weight_param_tensor.detach();
-            let updated_weight_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_weight_data, &update_value)?;
-            let final_updated_data = updated_weight_data_from_op.detach();
-            final_updated_data.set_requires_grad(true)?;
-            *weight_param_tensor = final_updated_data;
-        }
+        // Mettre à jour le learning rate
+        scheduler.step(Some(epoch as u64), None)?;
 
-        if let Some(bias_param_mut) = mlp.linear1.bias_mut() {
-            if let Some(grad_tensor) = bias_param_mut.tensor().grad() {
-                let update_value = match grad_tensor.dtype() {
-                    DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
-                    _ => return Err(NeuraRustError::DataTypeMismatch {
-                        expected: DType::F32,
-                        actual: grad_tensor.dtype(),
-                        operation: "Optimizer step (linear1 bias mul_op_scalar)".to_string(),
-                    }),
-                };
-                let bias_tensor_mut = bias_param_mut.tensor_mut();
-                let detached_bias_data = bias_tensor_mut.detach();
-                let updated_bias_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_bias_data, &update_value)?;
-                let final_updated_bias_data = updated_bias_data_from_op.detach();
-                final_updated_bias_data.set_requires_grad(true)?;
-                *bias_tensor_mut = final_updated_bias_data;
+        // Afficher la perte et le LR 
+        if (epoch + 1) % 2 == 0 {
+            let current_lr = scheduler.get_last_lr(); 
+            match loss.item_f32() { // Utiliser item_f32 pour obtenir Result<f32>
+                Ok(loss_value) => {
+                    println!(
+                        "Epoch [{}/{}], Loss: {:.4}, LR: {:?}", // Utiliser {:.4} ou :? pour f32
+                        epoch + 1,
+                        num_epochs,
+                        loss_value, // Pas besoin de .unwrap() ici, le format :? fonctionne
+                        current_lr
+                    );
+                },
+                Err(e) => {
+                    eprintln!("Impossible d'extraire la valeur de la perte à l'epoch {}: {:?}. Shape de la perte: {:?}", epoch, e, loss.shape());
+                }
             }
         }
-
-        // Paramètres de linear2
-        if let Some(grad_tensor) = mlp.linear2.weight().tensor().grad() {
-            let update_value = match grad_tensor.dtype() {
-                DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
-                _ => return Err(NeuraRustError::DataTypeMismatch {
-                    expected: DType::F32,
-                    actual: grad_tensor.dtype(),
-                    operation: "Optimizer step (linear2 weight mul_op_scalar)".to_string(),
-                }),
-            };
-            let weight_param_tensor = mlp.linear2.weight_mut().tensor_mut();
-            let detached_weight_data = weight_param_tensor.detach();
-            let updated_weight_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_weight_data, &update_value)?;
-            let final_updated_data = updated_weight_data_from_op.detach();
-            final_updated_data.set_requires_grad(true)?;
-            *weight_param_tensor = final_updated_data;
-        }
-
-        if let Some(bias_param_mut) = mlp.linear2.bias_mut() {
-            if let Some(grad_tensor) = bias_param_mut.tensor().grad() {
-                let update_value = match grad_tensor.dtype() {
-                    DType::F32 => neurarust_core::ops::arithmetic::mul::mul_op_scalar(&grad_tensor.contiguous()?, learning_rate)?,
-                    _ => return Err(NeuraRustError::DataTypeMismatch {
-                        expected: DType::F32,
-                        actual: grad_tensor.dtype(),
-                        operation: "Optimizer step (linear2 bias mul_op_scalar)".to_string(),
-                    }),
-                };
-                let bias_tensor_mut = bias_param_mut.tensor_mut();
-                let detached_bias_data = bias_tensor_mut.detach();
-                let updated_bias_data_from_op = neurarust_core::ops::arithmetic::sub::sub_op(&detached_bias_data, &update_value)?;
-                let final_updated_bias_data = updated_bias_data_from_op.detach();
-                final_updated_bias_data.set_requires_grad(true)?;
-                *bias_tensor_mut = final_updated_bias_data;
-            }
-        }
-
-        // --- Remise à Zéro des Gradients ---
-        mlp.linear1.weight_mut().zero_grad();
-        if let Some(b) = mlp.linear1.bias_mut() { b.zero_grad(); }
-        mlp.linear2.weight_mut().zero_grad();
-        if let Some(b) = mlp.linear2.bias_mut() { b.zero_grad(); }
     }
 
     println!("\nEntraînement terminé.");

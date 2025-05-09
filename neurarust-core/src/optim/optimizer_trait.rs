@@ -33,6 +33,14 @@ pub trait Optimizer {
     /// * `param_group`: The `ParamGroup` to add.
     fn add_param_group(&mut self, param_group: ParamGroup);
 
+    /// Returns an immutable slice of the parameter groups managed by the optimizer.
+    /// Each group contains parameters and their specific hyperparameters (e.g., learning rate).
+    fn param_groups(&self) -> &[ParamGroup];
+
+    /// Returns a mutable slice of the parameter groups managed by the optimizer.
+    /// This allows modifying hyperparameters like the learning rate for each group.
+    fn param_groups_mut(&mut self) -> &mut [ParamGroup];
+
     /// Loads the optimizer's state from an `OptimizerState` object.
     ///
     /// This is useful for resuming training from a saved state or for

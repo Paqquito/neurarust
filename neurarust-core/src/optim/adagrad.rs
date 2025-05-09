@@ -6,19 +6,27 @@
 //! See: [Adaptive Subgradient Methods for Online Learning and Stochastic Optimization](http://www.jmlr.org/papers/volume12/duchi11a/duchi11a.pdf)
 
 use crate::{
-    device::StorageDevice,
     error::NeuraRustError,
     nn::parameter::Parameter,
     optim::{Optimizer, OptimizerState, ParamGroup},
     tensor::Tensor,
-    tensor::create::{full as tensor_create_full, full_f64 as tensor_create_full_f64},
+    tensor::create::{full, full_f64},
     types::DType,
     ops::arithmetic::{add_op, div_op, mul_op},
     ops::arithmetic::pow::pow_op,
 };
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, RwLock};
 use log::debug;
-use std::ops::DerefMut;
+use std::collections::HashMap;
+
+/// Represents the state for a single parameter in the Adagrad optimizer.
+#[derive(Default, Clone, Debug)]
+pub struct AdagradState {
+    /// Sum of squared gradients.
+    pub sum_sq_grads: Option<Tensor>,
+    /// Number of steps taken (can be used for epsilon stabilization if needed).
+    pub step: u64,
+}
 
 /// Implements the Adagrad optimization algorithm.
 ///
@@ -32,38 +40,7 @@ pub struct AdagradOptimizer {
     param_groups: Vec<ParamGroup>,
     /// Initial value added to the accumulator (gradient square sums) for numerical stability.
     initial_accumulator_value: f32,
-    /// Term added to the denominator for numerical stability.
-    eps: f32,
-    /// Stores the sum of squared gradients for each parameter in each group.
-    pub(crate) state_sum_gradient_squares: Vec<Vec<Tensor>>,
-    /// Stores the number of steps taken for each parameter group.
-    pub(crate) steps: Vec<usize>,
-}
-
-/// Creates a scalar tensor on CPU for internal Adagrad use.
-/// Note: Ignores the device argument as Tensor::to is not yet implemented.
-fn create_scalar_tensor_adagrad_internal(value: f32, dtype: DType, _device: &StorageDevice) -> Result<Tensor, NeuraRustError> {
-    match dtype {
-        DType::F32 => tensor_create_full(&[], value),
-        DType::F64 => tensor_create_full_f64(&[], value as f64),
-        // _ => Err(NeuraRustError::UnsupportedOperation(format!(
-        //     "Adagrad internal scalar tensor creation: Unsupported DType {:?}. Only F32 and F64 are supported.",
-        //     dtype
-        // ))),
-    }
-}
-
-/// Creates a tensor with a given shape filled with the initial accumulator value on CPU.
-/// Note: Ignores the device argument as Tensor::to is not yet implemented.
-fn tensor_initial_state_adagrad(shape: &[usize], value: f32, dtype: DType, _device: &StorageDevice) -> Result<Tensor, NeuraRustError> {
-    match dtype {
-        DType::F32 => tensor_create_full(shape, value),
-        DType::F64 => tensor_create_full_f64(shape, value as f64),
-        // _ => Err(NeuraRustError::UnsupportedOperation(format!(
-        //     "Adagrad initial state tensor creation: Unsupported DType {:?}. Only F32 and F64 are supported.",
-        //     dtype
-        // ))),
-    }
+    state: HashMap<String, AdagradState>,
 }
 
 impl AdagradOptimizer {
@@ -71,7 +48,7 @@ impl AdagradOptimizer {
     ///
     /// # Arguments
     ///
-    /// * `params`: An iterator over `Arc<Mutex<Parameter>>` to optimize.
+    /// * `params`: An iterator over `Arc<RwLock<Parameter>>` to optimize.
     /// * `lr`: Learning rate (required > 0.0).
     /// * `lr_decay`: Learning rate decay factor (must be >= 0.0).
     /// * `weight_decay`: Weight decay (L2 penalty) (must be >= 0.0).
@@ -82,7 +59,7 @@ impl AdagradOptimizer {
     /// Returns `NeuraRustError::OptimizerError` if hyperparameters are invalid.
     /// Returns `NeuraRustError::UnsupportedOperation` if parameters have inconsistent devices or dtypes.
     pub fn new(
-        params: impl Iterator<Item = Arc<Mutex<Parameter>>>,
+        params: impl IntoIterator<Item = Arc<RwLock<Parameter>>>,
         lr: f32,
         lr_decay: f32,
         weight_decay: f32,
@@ -105,44 +82,32 @@ impl AdagradOptimizer {
             return Err(NeuraRustError::OptimizerError("Invalid initial_accumulator_value".to_string()));
         }
 
-        let params_vec: Vec<Arc<Mutex<Parameter>>> = params.collect();
-        let main_param_group = ParamGroup::new(params_vec, lr, weight_decay, lr_decay);
+        let params_vec: Vec<Arc<RwLock<Parameter>>> = params.into_iter().collect();
+        let mut main_param_group = ParamGroup::new(params_vec);
+        main_param_group.options.lr = Some(lr);
+        main_param_group.options.lr_decay = Some(lr_decay);
+        main_param_group.options.weight_decay = Some(weight_decay);
+        main_param_group.options.eps = Some(eps);
 
-        if main_param_group.params.is_empty() {
-            debug!("AdagradOptimizer: creating optimizer with no parameters.");
-            return Ok(Self {
-                param_groups: vec![main_param_group],
-                initial_accumulator_value,
-                eps,
-                state_sum_gradient_squares: Vec::new(),
-                steps: vec![0], 
-            });
-        }
-        
-        let mut state_sum_gradient_squares_group = Vec::with_capacity(main_param_group.params.len());
-        let first_param_guard = main_param_group.params[0].lock().map_err(|_| NeuraRustError::LockError{lock_type: "Mutex".to_string(), reason: "Failed to lock first param for device/dtype".to_string()})?;
-        let device = first_param_guard.tensor.device();
-        let dtype = first_param_guard.tensor.dtype();
-        drop(first_param_guard);
-
-        for p_arc in main_param_group.params.iter() {
-            let p_guard = p_arc.lock().map_err(|_| NeuraRustError::LockError{lock_type: "Mutex".to_string(), reason: "Failed to lock param for state init".to_string()})?;
-            let p_tensor = &p_guard.tensor;
-            if p_tensor.device() != device || p_tensor.dtype() != dtype {
-                return Err(NeuraRustError::UnsupportedOperation(
-                    "All parameters in the initial group must have the same device and dtype.".to_string()
-                ));
-            }
-            let grad_sq_sum = tensor_initial_state_adagrad(&p_tensor.shape(), initial_accumulator_value, p_tensor.dtype(), &p_tensor.device())?;
-            state_sum_gradient_squares_group.push(grad_sq_sum);
+        let mut state = HashMap::new();
+        for p_arc in &main_param_group.params {
+            let p_locked = p_arc.read().map_err(|e| NeuraRustError::LockError {
+                lock_type: "read".to_string(),
+                reason: format!("Failed to lock param for Adagrad state init: {}", e),
+            })?;
+            let p_name = p_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_{:?}", Arc::as_ptr(p_arc)));
+            let p_tensor = &p_locked.tensor;
+            let initial_sum_sq = match p_tensor.dtype() {
+                DType::F32 => full(&p_tensor.shape(), initial_accumulator_value)?,
+                DType::F64 => full_f64(&p_tensor.shape(), initial_accumulator_value as f64)?,
+            };
+            state.insert(p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 });
         }
 
         Ok(Self {
             param_groups: vec![main_param_group],
             initial_accumulator_value,
-            eps,
-            state_sum_gradient_squares: vec![state_sum_gradient_squares_group],
-            steps: vec![0],
+            state,
         })
     }
 
@@ -167,81 +132,72 @@ impl Optimizer for AdagradOptimizer {
     /// Returns `NeuraRustError` if locking fails, operations fail, or state is missing.
     fn step(&mut self) -> Result<(), NeuraRustError> {
         debug!("AdagradOptimizer: step() called");
-        for (group_idx, group) in self.param_groups.iter_mut().enumerate() {
-            let group_lr = group.lr;
-            let group_weight_decay = group.weight_decay;
-            let group_lr_decay = group.lr_decay;
-            let eps_val = self.eps;
+        for group in &mut self.param_groups {
+            let lr = group.options.lr.ok_or(NeuraRustError::ConfigurationError("Missing LR".to_string()))?;
+            let _lr_decay = group.options.lr_decay.unwrap_or(0.0);
+            let weight_decay = group.options.weight_decay.unwrap_or(0.0);
+            let eps = group.options.eps.ok_or(NeuraRustError::ConfigurationError("Missing eps".to_string()))?;
 
-            self.steps[group_idx] += 1;
-            let step_count = self.steps[group_idx] as f32; 
-            
-            let decayed_lr = if group_lr_decay > 0.0 {
-                group_lr / (1.0 + (step_count - 1.0) * group_lr_decay)
-            } else {
-                group_lr
-            };
+            let current_lr = lr;
 
-            for (param_idx, param_arc) in group.params.iter().enumerate() {
-                let mut param_guard = param_arc.lock().map_err(|_| NeuraRustError::LockError{lock_type: "Mutex".to_string(), reason: "Failed to lock param in step".to_string()})?;
+            for param_arc in &group.params {
+                let mut param_locked = param_arc.write().map_err(|e| NeuraRustError::LockError {
+                    lock_type: "write".to_string(),
+                    reason: format!("Failed to lock param in Adagrad step: {}", e),
+                })?;
                 
-                if !param_guard.tensor.requires_grad() {
-                    debug!("Parameter {:?} does not require grad, skipping.", param_guard.name().unwrap_or_default());
+                if !param_locked.tensor.requires_grad() {
+                    debug!("Parameter {:?} does not require grad, skipping.", param_locked.name().unwrap_or_default());
                     continue;
                 }
 
-                if let Some(grad_tensor_val) = param_guard.tensor.grad() {
+                if let Some(grad_tensor_val) = param_locked.tensor.grad() {
                     let mut grad_tensor = grad_tensor_val;
+                    let param_name = param_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_{:?}", Arc::as_ptr(param_arc)));
 
-                    if group_weight_decay != 0.0 {
-                        let wd_scalar = create_scalar_tensor_adagrad_internal(group_weight_decay, grad_tensor.dtype(), &grad_tensor.device())?;
-                        let wd_term = mul_op(&param_guard.tensor, &wd_scalar)?;
+                    if weight_decay != 0.0 {
+                        let wd_scalar = full(&[], weight_decay)?;
+                        let wd_term = mul_op(&param_locked.tensor, &wd_scalar)?;
                         grad_tensor = add_op(&grad_tensor, &wd_term)?;
                     }
                     
-                    if self.state_sum_gradient_squares.get(group_idx).and_then(|g| g.get(param_idx)).is_none() {
-                        debug!("Optimizer state for group {}, param {} is missing, attempting to create.", group_idx, param_idx);
-                        let p_tensor = &param_guard.tensor;
-                        match tensor_initial_state_adagrad(&p_tensor.shape(), self.initial_accumulator_value, p_tensor.dtype(), &p_tensor.device()) {
-                            Ok(state_tensor) => {
-                                while self.state_sum_gradient_squares.len() <= group_idx {
-                                    self.state_sum_gradient_squares.push(Vec::new());
-                                }
-                                self.state_sum_gradient_squares[group_idx].push(state_tensor);
-                                debug!("AdagradOptimizer: Created missing state tensor for group {}, param {}.", group_idx, param_idx);
-                            },
-                            Err(e) => {
-                                log::error!("Failed to create state tensor for new Adagrad group: {:?}. Skipping group.", e);
-                                return Err(e);
-                            }
-                        }
-                    }
-                    let state_sum_sq = &mut self.state_sum_gradient_squares[group_idx][param_idx];
-                    
+                    let state_entry = self.state.entry(param_name.clone()).or_insert_with(|| {
+                         let p_tensor = &param_locked.tensor;
+                         let initial_sum_sq = match p_tensor.dtype() {
+                            DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("State init failed"),
+                            DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("State init failed"),
+                         };
+                         AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }
+                    });
+
+                    state_entry.step += 1;
+
                     let grad_squared = mul_op(&grad_tensor, &grad_tensor)?;
-                    *state_sum_sq = add_op(state_sum_sq, &grad_squared)?;
-                    
-                    let exponent_scalar = create_scalar_tensor_adagrad_internal(0.5f32, state_sum_sq.dtype(), &state_sum_sq.device())?;
+                    let current_sum_sq = state_entry.sum_sq_grads.take().ok_or_else(|| NeuraRustError::InternalError(format!("Missing sum_sq_grads for {}", param_name)))?;
+                    let updated_sum_sq = add_op(&current_sum_sq, &grad_squared)?;
+                    state_entry.sum_sq_grads = Some(updated_sum_sq);
+
+                    let state_sum_sq = state_entry.sum_sq_grads.as_ref().unwrap();
+                    let exponent_scalar = full(&[], 0.5f32)?;
                     let sqrt_state_sum_sq = pow_op(state_sum_sq, &exponent_scalar)?;
                     
-                    let eps_scalar = create_scalar_tensor_adagrad_internal(eps_val, sqrt_state_sum_sq.dtype(), &sqrt_state_sum_sq.device())?;
+                    let eps_scalar = full(&[], eps)?;
                     let denom = add_op(&sqrt_state_sum_sq, &eps_scalar)?;
                                                             
-                    let lr_scalar = create_scalar_tensor_adagrad_internal(decayed_lr, grad_tensor.dtype(), &grad_tensor.device())?;
+                    let lr_scalar = full(&[], current_lr)?;
                     let step_size_num = mul_op(&grad_tensor, &lr_scalar)?;
 
                     let step_update = div_op(&step_size_num, &denom)?;
                                         
-                    let parameter_mut_ref: &mut Parameter = param_guard.deref_mut();
-                    parameter_mut_ref.tensor.direct_sub_inplace(&step_update)?;
+                    param_locked.tensor.direct_sub_inplace(&step_update)?;
 
                     debug!(
                         "Updated param {:?} (lr: {}, wd: {}) (Skipping norm logging)",
-                        param_guard.name().unwrap_or_default(), group_lr, group_weight_decay
+                        param_locked.name().unwrap_or_default(), current_lr, weight_decay
                     );
 
                 } else {
-                    debug!("Parameter {:?} has no gradient, skipping update.", param_guard.name().unwrap_or_default());
+                    debug!("Parameter {:?} has no gradient, skipping update.", param_locked.name().unwrap_or_default());
                 }
             }
         }
@@ -253,12 +209,12 @@ impl Optimizer for AdagradOptimizer {
     /// Should be called before the `backward()` pass in each training iteration.
     fn zero_grad(&mut self) {
         debug!("AdagradOptimizer: zero_grad() called");
-        for group in self.param_groups.iter_mut() {
-            for param_arc in group.params.iter() {
-                if let Ok(param_guard) = param_arc.lock() {
-                    param_guard.tensor.clear_grad();
+        for group in &mut self.param_groups {
+            for param_arc in &group.params {
+                if let Ok(mut param_locked) = param_arc.write() {
+                    param_locked.zero_grad();
                 } else {
-                     log::error!("Failed to acquire lock for param during zero_grad");
+                     eprintln!("Warning: Could not lock parameter to zero_grad in Adagrad.");
                 }
             }
         }
@@ -268,45 +224,40 @@ impl Optimizer for AdagradOptimizer {
     /// 
     /// Initializes the necessary state (sum of squared gradients) for the new parameters.
     /// Ensures parameters in the new group are consistent in device and dtype.
-    fn add_param_group(&mut self, param_group: ParamGroup) {
-        let num_params_in_group = param_group.params.len();
-        let mut new_state_group = Vec::with_capacity(num_params_in_group);
+    fn add_param_group(&mut self, mut param_group: ParamGroup) {
+        // Ensure the new group has default options if not set
+        let default_options = self.param_groups.get(0).map(|pg| pg.options.clone()).unwrap_or_default();
 
-        if num_params_in_group > 0 {
-            let first_param_guard = param_group.params[0].lock().unwrap();
-            let device = first_param_guard.tensor.device();
-            let dtype = first_param_guard.tensor.dtype();
-            drop(first_param_guard);
+        if param_group.options.lr.is_none() {
+            param_group.options.lr = default_options.lr;
+        }
+        if param_group.options.lr_decay.is_none() {
+            param_group.options.lr_decay = default_options.lr_decay;
+        }
+        if param_group.options.weight_decay.is_none() {
+            param_group.options.weight_decay = default_options.weight_decay;
+        }
+        if param_group.options.eps.is_none() {
+            param_group.options.eps = default_options.eps;
+        }
+        // Note: initial_accumulator_value is handled by initializing sum_sq_grads below
 
-            for p_arc in param_group.params.iter() {
-                let p_guard = p_arc.lock().unwrap();
-                let p_tensor = &p_guard.tensor;
-                if p_tensor.device() != device || p_tensor.dtype() != dtype {
-                    log::error!("Parameter in new group has mismatched device/dtype. Skipping state init for this param group.");
-                    new_state_group.clear(); 
-                    break; 
-                }
-                match tensor_initial_state_adagrad(&p_tensor.shape(), self.initial_accumulator_value, p_tensor.dtype(), &p_tensor.device()) {
-                    Ok(state_tensor) => {
-                        new_state_group.push(state_tensor)
-                    },
-                    Err(e) => {
-                        log::error!("Failed to create state tensor for new Adagrad group: {:?}. Skipping group.", e);
-                        new_state_group.clear();
-                        break; 
-                    }
-                }
-            }
+        let mut new_state_entries: Vec<(String, AdagradState)> = Vec::new();
+        for p_arc in &param_group.params {
+            let p_locked = p_arc.read().expect("Failed to lock new param for Adagrad state init");
+            let p_name = p_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_{:?}", Arc::as_ptr(p_arc)));
+            let p_tensor = &p_locked.tensor;
+            // Use self.initial_accumulator_value for consistency with new()
+            let initial_sum_sq = match p_tensor.dtype() {
+                DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("Failed to create state tensor F32"),
+                DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("Failed to create state tensor F64"),
+            };
+            new_state_entries.push((p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }));
         }
         
-        if new_state_group.len() == num_params_in_group || num_params_in_group == 0 {
-            self.param_groups.push(param_group);
-            self.state_sum_gradient_squares.push(new_state_group);
-            self.steps.push(0);
-            debug!("AdagradOptimizer: Added new param group. Total groups: {}", self.param_groups.len());
-        } else {
-             debug!("AdagradOptimizer: Did not add new param group due to errors in state initialization for its parameters.");
-        }
+        self.param_groups.push(param_group);
+        self.state.extend(new_state_entries);
+        debug!("Added Adagrad param group. Initial state created.");
     }
 
     /// Saves the optimizer's state.
@@ -314,16 +265,9 @@ impl Optimizer for AdagradOptimizer {
     /// Returns an `OptimizerState::Adagrad` variant containing the
     /// accumulated squared gradients and step counts for each parameter group.
     fn state_dict(&self) -> Result<OptimizerState, NeuraRustError> {
-        // Cloner l'état interne. C'est important car les Tensors dans state_sum_gradient_squares
-        // sont mutables en interne (via CoW ou accès direct). Un clonage profond est nécessaire
-        // si les Tensors eux-mêmes doivent être clonés (ce qui est le cas par défaut avec Tensor::clone).
-        let state_clone = self.state_sum_gradient_squares.clone();
-        let steps_clone = self.steps.clone();
-
-        Ok(OptimizerState::Adagrad {
-            state_sum_gradient_squares: state_clone,
-            steps: steps_clone,
-        })
+        // Cloner le HashMap d'état actuel
+        let state_clone = self.state.clone();
+        Ok(OptimizerState::Adagrad { state: state_clone })
     }
 
     /// Loads the optimizer's state from a `state_dict`.
@@ -344,37 +288,25 @@ impl Optimizer for AdagradOptimizer {
     /// don't match the expected state based on current parameters (this check is basic).
     fn load_state_dict(&mut self, state_dict: &OptimizerState) -> Result<(), NeuraRustError> {
         match state_dict {
-            OptimizerState::Adagrad { state_sum_gradient_squares: loaded_state_sum_sq, steps: loaded_steps } => {
-                if loaded_state_sum_sq.len() != self.param_groups.len() || loaded_steps.len() != self.param_groups.len() {
-                    return Err(NeuraRustError::OptimizerError(format!(
-                        "Loaded state_dict has {} groups, but optimizer has {} groups.",
-                        loaded_state_sum_sq.len(), self.param_groups.len()
-                    )));
-                }
-
-                // Vérification de base de la compatibilité (nombre de tenseurs par groupe)
-                for group_idx in 0..self.param_groups.len() {
-                    if loaded_state_sum_sq[group_idx].len() != self.param_groups[group_idx].params.len() {
-                         return Err(NeuraRustError::OptimizerError(format!(
-                            "Loaded state_dict group {} has {} states, but optimizer group {} has {} parameters.",
-                            group_idx, loaded_state_sum_sq[group_idx].len(), group_idx, self.param_groups[group_idx].params.len()
-                        )));
-                    }
-                    // On pourrait ajouter des vérifications de shape/dtype ici, mais restons simple pour l'instant.
-                }
-
-                // Remplacer l'état actuel
+            OptimizerState::Adagrad { state: loaded_state } => {
+                // Remplacer l'état actuel par l'état chargé
                 // .clone() est nécessaire car state_dict est une référence.
-                self.state_sum_gradient_squares = loaded_state_sum_sq.clone();
-                self.steps = loaded_steps.clone();
-                
-                debug!("AdagradOptimizer state loaded successfully. Steps: {:?}", self.steps);
+                self.state = loaded_state.clone();
+                debug!("AdagradOptimizer state loaded successfully.");
                 Ok(())
             }
-            _ => Err(NeuraRustError::OptimizerError(
-                "Invalid state_dict type for AdagradOptimizer".to_string(),
+            _ => Err(NeuraRustError::ConfigurationError(
+                "Invalid state_dict type for AdagradOptimizer. Expected Adagrad state.".to_string(),
             )),
         }
+    }
+
+    fn param_groups(&self) -> &[ParamGroup] {
+        &self.param_groups
+    }
+
+    fn param_groups_mut(&mut self) -> &mut [ParamGroup] {
+        &mut self.param_groups
     }
 }
 

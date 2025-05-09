@@ -21,13 +21,17 @@
 │   │   ├── device.rs
 │   │   ├── error.rs
 │   │   ├── lib.rs
+│   │   ├── model
+│   │   │   ├── mod.rs
+│   │   │   └── sequential.rs
 │   │   ├── nn
 │   │   │   ├── init.rs
 │   │   │   ├── init_test.rs
 │   │   │   ├── layers
 │   │   │   │   ├── linear.rs
 │   │   │   │   ├── linear_test.rs
-│   │   │   │   └── mod.rs
+│   │   │   │   ├── mod.rs
+│   │   │   │   └── relu.rs
 │   │   │   ├── losses
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── mse.rs
@@ -177,4 +181,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-25 directories, 153 files
+26 directories, 156 files

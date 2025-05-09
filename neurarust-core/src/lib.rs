@@ -31,7 +31,8 @@ pub mod device;
 
 // Declare new top-level modules
 pub mod nn;
-// pub mod optim; // REMOVED: Optimizers moved to neurarust-optim crate
+pub mod optim;
+pub mod model;
 pub mod utils;
 
 // Declare new sub-modules within ops
@@ -63,6 +64,3 @@ pub use types::DType;
 // Le module de test temporaire a été supprimé ici
 
 pub mod test_utils;
-
-// Add the new optim module
-pub mod optim;
