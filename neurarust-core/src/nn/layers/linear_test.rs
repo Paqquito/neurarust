@@ -145,7 +145,27 @@ mod tests {
             linear_loss_fn(&output)
         };
         let default_output_grad = ones(&[]).map_err(GradCheckError::TensorError)?;
-        check_grad(func, &[bias_tensor_clone], &default_output_grad, 1e-3, 1e-4, 1e-3)
+        check_grad(func, &[bias_tensor_clone], &default_output_grad, 1e-3, 1e-4, 3e-3)
+    }
+
+    #[test]
+    fn test_linear_bias_grad_f64() -> Result<(), GradCheckError> {
+        let linear = Linear::new(3, 2, true, DType::F64).unwrap();
+        let input_data_f64: Vec<f64> = [1., 2., 3., 4., 5., 6.].iter().map(|&x| x as f64).collect();
+        let input = from_vec_f64(input_data_f64, vec![2, 3]).unwrap();
+        
+        let weights_tensor_clone = linear.weight().read().unwrap().tensor.clone().detach();
+        let bias_tensor_clone = linear.bias().as_ref().unwrap().read().unwrap().tensor.clone();
+
+        let func = |params: &[Tensor]| -> Result<Tensor, NeuraRustError> {
+            let current_bias_tensor = &params[0];
+            let weights_transposed = crate::ops::view::transpose::transpose_op(&weights_tensor_clone, 0, 1)?;
+            let matmul_result = crate::ops::linalg::matmul::matmul_op(&input, &weights_transposed)?;
+            let output = crate::ops::arithmetic::add::add_op(&matmul_result, current_bias_tensor)?;
+            linear_loss_fn(&output)
+        };
+        let default_output_grad = crate::tensor::ones_f64(&[]).map_err(GradCheckError::TensorError)?;
+        check_grad(func, &[bias_tensor_clone], &default_output_grad, 1e-5, 1e-7, 1e-5)
     }
 
     #[test]

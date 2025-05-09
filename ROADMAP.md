@@ -467,12 +467,12 @@
             *   [✅] Implement `SequentialSampler`: `new()`.
                 *   [✅] `iter` yields `0..dataset_len`.
                 *   [✅] `len` returns `dataset_len`.
-            *   [ ] Implement `RandomSampler`: `new(replacement: bool, num_samples: Option<usize>)`.
-                *   [ ] `iter` yields random indices, with or without replacement.
-                *   [ ] `num_samples` can specify a different length than `dataset_len` (especially with replacement).
-                *   [ ] `len` returns `num_samples` if Some, else `dataset_len`.
-            *   [ ] (Optional) Implement `SubsetRandomSampler`: `new(indices: Vec<usize>)`.
-                *   [ ] Samples randomly from the provided subset of indices.
+            *   [✅] Implement `RandomSampler`: `new(replacement: bool, num_samples: Option<usize>)`.
+                *   [✅] `iter` yields random indices, with or without replacement.
+                *   [✅] `num_samples` can specify a different length than `dataset_len` (especially with replacement).
+                *   [✅] `len` returns `num_samples` if Some, else `dataset_len`.
+            *   [✅] (Optional) Implement `SubsetRandomSampler`: `new(indices: Vec<usize>)`.
+                *   [✅] Samples randomly from the provided subset of indices.
             *   [✅] Add tests for each sampler's iteration logic and length. (SequentialSampler tested)
             *   [✅] Add `rustdoc`. (For Sampler and SequentialSampler)
         *   **Step 2.B.5: Implement `DataLoader` using `Sampler`**
