@@ -461,20 +461,20 @@
             *   [✅] Add `rustdoc`.
         *   **Step 2.B.4: Define `Sampler` Trait and Basic Samplers**
             *   🎯 **Goal:** Abstract index generation for `DataLoader` to allow custom sampling strategies.
-            *   [ ] Define `trait Sampler: Send + Sync`:
-                *   [ ] `iter(&self, dataset_len: usize) -> Box<dyn Iterator<Item = usize> + Send + Sync>`.
-                *   [ ] `len(&self, dataset_len: usize) -> usize` (number of samples the sampler will yield for a given dataset size).
-            *   [ ] Implement `SequentialSampler`: `new()`.
-                *   [ ] `iter` yields `0..dataset_len`.
-                *   [ ] `len` returns `dataset_len`.
+            *   [✅] Define `trait Sampler: Send + Sync`:
+                *   [✅] `iter(&self, dataset_len: usize) -> Box<dyn Iterator<Item = usize> + Send + Sync>`.
+                *   [✅] `len(&self, dataset_len: usize) -> usize` (number of samples the sampler will yield for a given dataset size).
+            *   [✅] Implement `SequentialSampler`: `new()`.
+                *   [✅] `iter` yields `0..dataset_len`.
+                *   [✅] `len` returns `dataset_len`.
             *   [ ] Implement `RandomSampler`: `new(replacement: bool, num_samples: Option<usize>)`.
                 *   [ ] `iter` yields random indices, with or without replacement.
                 *   [ ] `num_samples` can specify a different length than `dataset_len` (especially with replacement).
                 *   [ ] `len` returns `num_samples` if Some, else `dataset_len`.
             *   [ ] (Optional) Implement `SubsetRandomSampler`: `new(indices: Vec<usize>)`.
                 *   [ ] Samples randomly from the provided subset of indices.
-            *   [ ] Add tests for each sampler's iteration logic and length.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Add tests for each sampler's iteration logic and length. (SequentialSampler tested)
+            *   [✅] Add `rustdoc`. (For Sampler and SequentialSampler)
         *   **Step 2.B.5: Implement `DataLoader` using `Sampler`**
             *   🎯 **Goal:** Provide an iterator for loading data in batches with flexible sampling and collation.
             *   [ ] Create `struct DataLoader<D: Dataset, S: Sampler>`.
