@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "neurarust-core",
-    # "neurarust-data", # Uncomment when this crate is added
+    "neurarust-data",
     # "neurarust-vision", # Uncomment when this crate is added
 ]
 resolver = "2"

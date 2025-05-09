@@ -437,18 +437,18 @@
     *   **Detailed Steps:**
         *   **Step 2.B.1: Define `Dataset` Trait**
             *   🎯 **Goal:** Establish a standard interface for datasets.
-            *   [ ] Define `trait Dataset`:
-                *   [ ] `get(&self, index: usize) -> Result<Self::Item, NeuraRustError>` (or `__getitem__`).
-                *   [ ] `len(&self) -> usize` (or `__len__`).
-                *   [ ] `type Item: Send + 'static` (the type of a single data sample, e.g., `(Tensor, Tensor)` or just `Tensor`).
-            *   [ ] Add `rustdoc`.
+            *   [✅] Define `trait Dataset`:
+                *   [✅] `get(&self, index: usize) -> Result<Self::Item, NeuraRustError>` (or `__getitem__`).
+                *   [✅] `len(&self) -> usize` (or `__len__`).
+                *   [✅] `type Item: Send + 'static` (the type of a single data sample, e.g., `(Tensor, Tensor)` or just `Tensor`).
+            *   [✅] Add `rustdoc`.
         *   **Step 2.B.2: Implement `VecDataset`**
             *   🎯 **Goal:** A simple dataset wrapping a `Vec` of items.
-            *   [ ] Create `struct VecDataset<T: Clone + Send + 'static>` implementing `Dataset`.
-            *   [ ] Constructor: `new(data: Vec<T>)`.
-            *   [ ] Implement `get` and `len`.
-            *   [ ] Add tests: creation, get, len.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Create `struct VecDataset<T: Clone + Send + 'static>` implementing `Dataset`.
+            *   [✅] Constructor: `new(data: Vec<T>)`.
+            *   [✅] Implement `get` and `len`.
+            *   [✅] Add tests: creation, get, len.
+            *   [✅] Add `rustdoc`.
         *   **Step 2.B.3: Implement `TensorDataset`**
             *   🎯 **Goal:** A dataset for one or more tensors, where the first dimension is the batch dimension.
             *   [ ] Create `struct TensorDataset` implementing `Dataset`.
