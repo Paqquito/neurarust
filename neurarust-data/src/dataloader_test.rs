@@ -1,6 +1,6 @@
 #[cfg(test)]
 mod tests {
-    use super::*;
+    use crate::dataloader::DataLoader;
     use crate::datasets::VecDataset;
     use crate::samplers::sequential_sampler::SequentialSampler;
 

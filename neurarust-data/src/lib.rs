@@ -10,3 +10,6 @@ pub mod dataloader;
 // pub use tensor_dataset::TensorDataset; // Ancien export
 pub use datasets::{Dataset, VecDataset, TensorDataset}; // Nouveaux exports
 pub use samplers::{Sampler, SequentialSampler, RandomSampler, SubsetRandomSampler}; 
+
+#[cfg(test)]
+mod dataloader_test; 
