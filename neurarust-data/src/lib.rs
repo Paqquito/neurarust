@@ -3,6 +3,7 @@
 // pub mod tensor_dataset; // Ancienne déclaration
 pub mod datasets; // Nouvelle déclaration
 pub mod samplers;
+pub mod dataloader;
 
 // pub use dataset::Dataset; // Ancien export
 // pub use vec_dataset::VecDataset; // Ancien export

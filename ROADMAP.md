@@ -477,17 +477,24 @@
             *   [✅] Add `rustdoc`. (For Sampler and SequentialSampler)
         *   **Step 2.B.5: Implement `DataLoader` using `Sampler`**
             *   🎯 **Goal:** Provide an iterator for loading data in batches with flexible sampling and collation.
-            *   [ ] Create `struct DataLoader<D: Dataset, S: Sampler>`.
-            *   [ ] Constructor: `new(dataset: D, batch_size: usize, sampler: S, drop_last: bool, collate_fn: Option<Box<dyn Fn(Vec<D::Item>) -> Result<BatchType, NeuraRustError> + Send + Sync>>)` (where `BatchType` is the type of the collated batch).
-                *   (Alternative) Constructor: `new(dataset: D, batch_size: usize, shuffle: bool, sampler: Option<S>, drop_last: bool, collate_fn: ...)` where if `sampler` is `None`, it defaults to `SequentialSampler` (if `shuffle=false`) or `RandomSampler` (if `shuffle=true`).
-            *   [ ] Implement `Iterator` trait for `DataLoader`.
-                *   [ ] `next()` method generates a batch.
-                *   [ ] Uses the provided `sampler` to get indices.
-                *   [ ] Collects `batch_size` items from the dataset using `dataset.get()` for the sampled indices.
-                *   [ ] Handle `drop_last`.
-            *   [ ] Implement a default `collate_fn` (as previously detailed).
-            *   [ ] Add tests: batching logic with different samplers, `drop_last`, default collation, custom `collate_fn`.
-            *   [ ] Add `rustdoc`.
+            *   **Sub-steps:**
+                *   [✅] **2.B.5.1: Définir la structure générique `DataLoader<D: Dataset, S: Sampler>`**
+                    *   Champs : dataset, batch_size, sampler, drop_last, collate_fn (optionnel)
+                    *   Définir le constructeur de base
+                *   [✅] **2.B.5.2: Implémenter le trait `Iterator` pour `DataLoader`**
+                    *   Méthode `next()` qui génère un batch
+                    *   Utilisation du sampler pour obtenir les indices
+                    *   Récupération des items via `dataset.get()`
+                    *   Gestion de `drop_last`
+                *   [✅] **2.B.5.3: Implémenter la fonction de collation par défaut**
+                    *   Collate une liste de samples en batch (ex: stack pour Tensor, zip pour tuples)
+                    *   Permettre une fonction personnalisée
+                *   [✅] **2.B.5.4: Ajouter des tests unitaires**
+                    *   Test du batching avec différents samplers
+                    *   Test de `drop_last`
+                    *   Test de la collation par défaut et personnalisée
+                *   [✅] **2.B.5.5: Ajouter la documentation rustdoc**
+                    *   Doc sur la structure, le constructeur, l'itérateur, la collation
         *   **Step 2.B.6: Create Data Loading Example**
             *   🎯 **Goal:** Demonstrate the usage of `Dataset`, `Sampler`, and `DataLoader` in a training context.
             *   [ ] Create a new example file (e.g., `examples/data_loading_example.rs`).
