@@ -497,13 +497,13 @@
                     *   Doc sur la structure, le constructeur, l'itérateur, la collation
         *   **Step 2.B.6: Create Data Loading Example**
             *   🎯 **Goal:** Demonstrate the usage of `Dataset`, `Sampler`, and `DataLoader` in a training context.
-            *   [ ] Create a new example file (e.g., `examples/data_loading_example.rs`).
-            *   [ ] Use `TensorDataset` with synthetic data (e.g., features and labels).
-            *   [ ] Demonstrate usage of `SequentialSampler` and `RandomSampler` with the `DataLoader`.
-            *   [ ] Iterate through the `DataLoader` to get batches.
-            *   [ ] (Optional) Perform a mock training step (e.g., print batch shapes or feed to a dummy model) to show integration.
-            *   [ ] Ensure the example runs and outputs expected batch information.
-            *   [ ] Add to `Cargo.toml` and document the example.
+            *   [✅] Create a new example file (e.g., `examples/data_loading_example.rs`).
+            *   [✅] Use `TensorDataset` with synthetic data (e.g., features and labels).
+            *   [✅] Demonstrate usage of `SequentialSampler` and `RandomSampler` with the `DataLoader`.
+            *   [✅] Iterate through the `DataLoader` to get batches.
+            *   [✅] (Optional) Perform a mock training step (e.g., print batch shapes or feed to a dummy model) to show integration.
+            *   [✅] Ensure the example runs and outputs expected batch information.
+            *   [✅] Add to `Cargo.toml` and document the example.
         *   **Step 2.B.7: (Advanced - Future Consideration) `DataLoader` Enhancements**
             *   🎯 **Goal:** Lay groundwork for more performant data loading.
             *   [ ] (Placeholder) `num_workers: usize` for multi-process/multi-threaded data fetching (significant complexity, for later).

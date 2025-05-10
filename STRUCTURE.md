@@ -184,6 +184,8 @@
 │       └── tensor_view_ops.rs
 ├── neurarust-data
 │   ├── Cargo.toml
+│   ├── examples
+│   │   └── data_loading_example.rs
 │   └── src
 │       ├── dataloader.rs
 │       ├── dataloader_test.rs
@@ -209,4 +211,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-31 directories, 179 files
+32 directories, 180 files

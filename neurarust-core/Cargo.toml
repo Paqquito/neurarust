@@ -13,6 +13,7 @@ num-traits = "0.2"
 approx = "0.5"
 rand = "0.8" # For random tensor creation
 rand_distr = "0.4" # For specific random distributions (randn)
+# neurarust-data = { path = "../neurarust-data" }
 
 # Optional: Add ndarray for potential BLAS backend or more complex ops later
 # ndarray = { version = "0.15", features = ["blas"] }
