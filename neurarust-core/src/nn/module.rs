@@ -135,6 +135,7 @@ mod tests {
             let data = match dtype {
                 DType::F32 => zeros(&[1])?,
                 DType::F64 => zeros_f64(&[1])?,
+                DType::I32 | DType::I64 | DType::Bool => todo!("module: non supporté pour ce DType"),
             };
             let param = Parameter::new(data, Some("mock_param".to_string()));
             Ok(MockModule {

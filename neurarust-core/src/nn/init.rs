@@ -152,6 +152,7 @@ where
             }
             CpuBuffer::F64(Arc::new(data_vec))
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!("init: non supporté pour ce DType"),
     };
 
     // Créer le nouveau Buffer (CPU seulement pour l'instant)
@@ -207,6 +208,7 @@ where
             }
             CpuBuffer::F64(Arc::new(data_vec))
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!("init: non supporté pour ce DType"),
     };
 
     let new_buffer = Buffer::Cpu(new_cpu_buffer);
@@ -242,6 +244,7 @@ fn fill_with_scalar(tensor: &mut Tensor, value: f64) -> Result<(), NeuraRustErro
             let data_vec = vec![value; numel];
             CpuBuffer::F64(Arc::new(data_vec))
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!("init: non supporté pour ce DType"),
     };
     
     let new_buffer = Buffer::Cpu(new_cpu_buffer);

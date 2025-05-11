@@ -124,10 +124,11 @@ impl BackwardOp for TransposeBackward {
     /// with respect to the original input tensor (which is the transposed `grad_output`).
     /// Returns an error if the transpose operation on the gradient fails.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        // Transposing the gradient is the same as transposing the input
-        let grad_input = transpose_op(grad_output, self.dim1, self.dim2)?;
-
-        // The autograd engine will handle accumulation. Just return the calculated grad.
+        println!("[DEBUG][transpose::backward] Appelé. grad_output.shape={:?}, dim1={}, dim2={}", grad_output.shape(), self.dim1, self.dim2);
+        // S'assurer que le gradient est contigu avant de le transposer
+        let grad_output_contig = grad_output.contiguous()?;
+        let grad_input = transpose_op(&grad_output_contig, self.dim1, self.dim2)?;
+        println!("[DEBUG][transpose::backward] grad_input.shape={:?}", grad_input.shape());
         Ok(vec![grad_input])
     }
 

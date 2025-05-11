@@ -170,7 +170,10 @@ impl TensorData {
         let dtype = match &*buffer_arc {
             Buffer::Cpu(CpuBuffer::F32(_)) => DType::F32,
             Buffer::Cpu(CpuBuffer::F64(_)) => DType::F64,
-            Buffer::Gpu { .. } => { // Assuming GPU buffers will have associated DType later
+            Buffer::Cpu(CpuBuffer::I32(_)) => DType::I32,
+            Buffer::Cpu(CpuBuffer::I64(_)) => DType::I64,
+            Buffer::Cpu(CpuBuffer::Bool(_)) => DType::Bool,
+            Buffer::Gpu { .. } => {
                 // For now, return an error or a default/placeholder DType if GPU supported
                 return Err(NeuraRustError::UnsupportedOperation(
                     "Cannot determine DType for GPU buffer in new_view yet.".to_string()
@@ -292,5 +295,78 @@ impl TensorData {
             }
         }
         true
+    }
+
+    /// Crée un TensorData à partir d'un Vec<i32> et shape
+    pub fn new_i32(data_vec: Vec<i32>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let numel: usize = shape.iter().product();
+        let data_len = data_vec.len();
+        if data_len != numel {
+            return Err(NeuraRustError::TensorCreationError { data_len, shape });
+        }
+        let strides = calculate_strides(&shape);
+        let data_arc = Arc::new(data_vec);
+        let cpu_buffer = CpuBuffer::I32(data_arc);
+        let buffer = Buffer::Cpu(cpu_buffer);
+        let buffer_arc = Arc::new(buffer);
+        Ok(TensorData {
+            buffer: buffer_arc,
+            device: StorageDevice::CPU,
+            dtype: DType::I32,
+            offset: 0,
+            shape,
+            strides,
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
+        })
+    }
+    /// Crée un TensorData à partir d'un Vec<i64> et shape
+    pub fn new_i64(data_vec: Vec<i64>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let numel: usize = shape.iter().product();
+        let data_len = data_vec.len();
+        if data_len != numel {
+            return Err(NeuraRustError::TensorCreationError { data_len, shape });
+        }
+        let strides = calculate_strides(&shape);
+        let data_arc = Arc::new(data_vec);
+        let cpu_buffer = CpuBuffer::I64(data_arc);
+        let buffer = Buffer::Cpu(cpu_buffer);
+        let buffer_arc = Arc::new(buffer);
+        Ok(TensorData {
+            buffer: buffer_arc,
+            device: StorageDevice::CPU,
+            dtype: DType::I64,
+            offset: 0,
+            shape,
+            strides,
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
+        })
+    }
+    /// Crée un TensorData à partir d'un Vec<bool> et shape
+    pub fn new_bool(data_vec: Vec<bool>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let numel: usize = shape.iter().product();
+        let data_len = data_vec.len();
+        if data_len != numel {
+            return Err(NeuraRustError::TensorCreationError { data_len, shape });
+        }
+        let strides = calculate_strides(&shape);
+        let data_arc = Arc::new(data_vec);
+        let cpu_buffer = CpuBuffer::Bool(data_arc);
+        let buffer = Buffer::Cpu(cpu_buffer);
+        let buffer_arc = Arc::new(buffer);
+        Ok(TensorData {
+            buffer: buffer_arc,
+            device: StorageDevice::CPU,
+            dtype: DType::Bool,
+            offset: 0,
+            shape,
+            strides,
+            requires_grad: false,
+            grad: None,
+            grad_fn: None,
+        })
     }
 }

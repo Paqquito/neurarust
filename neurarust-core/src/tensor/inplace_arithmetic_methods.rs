@@ -82,7 +82,6 @@ impl Tensor {
     /// # c.sub_(&d)?;
     /// # assert_eq!(c.get_f32_data().unwrap(), &[0.0, 1.0]);
     /// # Ok(())
-    /// # }
     /// ```
     pub fn sub_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::sub::perform_sub_inplace(self, other)
@@ -123,7 +122,6 @@ impl Tensor {
     /// # c.mul_(&d)?;
     /// # assert_eq!(c.get_f32_data().unwrap(), &[3.0, 6.0]);
     /// # Ok(())
-    /// # }
     /// ```
     pub fn mul_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::mul::perform_mul_inplace(self, other)
@@ -169,7 +167,6 @@ impl Tensor {
     /// # let f = Tensor::new(vec![0.0f32], vec![1])?;
     /// # assert!(matches!(e.div_(&f), Err(NeuraRustError::ArithmeticError(_))));
     /// # Ok(())
-    /// # }
     /// ```
     pub fn div_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::div::perform_div_inplace(self, other)
@@ -632,8 +629,7 @@ impl Tensor {
                 })?;
                 crate::tensor::inplace_ops::clamp::clamp_tensor_data::<f64>(&mut *tensor_data_guard, min_val, max_val)?;
             }
-            // No `_` arm is needed if DType only contains F32 and F64.
-            // The compiler will enforce exhaustiveness if DType is extended.
+            DType::I32 | DType::I64 | DType::Bool => todo!("clamp_ non supporté pour ce DType"),
         }
         Ok(self)
     }

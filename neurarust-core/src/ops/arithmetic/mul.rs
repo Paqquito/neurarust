@@ -213,6 +213,7 @@ pub fn mul_op_scalar<T: NeuraNumeric + Debug>(tensor: &Tensor, scalar: T) -> Res
             drop(tensor_guard);
             Tensor::new_f64(new_data, output_shape)?
         }
+        crate::types::DType::I32 | crate::types::DType::I64 | crate::types::DType::Bool => todo!("mul_op_scalar non supporté pour ce DType"),
         // Add other DTypes if supported by NeuraNumeric and Tensor creation
     };
 

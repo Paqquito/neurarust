@@ -98,8 +98,9 @@ impl AdagradOptimizer {
             let p_name = p_locked.name().map(|n| n.to_string()).unwrap_or_else(|| format!("unnamed_{:?}", Arc::as_ptr(p_arc)));
             let p_tensor = &p_locked.tensor;
             let initial_sum_sq = match p_tensor.dtype() {
-                DType::F32 => full(&p_tensor.shape(), initial_accumulator_value)?,
-                DType::F64 => full_f64(&p_tensor.shape(), initial_accumulator_value as f64)?,
+                DType::F32 => full(&p_tensor.shape(), initial_accumulator_value as f32).expect("State init failed"),
+                DType::F64 => full_f64(&p_tensor.shape(), initial_accumulator_value as f64).expect("State init failed"),
+                DType::I32 | DType::I64 | DType::Bool => todo!("adagrad: non supporté pour ce DType (initial_sum_sq)"),
             };
             state.insert(p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 });
         }
@@ -164,8 +165,9 @@ impl Optimizer for AdagradOptimizer {
                     let state_entry = self.state.entry(param_name.clone()).or_insert_with(|| {
                          let p_tensor = &param_locked.tensor;
                          let initial_sum_sq = match p_tensor.dtype() {
-                            DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("State init failed"),
-                            DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("State init failed"),
+                            DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value as f32).expect("Failed to create state tensor F32"),
+                            DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("Failed to create state tensor F64"),
+                            DType::I32 | DType::I64 | DType::Bool => todo!("adagrad: non supporté pour ce DType (initial_sum_sq)"),
                          };
                          AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }
                     });
@@ -226,19 +228,19 @@ impl Optimizer for AdagradOptimizer {
     /// Ensures parameters in the new group are consistent in device and dtype.
     fn add_param_group(&mut self, mut param_group: ParamGroup) {
         // Ensure the new group has default options if not set
-        let default_options = self.param_groups.get(0).map(|pg| pg.options.clone()).unwrap_or_default();
+        let options = self.param_groups.first().map(|pg| pg.options.clone()).unwrap_or_default();
 
         if param_group.options.lr.is_none() {
-            param_group.options.lr = default_options.lr;
+            param_group.options.lr = options.lr;
         }
         if param_group.options.lr_decay.is_none() {
-            param_group.options.lr_decay = default_options.lr_decay;
+            param_group.options.lr_decay = options.lr_decay;
         }
         if param_group.options.weight_decay.is_none() {
-            param_group.options.weight_decay = default_options.weight_decay;
+            param_group.options.weight_decay = options.weight_decay;
         }
         if param_group.options.eps.is_none() {
-            param_group.options.eps = default_options.eps;
+            param_group.options.eps = options.eps;
         }
         // Note: initial_accumulator_value is handled by initializing sum_sq_grads below
 
@@ -249,8 +251,9 @@ impl Optimizer for AdagradOptimizer {
             let p_tensor = &p_locked.tensor;
             // Use self.initial_accumulator_value for consistency with new()
             let initial_sum_sq = match p_tensor.dtype() {
-                DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("Failed to create state tensor F32"),
+                DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value as f32).expect("Failed to create state tensor F32"),
                 DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("Failed to create state tensor F64"),
+                DType::I32 | DType::I64 | DType::Bool => todo!("adagrad: non supporté pour ce DType (initial_sum_sq)"),
             };
             new_state_entries.push((p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }));
         }

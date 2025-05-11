@@ -514,10 +514,10 @@
     *   **Detailed Steps:**
         *   **Step 2.C.1: Extend Core `DType`, `Buffer`, `TensorData`**
             *   🎯 **Goal:** Update core enums and structs to recognize new DTypes.
-            *   [ ] Extend `DType` enum with `I64`, `I32`, `Bool`.
-            *   [ ] Extend `CpuBuffer` (and `Buffer` enum if it wraps `CpuBuffer` directly) with variants like `I64(Vec<i64>)`, `I32(Vec<i32>)`, `Bool(Vec<bool>)`.
-            *   [ ] Adapt `TensorData` internal representation or accessors to handle these new buffer types (e.g., `try_get_cpu_i64`, `try_get_cpu_bool`).
-            *   [ ] Add tests for new DType enum values and buffer variants.
+            *   [✅] Extend `DType` enum with `I64`, `I32`, `Bool`.
+            *   [✅] Extend `CpuBuffer` (and `Buffer` enum if it wraps `CpuBuffer` directly) with variants like `I64(Vec<i64>)`, `I32(Vec<i32>)`, `Bool(Vec<bool>)`.
+            *   [✅] Adapt `TensorData` internal representation or accessors to handle these new buffer types (e.g., `try_get_cpu_i64`, `try_get_cpu_bool`).
+            *   [✅] Add tests for new DType enum values and buffer variants.
         *   **Step 2.C.2: Adapt Tensor Creation Functions**
             *   🎯 **Goal:** Allow creation of tensors with new DTypes.
             *   [ ] Implement `Tensor::new_i64(data: Vec<i64>, shape: &[usize])`, `Tensor::new_i32(...)`, `Tensor::new_bool(...)`.

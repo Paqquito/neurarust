@@ -8,7 +8,13 @@ pub enum DType {
     F32,
     /// 64-bit floating-point type.
     F64,
-    // TODO: Add other types like I64, I32, U8, Bool etc. here later.
+    /// 32-bit integer type.
+    I32,
+    /// 64-bit integer type.
+    I64,
+    /// Boolean type (true/false values).
+    Bool,
+    // TODO: Add other types like U8 etc. here later.
 }
 
 // Optional: Add helper methods later if needed, e.g.,

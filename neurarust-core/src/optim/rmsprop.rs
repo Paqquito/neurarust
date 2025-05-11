@@ -39,6 +39,7 @@ impl Clone for RmsPropParamState {
                 self.square_avg.get_f64_data().expect("Failed to get F64 data for square_avg clone"),
                 self.square_avg.shape(),
             ).expect("Failed to create new F64 Tensor for square_avg clone"),
+            DType::I32 | DType::I64 | DType::Bool => todo!("rmsprop: non supporté pour ce DType (square_avg)"),
         };
 
         let new_grad_avg = self.grad_avg.as_ref().map(|ga| {
@@ -51,6 +52,7 @@ impl Clone for RmsPropParamState {
                     ga.get_f64_data().expect("Failed to get F64 data for grad_avg clone"),
                     ga.shape(),
                 ).expect("Failed to create new F64 Tensor for grad_avg clone"),
+                DType::I32 | DType::I64 | DType::Bool => todo!("rmsprop: non supporté pour ce DType (grad_avg)"),
             }
         });
 
@@ -64,6 +66,7 @@ impl Clone for RmsPropParamState {
                     mb.get_f64_data().expect("Failed to get F64 data for momentum_buffer clone"),
                     mb.shape(),
                 ).expect("Failed to create new F64 Tensor for momentum_buffer clone"),
+                DType::I32 | DType::I64 | DType::Bool => todo!("rmsprop: non supporté pour ce DType (momentum_buffer)"),
             }
         });
 
@@ -135,6 +138,7 @@ fn full_like_with_val(other: &Tensor, value: f32) -> Result<Tensor, NeuraRustErr
     match other.dtype() {
         DType::F32 => full(&[], value),
         DType::F64 => full_f64(&[], value as f64),
+        DType::I32 | DType::I64 | DType::Bool => todo!("rmsprop: non supporté pour ce DType (other)"),
     }
 }
 
@@ -311,8 +315,8 @@ impl Optimizer for RmsPropOptimizer {
     }
 
     fn state_dict(&self) -> Result<OptimizerState, NeuraRustError> {
-        let lr = self.param_groups.get(0).and_then(|pg| pg.options.lr).unwrap_or(self.eps);
-        let weight_decay = self.param_groups.get(0).and_then(|pg| pg.options.weight_decay).unwrap_or(0.0);
+        let lr = self.param_groups.first().and_then(|pg| pg.options.lr).unwrap_or(self.eps);
+        let weight_decay = self.param_groups.first().and_then(|pg| pg.options.weight_decay).unwrap_or(0.0);
 
         Ok(OptimizerState::RmsProp {
             param_states: self.state.clone(),

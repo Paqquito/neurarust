@@ -85,6 +85,7 @@ impl BackwardOp for SliceBackward {
         let grad_input = match input_dtype { // Make grad_input non-mutable
             DType::F32 => crate::tensor::zeros(&self.original_shape)?,
             DType::F64 => crate::tensor::zeros_f64(&self.original_shape)?,
+            DType::I32 | DType::I64 | DType::Bool => todo!("Slice backward non supporté pour ce DType"),
         };
 
         // Ensure grad_output is contiguous for easier iteration

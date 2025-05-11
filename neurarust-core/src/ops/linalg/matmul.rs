@@ -41,32 +41,33 @@ impl BackwardOp for MatmulBackward {
     /// The matrix multiplications involved in the gradient computation are performed using `matmul_op`.
     /// Input matrices are transposed and made contiguous before the multiplication for correctness and performance.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
+        println!("[DEBUG][matmul::backward] Appelé. grad_output.shape={:?}", grad_output.shape());
         let mut input_grads: Vec<Tensor> = Vec::with_capacity(2);
 
         // Create Tensors by cloning the Arcs stored in self
         let a_tensor = Tensor { data: self.a_node.clone() };
         let b_tensor = Tensor { data: self.b_node.clone() };
 
+        // S'assurer que le gradient est contigu
+        let grad_output_contig = grad_output.contiguous()?;
+
         // Calculate grad_a = grad_output @ b.T
         if self.a_requires_grad {
-            // Ensure b_transposed is contiguous before matmul
             let b_transposed = transpose_op(&b_tensor, 0, 1)?.contiguous()?;
-            let grad_a = matmul_op(grad_output, &b_transposed)?;
+            println!("[DEBUG][matmul::backward] Calcul grad_a = grad_output @ b.T, b_transposed.shape={:?}", b_transposed.shape());
+            let grad_a = matmul_op(&grad_output_contig, &b_transposed)?;
+            println!("[DEBUG][matmul::backward] grad_a.shape={:?}", grad_a.shape());
             input_grads.push(grad_a);
-        } // Else: No grad needed for a
+        }
 
         // Calculate grad_b = a.T @ grad_output
         if self.b_requires_grad {
-             // Ensure a_transposed is contiguous before matmul
             let a_transposed = transpose_op(&a_tensor, 0, 1)?.contiguous()?;
-            let grad_b = matmul_op(&a_transposed, grad_output)?;
-            // Ensure grads are pushed in the correct order relative to `inputs()`
-            // If a_grad wasn't pushed, grad_b is the first element.
-            // If a_grad was pushed, grad_b is the second.
-            // Let's assume the graph expects grads only for inputs that required them.
-            
+            println!("[DEBUG][matmul::backward] Calcul grad_b = a.T @ grad_output, a_transposed.shape={:?}", a_transposed.shape());
+            let grad_b = matmul_op(&a_transposed, &grad_output_contig)?;
+            println!("[DEBUG][matmul::backward] grad_b.shape={:?}", grad_b.shape());
             input_grads.push(grad_b);
-        } // Else: No grad needed for b
+        }
 
         Ok(input_grads)
     }
@@ -277,7 +278,7 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
             let b_buffer_arc = b_guard.buffer().try_get_cpu_f32()?.clone();
             let a_buffer_slice = a_buffer_arc.as_slice();
             let b_buffer_slice = b_buffer_arc.as_slice();
-            drop(a_guard); drop(b_guard); // Drop guards
+            drop(a_guard); drop(b_guard);
 
             let output_data = matmul_kernel(
                 m, k1, n,
@@ -291,7 +292,7 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
             let b_buffer_arc = b_guard.buffer().try_get_cpu_f64()?.clone();
             let a_buffer_slice = a_buffer_arc.as_slice();
             let b_buffer_slice = b_buffer_arc.as_slice();
-            drop(a_guard); drop(b_guard); // Drop guards
+            drop(a_guard); drop(b_guard);
 
             let output_data: Vec<f64> = matmul_kernel(
                 m, k1, n,
@@ -299,6 +300,21 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 b_buffer_slice, &b_strides, b_offset,
             )?;
             Tensor::new_f64(output_data, output_shape)?
+        }
+        DType::I32 => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "Matrix multiplication not supported for I32 type".to_string(),
+            ))
+        }
+        DType::I64 => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "Matrix multiplication not supported for I64 type".to_string(),
+            ))
+        }
+        DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "Matrix multiplication not supported for Bool type".to_string(),
+            ))
         }
     };
 

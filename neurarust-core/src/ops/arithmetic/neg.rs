@@ -104,7 +104,7 @@ pub fn neg_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
                 Buffer::Cpu(CpuBuffer::F32(data_arc)) => {
                     if offset + numel > data_arc.len() {
                         return Err(NeuraRustError::InternalError(format!(
-                            "neg_op F32: offset + numel ({}+{}={}) exceeds buffer len ({}) for shape {:?} and strides {:?}",
+                            "neg_op F32: offset + numel ({}+{}={}) exceeds buffer len ({}) for shape {:?} et strides {:?}",
                             offset, numel, offset + numel, data_arc.len(), &output_shape, a.strides()
                         )));
                     }
@@ -119,7 +119,7 @@ pub fn neg_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
                 Buffer::Cpu(CpuBuffer::F64(data_arc)) => {
                      if offset + numel > data_arc.len() {
                         return Err(NeuraRustError::InternalError(format!(
-                            "neg_op F64: offset + numel ({}+{}={}) exceeds buffer len ({}) for shape {:?} and strides {:?}",
+                            "neg_op F64: offset + numel ({}+{}={}) exceeds buffer len ({}) for shape {:?} et strides {:?}",
                             offset, numel, offset + numel, data_arc.len(), &output_shape, a.strides()
                         )));
                     }
@@ -129,6 +129,7 @@ pub fn neg_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
                 _ => return Err(NeuraRustError::InternalError("Buffer type mismatch for F64 DType in neg_op".to_string())),
             }
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!("neg_op non supporté pour ce DType"),
     };
     
     let new_strides = if output_shape.is_empty() {

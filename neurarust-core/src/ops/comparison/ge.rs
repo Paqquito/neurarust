@@ -123,6 +123,7 @@ pub fn ge_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 .map(|(va, vb)| ge_kernel::<f64>(va, vb))
                 .collect()
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     if result_data_vec.len() != numel {

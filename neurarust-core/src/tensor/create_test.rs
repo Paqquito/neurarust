@@ -6,6 +6,7 @@ use crate::tensor::Tensor; // Importer Tensor directement si create::* ne suffit
 use crate::device::StorageDevice;
 use crate::types::DType; 
 // NeuraRustError n'est pas nécessaire si on utilise unwrap() ou ? sur les Results des créations
+use crate::ops::view::SliceArg;
 
 #[test]
 fn test_zeros_like() {
@@ -297,4 +298,103 @@ fn test_bernoulli_scalar() {
     assert!(matches!(err_p_high, Err(NeuraRustError::ArithmeticError(_))));
     let err_p_low = bernoulli_scalar(-0.1, vec![1], DType::F32, StorageDevice::CPU);
     assert!(matches!(err_p_low, Err(NeuraRustError::ArithmeticError(_))));
+}
+
+#[test]
+fn test_zeros_i32() {
+    let shape = vec![2, 3];
+    let t = zeros_i32(&shape).unwrap();
+    assert_eq!(t.shape(), shape);
+    assert_eq!(t.numel(), 6);
+    assert_eq!(t.device(), StorageDevice::CPU);
+    assert_eq!(t.dtype(), DType::I32);
+    assert!(t.get_i32_data().unwrap().iter().all(|&x| x == 0));
+}
+
+#[test]
+fn test_zeros_i64() {
+    let shape = vec![2, 2];
+    let t = zeros_i64(&shape).unwrap();
+    assert_eq!(t.shape(), shape);
+    assert_eq!(t.numel(), 4);
+    assert_eq!(t.device(), StorageDevice::CPU);
+    assert_eq!(t.dtype(), DType::I64);
+    assert!(t.get_i64_data().unwrap().iter().all(|&x| x == 0));
+}
+
+#[test]
+fn test_zeros_bool() {
+    let shape = vec![2, 2];
+    let t = zeros_bool(&shape).unwrap();
+    assert_eq!(t.shape(), shape);
+    assert_eq!(t.numel(), 4);
+    assert_eq!(t.device(), StorageDevice::CPU);
+    assert_eq!(t.dtype(), DType::Bool);
+    assert!(t.get_bool_data().unwrap().iter().all(|&x| x == false));
+}
+
+#[test]
+fn test_from_vec_i32_and_item() {
+    let data = vec![1, 2, 3, 4];
+    let shape = vec![2, 2];
+    let t = from_vec_i32(data.clone(), shape.clone()).unwrap();
+    assert_eq!(t.shape(), shape);
+    assert_eq!(t.get_i32_data().unwrap(), data);
+    let scalar = from_vec_i32(vec![42], vec![]).unwrap();
+    assert_eq!(scalar.shape(), vec![]);
+    assert_eq!(scalar.item_i32().unwrap(), 42);
+}
+
+#[test]
+fn test_from_vec_i64_and_item() {
+    let data = vec![10, 20, 30];
+    let shape = vec![3];
+    let t = from_vec_i64(data.clone(), shape.clone()).unwrap();
+    assert_eq!(t.shape(), shape);
+    assert_eq!(t.get_i64_data().unwrap(), data);
+    let scalar = from_vec_i64(vec![-7], vec![]).unwrap();
+    assert_eq!(scalar.shape(), vec![]);
+    assert_eq!(scalar.item_i64().unwrap(), -7);
+}
+
+#[test]
+fn test_from_vec_bool_and_item() {
+    let data = vec![true, false, true];
+    let shape = vec![3];
+    let t = from_vec_bool(data.clone(), shape.clone()).unwrap();
+    assert_eq!(t.shape(), shape);
+    assert_eq!(t.get_bool_data().unwrap(), data);
+    let scalar = from_vec_bool(vec![true], vec![]).unwrap();
+    assert_eq!(scalar.shape(), vec![]);
+    assert_eq!(scalar.item_bool().unwrap(), true);
+}
+
+#[test]
+fn test_view_i32() {
+    let data = vec![1, 2, 3, 4, 5, 6];
+    let t = from_vec_i32(data, vec![2, 3]).unwrap();
+    let view = t.slice(&[SliceArg::Slice(0, 2, 1), SliceArg::Slice(1, 3, 1)]).unwrap();
+    assert_eq!(view.shape(), vec![2, 2]);
+    let v = view.get_i32_data().unwrap();
+    assert_eq!(v, vec![2, 3, 5, 6]);
+}
+
+#[test]
+fn test_view_i64() {
+    let data = vec![10, 20, 30, 40];
+    let t = from_vec_i64(data, vec![2, 2]).unwrap();
+    let view = t.slice(&[SliceArg::Slice(0, 2, 1), SliceArg::Slice(0, 1, 1)]).unwrap();
+    assert_eq!(view.shape(), vec![2, 1]);
+    let v = view.get_i64_data().unwrap();
+    assert_eq!(v, vec![10, 30]);
+}
+
+#[test]
+fn test_view_bool() {
+    let data = vec![true, false, true, false];
+    let t = from_vec_bool(data, vec![2, 2]).unwrap();
+    let view = t.slice(&[SliceArg::Slice(1, 2, 1), SliceArg::Slice(0, 2, 1)]).unwrap();
+    assert_eq!(view.shape(), vec![1, 2]);
+    let v = view.get_bool_data().unwrap();
+    assert_eq!(v, vec![true, false]);
 } 

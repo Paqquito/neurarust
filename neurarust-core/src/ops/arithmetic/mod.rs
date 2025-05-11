@@ -149,6 +149,7 @@ where
             drop(a_guard); drop(b_guard);
             Tensor::new_f64(output_data_vec, output_shape)?
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!("Opération non encore supportée pour ce DType"),
     };
 
     // --- Autograd Setup --- 

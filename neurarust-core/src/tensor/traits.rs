@@ -118,8 +118,7 @@ impl Debug for Tensor {
                         if numel > preview_len { write!(f, ", ...")?; }
                         write!(f, "]")?;
                     }
-                    // Add arms for other CpuBuffer types later
-                    // _ => write!(f, "<Other CPU Buffer Type>")?,
+                    &CpuBuffer::I32(_) | &CpuBuffer::I64(_) | &CpuBuffer::Bool(_) => todo!(),
                 }
             }
             (Buffer::Gpu{..}, StorageDevice::GPU) => write!(f, "<GPU Buffer>")?,

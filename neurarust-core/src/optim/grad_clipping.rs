@@ -65,6 +65,7 @@ where
                     let clamped_data: Vec<f64> = current_data.into_iter().map(|x| x.clamp(min_f64, max_f64)).collect();
                     from_vec_f64(clamped_data, shape)?
                 }
+                DType::I32 | DType::I64 | DType::Bool => todo!("grad_clipping: non supporté pour ce DType (new_grad_tensor)"),
             };
             tensor_data_guard.grad = Some(new_grad_tensor);
         } // grad_tensor est droppé ici s'il a été pris
@@ -186,6 +187,7 @@ where
                     DType::F64 => {
                         mul_op_scalar(&original_grad_clone, clip_coef)?
                     }
+                    DType::I32 | DType::I64 | DType::Bool => todo!("grad_clipping: non supporté pour ce DType (scaled_grad)"),
                 };
                 
                 // Mettre à jour le gradient dans le paramètre
