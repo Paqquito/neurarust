@@ -44,4 +44,11 @@ pub use logical_not::logical_not_op;
 pub use logical_or::logical_or_op;
 pub use logical_xor::logical_xor_op;
 pub use lt::lt_op;
-pub use ne::ne_op; 
+pub use ne::ne_op;
+
+#[cfg(test)]
+mod gt_test;
+#[cfg(test)]
+mod le_test;
+#[cfg(test)]
+mod lt_test; 

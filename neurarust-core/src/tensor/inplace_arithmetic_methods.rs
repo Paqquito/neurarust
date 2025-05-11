@@ -764,15 +764,21 @@ impl Tensor {
             (Buffer::Gpu { .. }, Buffer::Gpu { .. }) => {
                 // ... GPU implementation ...
             }
+            #[cfg(not(feature = "gpu"))]
+            (Buffer::Gpu { .. }, _) | (_, Buffer::Gpu { .. }) => {
+                return Err(NeuraRustError::UnsupportedOperation(
+                    "GPU support n'est pas activé dans cette compilation.".to_string(),
+                ));
+            }
+            // Cas où l'un est CPU et l'autre GPU (toujours une erreur de device)
             #[cfg(feature = "gpu")]
-            (Buffer::Gpu {..}, _) | (_, Buffer::Gpu {..}) => {
+            (Buffer::Cpu(_), Buffer::Gpu { .. }) | (Buffer::Gpu { .. }, Buffer::Cpu(_)) => {
                 return Err(NeuraRustError::DeviceMismatch {
                     expected: self.device(),
                     actual: other.device(),
                     operation: "direct_sub_inplace (device mismatch)".to_string(),
                 });
             }
-            _ => unreachable!("Unsupported buffer combination reached in direct_sub_inplace"),
         }
         Ok(())
     }

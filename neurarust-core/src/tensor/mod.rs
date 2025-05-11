@@ -25,6 +25,9 @@ mod view_methods; // Declare view methods
 mod inplace_arithmetic_methods; // Added inplace_arithmetic_methods module
 pub mod inplace_ops; // Declare the new module for inplace operations logic
 
+#[cfg(test)]
+mod inplace_ops_tests;
+
 pub mod create; // Make the create module public
 
 // --- Declare utility modules ---

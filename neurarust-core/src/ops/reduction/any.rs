@@ -1,8 +1,8 @@
 use crate::{tensor::Tensor, error::NeuraRustError, types::DType};
 use crate::ops::reduction::utils::{process_reduction_axes, calculate_reduction_output_shape};
-use crate::tensor::create::full_bool;
 
 /// Effectue une réduction logique 'any' sur un tenseur booléen.
+#[allow(dead_code)]
 pub(crate) fn any_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -> Result<Tensor, NeuraRustError> {
     let t_guard = tensor.read_data();
     if t_guard.dtype != DType::Bool {
@@ -20,7 +20,7 @@ pub(crate) fn any_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -
     let numel = t_guard.numel();
     if numel == 0 {
         // Par convention, any([]) = false
-        return Ok(full_bool(&output_shape, false)?);
+        return Ok(Tensor::new_bool(vec![false; output_shape.iter().product()], output_shape)?);
     }
     // Si aucune réduction, on renvoie une copie
     if axes_vec.is_empty() {
@@ -29,7 +29,7 @@ pub(crate) fn any_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -
     // Réduction sur axes
     if axes_vec.len() == rank {
         let any_true = input_data.iter().any(|&b| b);
-        return Ok(full_bool(&output_shape, any_true)?);
+        return Ok(Tensor::new_bool(vec![any_true; output_shape.iter().product()], output_shape)?);
     }
     // Réduction par axes (implémentation naïve)
     let mut result = vec![false; output_shape.iter().product()];
@@ -38,7 +38,7 @@ pub(crate) fn any_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -
         // Calculer l'index de sortie
         let mut out_idx = 0;
         let mut stride = 1;
-        for (d, &dim) in input_shape.iter().enumerate().rev() {
+        for (d, _) in input_shape.iter().enumerate().rev() {
             if axes_vec.contains(&d) {
                 continue;
             }
@@ -56,5 +56,5 @@ pub(crate) fn any_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -
             }
         }
     }
-    Ok(Tensor::from_vec_bool(result, output_shape))
+    Tensor::new_bool(result, output_shape)
 } 
