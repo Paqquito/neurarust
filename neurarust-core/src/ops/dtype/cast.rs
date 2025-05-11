@@ -36,36 +36,150 @@ pub fn cast_op(tensor: &Tensor, new_dtype: DType) -> Result<Tensor, NeuraRustErr
         (DType::F32, DType::F64) => {
             let input_data_slice = tensor_guard.buffer().try_get_cpu_f32()?.as_slice();
             let output_data: Vec<f64> = input_data_slice[offset..offset + numel]
-                .iter()
-                .map(|&x| x as f64)
-                .collect();
+                .iter().map(|&x| x as f64).collect();
             drop(tensor_guard);
             Tensor::new_f64(output_data, output_shape)?
         }
         (DType::F64, DType::F32) => {
             let input_data_slice = tensor_guard.buffer().try_get_cpu_f64()?.as_slice();
             let output_data: Vec<f32> = input_data_slice[offset..offset + numel]
-                .iter()
-                .map(|&x| x as f32)
-                .collect();
+                .iter().map(|&x| x as f32).collect();
             drop(tensor_guard);
             Tensor::new(output_data, output_shape)?
         }
-        (DType::I32, _) | (DType::I64, _) | (DType::Bool, _) => {
-            return Err(NeuraRustError::UnsupportedOperation(format!(
-                "cast_op from {:?} to {:?} is not supported encore.",
-                tensor_guard.dtype, new_dtype
-            )));
+        (DType::F32, DType::I32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_f32()?.as_slice();
+            let output_data: Vec<i32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as i32).collect();
+            drop(tensor_guard);
+            Tensor::new_i32(output_data, output_shape)?
         }
-        (_, DType::I32) | (_, DType::I64) | (_, DType::Bool) => {
-            return Err(NeuraRustError::UnsupportedOperation(format!(
-                "cast_op from {:?} to {:?} is not supported encore.",
-                tensor_guard.dtype, new_dtype
-            )));
+        (DType::F32, DType::I64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_f32()?.as_slice();
+            let output_data: Vec<i64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as i64).collect();
+            drop(tensor_guard);
+            Tensor::new_i64(output_data, output_shape)?
+        }
+        (DType::F32, DType::Bool) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_f32()?.as_slice();
+            let output_data: Vec<bool> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x != 0.0).collect();
+            drop(tensor_guard);
+            Tensor::new_bool(output_data, output_shape)?
+        }
+        (DType::F64, DType::I32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_f64()?.as_slice();
+            let output_data: Vec<i32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as i32).collect();
+            drop(tensor_guard);
+            Tensor::new_i32(output_data, output_shape)?
+        }
+        (DType::F64, DType::I64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_f64()?.as_slice();
+            let output_data: Vec<i64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as i64).collect();
+            drop(tensor_guard);
+            Tensor::new_i64(output_data, output_shape)?
+        }
+        (DType::F64, DType::Bool) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_f64()?.as_slice();
+            let output_data: Vec<bool> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x != 0.0).collect();
+            drop(tensor_guard);
+            Tensor::new_bool(output_data, output_shape)?
+        }
+        (DType::I32, DType::F32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i32()?.as_slice();
+            let output_data: Vec<f32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as f32).collect();
+            drop(tensor_guard);
+            Tensor::new(output_data, output_shape)?
+        }
+        (DType::I32, DType::F64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i32()?.as_slice();
+            let output_data: Vec<f64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as f64).collect();
+            drop(tensor_guard);
+            Tensor::new_f64(output_data, output_shape)?
+        }
+        (DType::I32, DType::I64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i32()?.as_slice();
+            let output_data: Vec<i64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as i64).collect();
+            drop(tensor_guard);
+            Tensor::new_i64(output_data, output_shape)?
+        }
+        (DType::I32, DType::Bool) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i32()?.as_slice();
+            let output_data: Vec<bool> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x != 0).collect();
+            drop(tensor_guard);
+            Tensor::new_bool(output_data, output_shape)?
+        }
+        (DType::I64, DType::F32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i64()?.as_slice();
+            let output_data: Vec<f32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as f32).collect();
+            drop(tensor_guard);
+            Tensor::new(output_data, output_shape)?
+        }
+        (DType::I64, DType::F64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i64()?.as_slice();
+            let output_data: Vec<f64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as f64).collect();
+            drop(tensor_guard);
+            Tensor::new_f64(output_data, output_shape)?
+        }
+        (DType::I64, DType::I32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i64()?.as_slice();
+            let output_data: Vec<i32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x as i32).collect();
+            drop(tensor_guard);
+            Tensor::new_i32(output_data, output_shape)?
+        }
+        (DType::I64, DType::Bool) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_i64()?.as_slice();
+            let output_data: Vec<bool> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| x != 0).collect();
+            drop(tensor_guard);
+            Tensor::new_bool(output_data, output_shape)?
+        }
+        (DType::Bool, DType::F32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_bool()?.as_slice();
+            let output_data: Vec<f32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| if x { 1.0 } else { 0.0 }).collect();
+            drop(tensor_guard);
+            Tensor::new(output_data, output_shape)?
+        }
+        (DType::Bool, DType::F64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_bool()?.as_slice();
+            let output_data: Vec<f64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| if x { 1.0 } else { 0.0 }).collect();
+            drop(tensor_guard);
+            Tensor::new_f64(output_data, output_shape)?
+        }
+        (DType::Bool, DType::I32) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_bool()?.as_slice();
+            let output_data: Vec<i32> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| if x { 1 } else { 0 }).collect();
+            drop(tensor_guard);
+            Tensor::new_i32(output_data, output_shape)?
+        }
+        (DType::Bool, DType::I64) => {
+            let input_data_slice = tensor_guard.buffer().try_get_cpu_bool()?.as_slice();
+            let output_data: Vec<i64> = input_data_slice[offset..offset + numel]
+                .iter().map(|&x| if x { 1 } else { 0 }).collect();
+            drop(tensor_guard);
+            Tensor::new_i64(output_data, output_shape)?
+        }
+        (DType::I32, DType::I32) | (DType::I64, DType::I64) | (DType::F32, DType::F32) | (DType::F64, DType::F64) | (DType::Bool, DType::Bool) => {
+            drop(tensor_guard);
+            tensor.clone()
         }
         _ => {
             return Err(NeuraRustError::UnsupportedOperation(format!(
-                "cast_op from {:?} to {:?} is not supported yet.",
+                "cast_op from {:?} to {:?} is not supported (cas inattendu).",
                 tensor_guard.dtype, new_dtype
             )));
         }

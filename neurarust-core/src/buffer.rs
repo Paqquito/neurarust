@@ -205,6 +205,102 @@ impl Buffer {
         }
     }
 
+    /// Tente d'obtenir une référence immuable vers l'Arc<Vec<i32>> sous-jacent.
+    pub fn try_get_cpu_i32(&self) -> Result<&Arc<Vec<i32>>, NeuraRustError> {
+        match self {
+            Buffer::Cpu(CpuBuffer::I32(data_arc)) => Ok(data_arc),
+            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I32,
+                actual: DType::F32,
+                operation: "try_get_cpu_i32".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I32,
+                actual: DType::F64,
+                operation: "try_get_cpu_i32".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I32,
+                actual: DType::I64,
+                operation: "try_get_cpu_i32".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I32,
+                actual: DType::Bool,
+                operation: "try_get_cpu_i32".to_string(),
+            }),
+            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: *device,
+                operation: "try_get_cpu_i32".to_string(),
+            }),
+        }
+    }
+
+    /// Tente d'obtenir une référence immuable vers l'Arc<Vec<i64>> sous-jacent.
+    pub fn try_get_cpu_i64(&self) -> Result<&Arc<Vec<i64>>, NeuraRustError> {
+        match self {
+            Buffer::Cpu(CpuBuffer::I64(data_arc)) => Ok(data_arc),
+            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I64,
+                actual: DType::F32,
+                operation: "try_get_cpu_i64".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I64,
+                actual: DType::F64,
+                operation: "try_get_cpu_i64".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I64,
+                actual: DType::I32,
+                operation: "try_get_cpu_i64".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I64,
+                actual: DType::Bool,
+                operation: "try_get_cpu_i64".to_string(),
+            }),
+            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: *device,
+                operation: "try_get_cpu_i64".to_string(),
+            }),
+        }
+    }
+
+    /// Tente d'obtenir une référence immuable vers l'Arc<Vec<bool>> sous-jacent.
+    pub fn try_get_cpu_bool(&self) -> Result<&Arc<Vec<bool>>, NeuraRustError> {
+        match self {
+            Buffer::Cpu(CpuBuffer::Bool(data_arc)) => Ok(data_arc),
+            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::Bool,
+                actual: DType::F32,
+                operation: "try_get_cpu_bool".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::Bool,
+                actual: DType::F64,
+                operation: "try_get_cpu_bool".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::Bool,
+                actual: DType::I32,
+                operation: "try_get_cpu_bool".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::Bool,
+                actual: DType::I64,
+                operation: "try_get_cpu_bool".to_string(),
+            }),
+            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: *device,
+                operation: "try_get_cpu_bool".to_string(),
+            }),
+        }
+    }
+
     // TODO: Add similar try_get methods for other DTypes (I64, Bool, etc.) when added.
 }
 

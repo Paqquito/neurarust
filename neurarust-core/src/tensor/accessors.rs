@@ -542,4 +542,322 @@ impl Tensor {
 
         Ok(result_vec)
     }
+
+    /// Extrait la valeur scalaire unique comme `i32` d'un tenseur contenant exactement un élément.
+    pub fn item_i32(&self) -> Result<i32, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.numel() != 1 {
+            return Err(NeuraRustError::ShapeMismatch {
+                operation: "item_i32()".to_string(),
+                expected: "1 element".to_string(),
+                actual: format!("{} elements (shape {:?})", guard.numel(), guard.shape),
+            });
+        }
+        let physical_offset = guard.offset;
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::I32(arc_vec)) => {
+                let data: &Vec<i32> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::IndexOutOfBounds { index: vec![physical_offset], shape: vec![data.len()] });
+                }
+                Ok(data[physical_offset])
+            }
+            Buffer::Cpu(CpuBuffer::F32(_)) | Buffer::Cpu(CpuBuffer::F64(_)) | Buffer::Cpu(CpuBuffer::I64(_)) | Buffer::Cpu(CpuBuffer::Bool(_)) | Buffer::Gpu { .. } => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::I32,
+                    actual: guard.dtype,
+                    operation: "item_i32()".to_string(),
+                })
+            }
+        }
+    }
+
+    /// Extrait la valeur scalaire unique comme `i64` d'un tenseur contenant exactement un élément.
+    pub fn item_i64(&self) -> Result<i64, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.numel() != 1 {
+            return Err(NeuraRustError::ShapeMismatch {
+                operation: "item_i64()".to_string(),
+                expected: "1 element".to_string(),
+                actual: format!("{} elements (shape {:?})", guard.numel(), guard.shape),
+            });
+        }
+        let physical_offset = guard.offset;
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::I64(arc_vec)) => {
+                let data: &Vec<i64> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::IndexOutOfBounds { index: vec![physical_offset], shape: vec![data.len()] });
+                }
+                Ok(data[physical_offset])
+            }
+            Buffer::Cpu(CpuBuffer::F32(_)) | Buffer::Cpu(CpuBuffer::F64(_)) | Buffer::Cpu(CpuBuffer::I32(_)) | Buffer::Cpu(CpuBuffer::Bool(_)) | Buffer::Gpu { .. } => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::I64,
+                    actual: guard.dtype,
+                    operation: "item_i64()".to_string(),
+                })
+            }
+        }
+    }
+
+    /// Extrait la valeur scalaire unique comme `bool` d'un tenseur contenant exactement un élément.
+    pub fn item_bool(&self) -> Result<bool, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.numel() != 1 {
+            return Err(NeuraRustError::ShapeMismatch {
+                operation: "item_bool()".to_string(),
+                expected: "1 element".to_string(),
+                actual: format!("{} elements (shape {:?})", guard.numel(), guard.shape),
+            });
+        }
+        let physical_offset = guard.offset;
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::Bool(arc_vec)) => {
+                let data: &Vec<bool> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::IndexOutOfBounds { index: vec![physical_offset], shape: vec![data.len()] });
+                }
+                Ok(data[physical_offset])
+            }
+            Buffer::Cpu(CpuBuffer::F32(_)) | Buffer::Cpu(CpuBuffer::F64(_)) | Buffer::Cpu(CpuBuffer::I32(_)) | Buffer::Cpu(CpuBuffer::I64(_)) | Buffer::Gpu { .. } => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::Bool,
+                    actual: guard.dtype,
+                    operation: "item_bool()".to_string(),
+                })
+            }
+        }
+    }
+
+    /// Accède à l'élément à l'index donné comme `i32` (pour DType::I32)
+    pub fn at_i32(&self, index: &[usize]) -> Result<i32, NeuraRustError> {
+        let guard = self.read_data();
+        let rank = guard.shape.len();
+        if index.len() != rank {
+            return Err(NeuraRustError::RankMismatch {
+                expected: rank,
+                actual: index.len(),
+            });
+        }
+        for (dim, &idx) in index.iter().enumerate() {
+            if idx >= guard.shape[dim] {
+                return Err(NeuraRustError::IndexOutOfBounds {
+                    index: index.to_vec(),
+                    shape: guard.shape.clone(),
+                });
+            }
+        }
+        let mut physical_offset = guard.offset;
+        for (dim, &idx) in index.iter().enumerate() {
+            physical_offset += idx * guard.strides[dim];
+        }
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::I32(arc_vec)) => {
+                let data: &Vec<i32> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::InternalError(
+                        format!("Calculated physical offset {} is out of buffer bounds {} in at_i32", physical_offset, data.len())
+                    ));
+                }
+                Ok(data[physical_offset])
+            }
+            _ => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I32,
+                actual: guard.dtype,
+                operation: "at_i32()".to_string(),
+            })
+        }
+    }
+
+    /// Accède à l'élément à l'index donné comme `i64` (pour DType::I64)
+    pub fn at_i64(&self, index: &[usize]) -> Result<i64, NeuraRustError> {
+        let guard = self.read_data();
+        let rank = guard.shape.len();
+        if index.len() != rank {
+            return Err(NeuraRustError::RankMismatch {
+                expected: rank,
+                actual: index.len(),
+            });
+        }
+        for (dim, &idx) in index.iter().enumerate() {
+            if idx >= guard.shape[dim] {
+                return Err(NeuraRustError::IndexOutOfBounds {
+                    index: index.to_vec(),
+                    shape: guard.shape.clone(),
+                });
+            }
+        }
+        let mut physical_offset = guard.offset;
+        for (dim, &idx) in index.iter().enumerate() {
+            physical_offset += idx * guard.strides[dim];
+        }
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::I64(arc_vec)) => {
+                let data: &Vec<i64> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::InternalError(
+                        format!("Calculated physical offset {} is out of buffer bounds {} in at_i64", physical_offset, data.len())
+                    ));
+                }
+                Ok(data[physical_offset])
+            }
+            _ => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::I64,
+                actual: guard.dtype,
+                operation: "at_i64()".to_string(),
+            })
+        }
+    }
+
+    /// Accède à l'élément à l'index donné comme `bool` (pour DType::Bool)
+    pub fn at_bool(&self, index: &[usize]) -> Result<bool, NeuraRustError> {
+        let guard = self.read_data();
+        let rank = guard.shape.len();
+        if index.len() != rank {
+            return Err(NeuraRustError::RankMismatch {
+                expected: rank,
+                actual: index.len(),
+            });
+        }
+        for (dim, &idx) in index.iter().enumerate() {
+            if idx >= guard.shape[dim] {
+                return Err(NeuraRustError::IndexOutOfBounds {
+                    index: index.to_vec(),
+                    shape: guard.shape.clone(),
+                });
+            }
+        }
+        let mut physical_offset = guard.offset;
+        for (dim, &idx) in index.iter().enumerate() {
+            physical_offset += idx * guard.strides[dim];
+        }
+        match &*guard.buffer {
+            Buffer::Cpu(CpuBuffer::Bool(arc_vec)) => {
+                let data: &Vec<bool> = arc_vec;
+                if physical_offset >= data.len() {
+                    return Err(NeuraRustError::InternalError(
+                        format!("Calculated physical offset {} is out of buffer bounds {} in at_bool", physical_offset, data.len())
+                    ));
+                }
+                Ok(data[physical_offset])
+            }
+            _ => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::Bool,
+                actual: guard.dtype,
+                operation: "at_bool()".to_string(),
+            })
+        }
+    }
+
+    /// Copie les données logiques du tenseur dans un nouveau `Vec<i32>`.
+    ///
+    /// Gère correctement les vues (non contiguës) en itérant selon shape, strides et offset.
+    /// Retourne une erreur si le tenseur n'est pas sur le CPU ou n'est pas de type I32.
+    pub fn get_i32_data(&self) -> Result<Vec<i32>, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: guard.device,
+                operation: "get_i32_data".to_string(),
+            });
+        }
+        if guard.dtype != DType::I32 {
+            return Err(NeuraRustError::UnsupportedOperation(
+                format!("get_i32_data requires DType::I32, got {:?}", guard.dtype)
+            ));
+        }
+        let buffer_arc = guard.buffer().try_get_cpu_i32()?;
+        let underlying_data: &Vec<i32> = buffer_arc;
+        let numel = guard.numel();
+        let mut result_vec = Vec::with_capacity(numel);
+        if numel == 0 {
+            return Ok(result_vec);
+        }
+        for i in 0..numel {
+            let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+            let physical_offset = guard.get_offset(&coords);
+            if physical_offset >= underlying_data.len() {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Calculated physical offset {} is out of bounds for I32 buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                    physical_offset, underlying_data.len(), i, coords, guard.shape, guard.strides, guard.offset
+                )));
+            }
+            result_vec.push(underlying_data[physical_offset]);
+        }
+        Ok(result_vec)
+    }
+
+    /// Copie les données logiques du tenseur dans un nouveau `Vec<i64>`.
+    pub fn get_i64_data(&self) -> Result<Vec<i64>, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: guard.device,
+                operation: "get_i64_data".to_string(),
+            });
+        }
+        if guard.dtype != DType::I64 {
+            return Err(NeuraRustError::UnsupportedOperation(
+                format!("get_i64_data requires DType::I64, got {:?}", guard.dtype)
+            ));
+        }
+        let buffer_arc = guard.buffer().try_get_cpu_i64()?;
+        let underlying_data: &Vec<i64> = buffer_arc;
+        let numel = guard.numel();
+        let mut result_vec = Vec::with_capacity(numel);
+        if numel == 0 {
+            return Ok(result_vec);
+        }
+        for i in 0..numel {
+            let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+            let physical_offset = guard.get_offset(&coords);
+            if physical_offset >= underlying_data.len() {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Calculated physical offset {} is out of bounds for I64 buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                    physical_offset, underlying_data.len(), i, coords, guard.shape, guard.strides, guard.offset
+                )));
+            }
+            result_vec.push(underlying_data[physical_offset]);
+        }
+        Ok(result_vec)
+    }
+
+    /// Copie les données logiques du tenseur dans un nouveau `Vec<bool>`.
+    pub fn get_bool_data(&self) -> Result<Vec<bool>, NeuraRustError> {
+        let guard = self.read_data();
+        if guard.device != StorageDevice::CPU {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: guard.device,
+                operation: "get_bool_data".to_string(),
+            });
+        }
+        if guard.dtype != DType::Bool {
+            return Err(NeuraRustError::UnsupportedOperation(
+                format!("get_bool_data requires DType::Bool, got {:?}", guard.dtype)
+            ));
+        }
+        let buffer_arc = guard.buffer().try_get_cpu_bool()?;
+        let underlying_data: &Vec<bool> = buffer_arc;
+        let numel = guard.numel();
+        let mut result_vec = Vec::with_capacity(numel);
+        if numel == 0 {
+            return Ok(result_vec);
+        }
+        for i in 0..numel {
+            let coords = crate::tensor::utils::index_to_coord(i, &guard.shape);
+            let physical_offset = guard.get_offset(&coords);
+            if physical_offset >= underlying_data.len() {
+                return Err(NeuraRustError::InternalError(format!(
+                    "Calculated physical offset {} is out of bounds for Bool buffer len {} (logical index {}, coords {:?}, shape {:?}, strides {:?}, offset {})",
+                    physical_offset, underlying_data.len(), i, coords, guard.shape, guard.strides, guard.offset
+                )));
+            }
+            result_vec.push(underlying_data[physical_offset]);
+        }
+        Ok(result_vec)
+    }
 }

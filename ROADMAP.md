@@ -530,12 +530,12 @@
             *   [✅] Add tests for creating tensors of each new DType using all relevant methods.
         *   **Step 2.C.3: Adapt Core Tensor Methods**
             *   🎯 **Goal:** Ensure core tensor functionalities work with new DTypes.
-            *   [ ] Implement scalar extraction: `item_i64()`, `item_i32()`, `item_bool()`.
-            *   [ ] Ensure `Tensor::dtype()` correctly returns the new DTypes.
-            *   [ ] Ensure `Tensor::numel()`, `Tensor::shape()`, `Tensor::strides()`, etc., function correctly.
-            *   [ ] Implement `Tensor::cast(new_dtype)` to support casting to/from I64, I32, Bool.
+            *   [✅] Implement scalar extraction: `item_i64()`, `item_i32()`, `item_bool()`.
+            *   [✅] Ensure `Tensor::dtype()` correctly returns the new DTypes.
+            *   [✅] Ensure `Tensor::numel()`, `Tensor::shape()`, `Tensor::strides()`, etc., function correctly.
+            *   [✅] Implement `Tensor::cast(new_dtype)` to support casting to/from I64, I32, Bool.
                 *   Define casting rules (e.g., Float to Int truncation, Int to Float, Bool to Int/Float as 0/1).
-            *   [ ] Add tests for `item_*`, `cast` across various DType combinations.
+            *   [✅] Add tests for `item_*`, `cast` across various DType combinations.
         *   **Step 2.C.4: Implement Arithmetic Operations for Integer DTypes**
             *   🎯 **Goal:** Enable basic arithmetic for integer tensors.
             *   [ ] Implement `add_op`, `sub_op`, `mul_op` for (Int, Int) -> Int.
