@@ -87,7 +87,7 @@ impl AdamOptimizer {
 
     /// Returns strong references to the parameters managed by the optimizer.
     pub fn get_params(&self) -> Vec<Arc<RwLock<Parameter>>> {
-        self.param_groups.first().map_or(Vec::new(), |group| group.params.clone())
+        self.param_groups.get(0).map_or(Vec::new(), |group| group.params.clone())
     }
 }
 
@@ -126,7 +126,7 @@ impl Optimizer for AdamOptimizer {
                     grad_decayed = add_op(&grad_decayed, &mul_op_scalar(&param_locked.tensor, weight_decay)?)?;
                 }
                 
-                let state_entry = self.state.entry(state_key.clone()).or_default();
+                let state_entry = self.state.entry(state_key.clone()).or_insert_with(AdamParamState::default);
     
                 let m_prev = state_entry.m.clone().unwrap_or_else(|| zeros_like(&grad_decayed).unwrap());
                 let term1_m = mul_op_scalar(&m_prev, beta1)?;
@@ -144,12 +144,10 @@ impl Optimizer for AdamOptimizer {
                 let m_hat = match param_dtype {
                     DType::F32 => div_op(&m_t, &full(&[], bias_correction1)?)?,
                     DType::F64 => div_op(&m_t, &full_f64(&[], bias_correction1 as f64)?)?,
-                    DType::I32 | DType::I64 | DType::Bool => todo!("adam: non supporté pour ce DType (m_hat)"),
                 };
                 let v_hat = match param_dtype {
                     DType::F32 => div_op(&v_t, &full(&[], bias_correction2)?)?,
                     DType::F64 => div_op(&v_t, &full_f64(&[], bias_correction2 as f64)?)?,
-                    DType::I32 | DType::I64 | DType::Bool => todo!("adam: non supporté pour ce DType (v_hat)"),
                 };
     
                 let v_hat_for_update = if amsgrad {
@@ -164,13 +162,11 @@ impl Optimizer for AdamOptimizer {
                 let sqrt_v_hat = match param_dtype {
                     DType::F32 => pow_op(&v_hat_for_update, &full(&[], 0.5f32)?)?,
                     DType::F64 => pow_op(&v_hat_for_update, &full_f64(&[], 0.5f64)?)?,
-                    DType::I32 | DType::I64 | DType::Bool => todo!("adam: non supporté pour ce DType (sqrt_v_hat)"),
                 };
                 
                 let denom = match param_dtype {
                     DType::F32 => add_op(&sqrt_v_hat, &full(&[], eps)?)?,
                     DType::F64 => add_op(&sqrt_v_hat, &full_f64(&[], eps as f64)?)?,
-                    DType::I32 | DType::I64 | DType::Bool => todo!("adam: non supporté pour ce DType (denom)"),
                 };
                 
                 let update_num = mul_op_scalar(&m_hat, lr)?;

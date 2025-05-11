@@ -162,7 +162,6 @@ impl BackwardOp for MSEBackward {
         let two_scalar = match dtype {
             DType::F32 => crate::tensor::create::full(&[], 2.0f32)?,
             DType::F64 => crate::tensor::create::full_f64(&[], 2.0f64)?,
-            DType::I32 | DType::I64 | DType::Bool => todo!("mse: non supporté pour ce DType (two_scalar)"),
         };
         
         let common_term = mul_op(&diff, &two_scalar)?;
@@ -176,7 +175,6 @@ impl BackwardOp for MSEBackward {
             let num_elements_scalar = match dtype {
                 DType::F32 => crate::tensor::create::full(&[], num_elements as f32)?,
                 DType::F64 => crate::tensor::create::full_f64(&[], num_elements as f64)?,
-                DType::I32 | DType::I64 | DType::Bool => todo!("mse: non supporté pour ce DType (num_elements_scalar)"),
             };
             div_op(&grad_input_unscaled, &num_elements_scalar)?
         } else { // Reduction::Sum
@@ -186,7 +184,6 @@ impl BackwardOp for MSEBackward {
         let minus_one_scalar = match dtype {
             DType::F32 => crate::tensor::create::full(&[], -1.0f32)?,
             DType::F64 => crate::tensor::create::full_f64(&[], -1.0f64)?,
-            DType::I32 | DType::I64 | DType::Bool => todo!("mse: non supporté pour ce DType (minus_one_scalar)"),
         };
         let final_grad_target = mul_op(&final_grad_input, &minus_one_scalar)?;
         // Ou si neg() existe : let final_grad_target = final_grad_input.neg()?;

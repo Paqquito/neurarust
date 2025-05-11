@@ -2,6 +2,7 @@ use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
 use crate::tensor::Tensor;
 use crate::types::DType; // Corrected DType import
+use crate::tensor::iter_utils::{NdArraySimpleIter, NdArraySimpleIterF64};
 use crate::ops::view::contiguous::ContiguousBackward;
 use crate::autograd::graph::NodeId;
 use std::sync::Arc;
@@ -209,30 +210,73 @@ impl Tensor {
             Ok(self.clone())
         } else {
             let a_guard = self.read_data();
-            let _requires_grad = a_guard.requires_grad;
-            let _a_node_id: NodeId = Arc::as_ptr(&self.data);
-            let _output_shape = self.shape();
-            let _strides = self.strides();
-            let _offset = a_guard.offset;
-            let _numel = a_guard.numel();
-            let _dtype = a_guard.dtype;
-            let _device = a_guard.device;
+            let requires_grad = a_guard.requires_grad;
+            let a_node_id: NodeId = Arc::as_ptr(&self.data);
+            let output_shape = self.shape();
+            let strides = self.strides();
+            let offset = a_guard.offset;
+            let numel = a_guard.numel();
+            let dtype = a_guard.dtype;
+            let device = a_guard.device;
 
-            if _device != StorageDevice::CPU {
+            if device != StorageDevice::CPU {
                  return Err(NeuraRustError::UnsupportedOperation(
                     "contiguous() currently only supports CPU tensors.".to_string(),
                 ));
             }
 
-            let output_tensor = match _dtype {
-                DType::F32 => crate::tensor::zeros(&_output_shape)?,
-                DType::F64 => crate::tensor::zeros_f64(&_output_shape)?,
-                DType::I32 | DType::I64 | DType::Bool => todo!("view_methods: non supporté pour ce DType"),
+            let output_tensor = match dtype {
+                DType::F32 => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_f32()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = NdArraySimpleIter::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<f32> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                    if new_data.len() != numel {
+                         return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (F32): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new(new_data, output_shape)?
+                }
+                DType::F64 => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_f64()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = NdArraySimpleIterF64::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<f64> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                     if new_data.len() != numel {
+                         return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (F64): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new_f64(new_data, output_shape)?
+                }
             };
 
-            if _requires_grad {
+            if requires_grad {
                 let grad_fn = ContiguousBackward {
-                    a_node: _a_node_id,
+                    a_node: a_node_id,
                 };
                 let mut output_guard = output_tensor.write_data();
                 output_guard.grad_fn = Some(Arc::new(grad_fn));

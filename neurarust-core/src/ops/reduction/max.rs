@@ -309,7 +309,6 @@ pub(crate) fn max_op(tensor: &Tensor, axes: Option<&[usize]>, keep_dims: bool) -
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     // --- Autograd Setup --- 

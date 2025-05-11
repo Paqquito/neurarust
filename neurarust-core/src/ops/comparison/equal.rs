@@ -118,7 +118,6 @@ pub fn equal_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                  "equal_op currently only supports F32".to_string()
             )); // Keep F32 only for now
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     if result_data_vec.len() != numel {

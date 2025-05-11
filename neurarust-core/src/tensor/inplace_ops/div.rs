@@ -156,7 +156,6 @@ pub fn perform_div_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("div_ inplace non supporté pour ce DType"),
     }
     Ok(())
 } 

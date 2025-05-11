@@ -159,7 +159,6 @@ pub fn perform_add_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("add_ inplace non supporté pour ce DType"),
     }
     Ok(())
 } 

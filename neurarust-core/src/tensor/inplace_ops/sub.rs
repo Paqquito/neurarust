@@ -157,7 +157,6 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("sub_ inplace non supporté pour ce DType"),
     }
     Ok(())
 } 

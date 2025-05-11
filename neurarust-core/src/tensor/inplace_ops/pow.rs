@@ -112,7 +112,6 @@ pub fn perform_pow_inplace<E: NeuraNumeric + Copy + Debug>(
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("pow_ inplace non supporté pour ce DType"),
     }
     Ok(())
 } 

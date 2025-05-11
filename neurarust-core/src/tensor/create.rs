@@ -194,7 +194,7 @@ pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
             let data_vec: Vec<f64> = vec![0.0; numel];
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("create: non supporté pour ce DType"),
+        // Add other dtypes later
     }
 }
 
@@ -219,7 +219,7 @@ pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
             let data_vec: Vec<f64> = vec![1.0; numel];
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("create: non supporté pour ce DType"),
+        // Add other dtypes later
     }
 }
 
@@ -449,7 +449,8 @@ pub fn randint(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("create: non supporté pour ce DType"),
+        // The _ arm is removed as DType only has F32 and F64 for now.
+        // If DType is extended, the compiler will enforce updating this match.
     }
 }
 
@@ -519,44 +520,9 @@ pub fn bernoulli_scalar(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("create: non supporté pour ce DType"),
+        // The _ arm is removed as DType only has F32 and F64 for now.
+        // If DType is extended, the compiler will enforce updating this match.
     }
-}
-
-/// Crée un tenseur CPU à partir d'un Vec<i32> et shape
-pub fn from_vec_i32(data_vec: Vec<i32>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    Tensor::new_i32(data_vec, shape)
-}
-
-/// Crée un tenseur CPU à partir d'un Vec<i64> et shape
-pub fn from_vec_i64(data_vec: Vec<i64>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    Tensor::new_i64(data_vec, shape)
-}
-
-/// Crée un tenseur CPU à partir d'un Vec<bool> et shape
-pub fn from_vec_bool(data_vec: Vec<bool>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
-    Tensor::new_bool(data_vec, shape)
-}
-
-/// Crée un tenseur de zéros I32
-pub fn zeros_i32(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
-    let numel = shape.iter().product();
-    let data_vec: Vec<i32> = vec![0; numel];
-    Tensor::new_i32(data_vec, shape.to_vec())
-}
-
-/// Crée un tenseur de zéros I64
-pub fn zeros_i64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
-    let numel = shape.iter().product();
-    let data_vec: Vec<i64> = vec![0; numel];
-    Tensor::new_i64(data_vec, shape.to_vec())
-}
-
-/// Crée un tenseur de zéros Bool
-pub fn zeros_bool(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
-    let numel = shape.iter().product();
-    let data_vec: Vec<bool> = vec![false; numel];
-    Tensor::new_bool(data_vec, shape.to_vec())
 }
 
 // Link the external tests file

@@ -27,7 +27,7 @@ struct MeanBackward {
     input_node: NodeId,
     input_shape: Vec<usize>,
     output_shape: Vec<usize>,
-    _keep_dims: bool,
+    keep_dims: bool,
 }
 
 // Add unsafe impls for Send + Sync because NodeId is a raw pointer
@@ -56,31 +56,22 @@ impl BackwardOp for MeanBackward {
     /// with respect to the original input tensor. Returns an error if expansion or
     /// device operations fail.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        println!("[DEBUG][mean::backward] Appelé pour input_shape={:?}, output_shape={:?}, grad_output.shape={:?}", self.input_shape, self.output_shape, grad_output.shape());
         let numel_reduced: usize = self.input_shape.iter().product::<usize>() 
             / self.output_shape.iter().product::<usize>();
         if numel_reduced == 0 {
              let zero_grad = zeros(&self.input_shape)?;
-             println!("[DEBUG][mean::backward] numel_reduced=0, retourne zeros");
              return Ok(vec![cast_op(&zero_grad, grad_output.dtype())?]); // Utiliser cast_op
         }
         let scale_factor = 1.0 / (numel_reduced as f64);
-        println!("[DEBUG][mean::backward] numel_reduced={}, scale_factor={}", numel_reduced, scale_factor);
 
-        // S'assurer que le gradient est contigu
-        let grad_output_contig = grad_output.contiguous()?;
-
-        let scale_tensor = match grad_output_contig.dtype() {
+        let scale_tensor = match grad_output.dtype() {
              DType::F32 => full(&[], scale_factor as f32)?,
              DType::F64 => full_f64(&[], scale_factor)?,
-             DType::I32 | DType::I64 | DType::Bool => todo!(),
         };
 
-        let scaled_grad = mul_op(&grad_output_contig, &scale_tensor)?;
-        println!("[DEBUG][mean::backward] scaled_grad.shape={:?}", scaled_grad.shape());
+        let scaled_grad = mul_op(grad_output, &scale_tensor)?;
 
-        let grad_to_expand = if grad_output_contig.shape() != &self.output_shape[..] {
-            println!("[DEBUG][mean::backward] reshape grad_output de {:?} vers {:?}", grad_output_contig.shape(), self.output_shape);
+        let grad_to_expand = if !self.keep_dims {
             scaled_grad.reshape(self.output_shape.clone())?
         } else {
             scaled_grad
@@ -88,7 +79,6 @@ impl BackwardOp for MeanBackward {
 
         let target_shape_isize: Vec<isize> = self.input_shape.iter().map(|&d| d as isize).collect();
         let grad_input = expand_op(&grad_to_expand, &target_shape_isize)?;
-        println!("[DEBUG][mean::backward] grad_input.shape={:?}", grad_input.shape());
 
         Ok(vec![grad_input])
     }
@@ -191,13 +181,14 @@ pub(crate) fn mean_op(
         DType::F32 => {
             let input_data_slice = t_guard.buffer().try_get_cpu_f32()?.as_slice();
             let n_f32 = n as f32;
+            // Correction: appeler mean_kernel et non sum_kernel
             let result_data = mean_kernel::<f32>(
-                &t_guard,
+                &t_guard, // Passer la garde du tenseur
                 input_data_slice, 
                 &axes_vec, 
                 keep_dims, 
                 &output_shape, 
-                n_f32,
+                n_f32, // Passer n converti au bon type
             )?;
             drop(t_guard);
             Tensor::new(result_data, output_shape)?
@@ -205,31 +196,17 @@ pub(crate) fn mean_op(
         DType::F64 => {
             let input_data_slice = t_guard.buffer().try_get_cpu_f64()?.as_slice();
             let n_f64 = n as f64;
+            // Correction: appeler mean_kernel et non sum_kernel
             let result_data = mean_kernel::<f64>(
-                &t_guard,
+                &t_guard, // Passer la garde du tenseur
                 input_data_slice, 
                 &axes_vec, 
                 keep_dims, 
                 &output_shape, 
-                n_f64,
+                n_f64, // Passer n converti au bon type
             )?;
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
-        }
-        DType::I32 => {
-            return Err(NeuraRustError::UnsupportedOperation(
-                "Mean operation not supported for I32 type".to_string(),
-            ))
-        }
-        DType::I64 => {
-            return Err(NeuraRustError::UnsupportedOperation(
-                "Mean operation not supported for I64 type".to_string(),
-            ))
-        }
-        DType::Bool => {
-            return Err(NeuraRustError::UnsupportedOperation(
-                "Mean operation not supported for Bool type".to_string(),
-            ))
         }
     };
 
@@ -240,7 +217,7 @@ pub(crate) fn mean_op(
             //num_elements_reduced: n, // On recalcule dans backward si besoin
             input_shape: input_shape, 
             output_shape: output_shape_clone, 
-            _keep_dims: keep_dims,
+            keep_dims: keep_dims,
         };
         let mut output_guard = output_tensor.write_data();
         output_guard.grad_fn = Some(Arc::new(grad_fn));

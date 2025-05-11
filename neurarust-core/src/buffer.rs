@@ -37,12 +37,6 @@ pub enum CpuBuffer {
     F32(Arc<Vec<f32>>),
     /// Buffer holding `f64` (64-bit floating-point) values.
     F64(Arc<Vec<f64>>),
-    /// Buffer holding `i32` (32-bit integer) values.
-    I32(Arc<Vec<i32>>),
-    /// Buffer holding `i64` (64-bit integer) values.
-    I64(Arc<Vec<i64>>),
-    /// Buffer holding `bool` values.
-    Bool(Arc<Vec<bool>>),
     // TODO: Add other CPU buffer types like I64, I32, U8, Bool later
 }
 
@@ -57,21 +51,6 @@ impl Buffer {
             Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
                 expected: DType::F32,
                 actual: DType::F64,
-                operation: "try_get_cpu_f32".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F32,
-                actual: DType::I32,
-                operation: "try_get_cpu_f32".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F32,
-                actual: DType::I64,
-                operation: "try_get_cpu_f32".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F32,
-                actual: DType::Bool,
                 operation: "try_get_cpu_f32".to_string(),
             }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
@@ -92,21 +71,6 @@ impl Buffer {
             Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
                 expected: DType::F64,
                 actual: DType::F32,
-                operation: "try_get_cpu_f64".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: DType::I32,
-                operation: "try_get_cpu_f64".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: DType::I64,
-                operation: "try_get_cpu_f64".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: DType::Bool,
                 operation: "try_get_cpu_f64".to_string(),
             }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
@@ -138,21 +102,6 @@ impl Buffer {
                 actual: DType::F64,
                 operation: op_name.to_string(),
             }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F32,
-                actual: DType::I32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F32,
-                actual: DType::I64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F32,
-                actual: DType::Bool,
-                operation: op_name.to_string(),
-            }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
@@ -182,22 +131,7 @@ impl Buffer {
                 actual: DType::F32,
                 operation: op_name.to_string(),
             }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: DType::I32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: DType::I64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::F64,
-                actual: DType::Bool,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
                 operation: op_name.to_string(),
@@ -205,210 +139,7 @@ impl Buffer {
         }
     }
 
-    /// Accès immuable à Arc<Vec<i32>> si le buffer est Cpu(I32)
-    pub fn try_get_cpu_i32(&self) -> Result<&Arc<Vec<i32>>, NeuraRustError> {
-        match self {
-            Buffer::Cpu(CpuBuffer::I32(data_arc)) => Ok(data_arc),
-            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::F32,
-                operation: "try_get_cpu_i32".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::F64,
-                operation: "try_get_cpu_i32".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::I64,
-                operation: "try_get_cpu_i32".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::Bool,
-                operation: "try_get_cpu_i32".to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: *device,
-                operation: "try_get_cpu_i32".to_string(),
-            }),
-        }
-    }
-    /// Accès immuable à Arc<Vec<i64>> si le buffer est Cpu(I64)
-    pub fn try_get_cpu_i64(&self) -> Result<&Arc<Vec<i64>>, NeuraRustError> {
-        match self {
-            Buffer::Cpu(CpuBuffer::I64(data_arc)) => Ok(data_arc),
-            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::F32,
-                operation: "try_get_cpu_i64".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::F64,
-                operation: "try_get_cpu_i64".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::I32,
-                operation: "try_get_cpu_i64".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::Bool,
-                operation: "try_get_cpu_i64".to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: *device,
-                operation: "try_get_cpu_i64".to_string(),
-            }),
-        }
-    }
-    /// Accès immuable à Arc<Vec<bool>> si le buffer est Cpu(Bool)
-    pub fn try_get_cpu_bool(&self) -> Result<&Arc<Vec<bool>>, NeuraRustError> {
-        match self {
-            Buffer::Cpu(CpuBuffer::Bool(data_arc)) => Ok(data_arc),
-            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::F32,
-                operation: "try_get_cpu_bool".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::F64,
-                operation: "try_get_cpu_bool".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::I32,
-                operation: "try_get_cpu_bool".to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::I64,
-                operation: "try_get_cpu_bool".to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: *device,
-                operation: "try_get_cpu_bool".to_string(),
-            }),
-        }
-    }
-    /// Accès mutable à Vec<i32> si le buffer est Cpu(I32) et non partagé
-    pub fn try_get_cpu_i32_mut(&mut self) -> Result<&mut Vec<i32>, NeuraRustError> {
-        let op_name = "try_get_cpu_i32_mut";
-        match self {
-            Buffer::Cpu(CpuBuffer::I32(data_arc)) => {
-                match Arc::get_mut(data_arc) {
-                    Some(vec_mut) => Ok(vec_mut),
-                    None => Err(NeuraRustError::BufferSharedError { operation: op_name.to_string() })
-                }
-            }
-            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::F32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::F64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::I64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I32,
-                actual: DType::Bool,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: *device,
-                operation: op_name.to_string(),
-            }),
-        }
-    }
-    /// Accès mutable à Vec<i64> si le buffer est Cpu(I64) et non partagé
-    pub fn try_get_cpu_i64_mut(&mut self) -> Result<&mut Vec<i64>, NeuraRustError> {
-        let op_name = "try_get_cpu_i64_mut";
-        match self {
-            Buffer::Cpu(CpuBuffer::I64(data_arc)) => {
-                match Arc::get_mut(data_arc) {
-                    Some(vec_mut) => Ok(vec_mut),
-                    None => Err(NeuraRustError::BufferSharedError { operation: op_name.to_string() })
-                }
-            }
-            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::F32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::F64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::I32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::I64,
-                actual: DType::Bool,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: *device,
-                operation: op_name.to_string(),
-            }),
-        }
-    }
-    /// Accès mutable à Vec<bool> si le buffer est Cpu(Bool) et non partagé
-    pub fn try_get_cpu_bool_mut(&mut self) -> Result<&mut Vec<bool>, NeuraRustError> {
-        let op_name = "try_get_cpu_bool_mut";
-        match self {
-            Buffer::Cpu(CpuBuffer::Bool(data_arc)) => {
-                match Arc::get_mut(data_arc) {
-                    Some(vec_mut) => Ok(vec_mut),
-                    None => Err(NeuraRustError::BufferSharedError { operation: op_name.to_string() })
-                }
-            }
-            Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::F32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::F64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::I32,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
-                expected: DType::Bool,
-                actual: DType::I64,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: *device,
-                operation: op_name.to_string(),
-            }),
-        }
-    }
+    // TODO: Add similar try_get methods for other DTypes (I64, Bool, etc.) when added.
 }
 
 /* // Temporarily comment out old methods causing errors

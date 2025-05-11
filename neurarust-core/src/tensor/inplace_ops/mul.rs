@@ -150,7 +150,6 @@ pub fn perform_mul_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!("mul_ inplace non supporté pour ce DType"),
     }
     Ok(())
 } 

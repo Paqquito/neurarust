@@ -52,11 +52,12 @@ impl BackwardOp for PermuteBackward {
     /// with respect to the original input tensor (which is the inversely permuted `grad_output`).
     /// Returns an error if the permutation operation on the gradient fails.
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
-        println!("[DEBUG][permute::backward] Appelé. grad_output.shape={:?}, original_axes={:?}", grad_output.shape(), self.original_axes);
         let inverse_axes = self.inverse_axes();
-        println!("[DEBUG][permute::backward] inverse_axes={:?}", inverse_axes);
+        
+        // Appeler permute_op avec les axes inverses sur le gradient entrant original
         let grad_input = permute_op(grad_output, &inverse_axes)?;
-        println!("[DEBUG][permute::backward] grad_input.shape={:?}", grad_input.shape());
+
+        // Retourner le gradient calculé dans un vecteur
         Ok(vec![grad_input])
     }
 

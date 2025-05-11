@@ -98,7 +98,7 @@ impl Optimizer for SgdOptimizer {
 
                 // Apply momentum
                 if momentum != 0.0 {
-                    let state_entry = self.state.entry(param_name.clone()).or_default();
+                    let state_entry = self.state.entry(param_name.clone()).or_insert_with(SgdState::default);
                     
                     if state_entry.momentum_buffer.is_none() {
                         state_entry.momentum_buffer = Some(grad_processed.clone());
