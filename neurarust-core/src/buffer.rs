@@ -37,6 +37,12 @@ pub enum CpuBuffer {
     F32(Arc<Vec<f32>>),
     /// Buffer holding `f64` (64-bit floating-point) values.
     F64(Arc<Vec<f64>>),
+    /// Buffer holding `i32` (32-bit integer) values.
+    I32(Arc<Vec<i32>>),
+    /// Buffer holding `i64` (64-bit integer) values.
+    I64(Arc<Vec<i64>>),
+    /// Buffer holding `bool` values.
+    Bool(Arc<Vec<bool>>),
     // TODO: Add other CPU buffer types like I64, I32, U8, Bool later
 }
 
@@ -51,6 +57,21 @@ impl Buffer {
             Buffer::Cpu(CpuBuffer::F64(_)) => Err(NeuraRustError::DataTypeMismatch {
                 expected: DType::F32,
                 actual: DType::F64,
+                operation: "try_get_cpu_f32".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::I32,
+                operation: "try_get_cpu_f32".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::I64,
+                operation: "try_get_cpu_f32".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::Bool,
                 operation: "try_get_cpu_f32".to_string(),
             }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
@@ -71,6 +92,21 @@ impl Buffer {
             Buffer::Cpu(CpuBuffer::F32(_)) => Err(NeuraRustError::DataTypeMismatch {
                 expected: DType::F64,
                 actual: DType::F32,
+                operation: "try_get_cpu_f64".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::I32,
+                operation: "try_get_cpu_f64".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::I64,
+                operation: "try_get_cpu_f64".to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::Bool,
                 operation: "try_get_cpu_f64".to_string(),
             }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
@@ -102,6 +138,21 @@ impl Buffer {
                 actual: DType::F64,
                 operation: op_name.to_string(),
             }),
+            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::I32,
+                operation: op_name.to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::I64,
+                operation: op_name.to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F32,
+                actual: DType::Bool,
+                operation: op_name.to_string(),
+            }),
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
@@ -131,7 +182,22 @@ impl Buffer {
                 actual: DType::F32,
                 operation: op_name.to_string(),
             }),
-             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
+            Buffer::Cpu(CpuBuffer::I32(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::I32,
+                operation: op_name.to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::I64(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::I64,
+                operation: op_name.to_string(),
+            }),
+            Buffer::Cpu(CpuBuffer::Bool(_)) => Err(NeuraRustError::DataTypeMismatch {
+                expected: DType::F64,
+                actual: DType::Bool,
+                operation: op_name.to_string(),
+            }),
+            Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
                 operation: op_name.to_string(),

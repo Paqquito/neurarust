@@ -152,6 +152,7 @@ where
             }
             CpuBuffer::F64(Arc::new(data_vec))
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     // Créer le nouveau Buffer (CPU seulement pour l'instant)
@@ -207,6 +208,7 @@ where
             }
             CpuBuffer::F64(Arc::new(data_vec))
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     let new_buffer = Buffer::Cpu(new_cpu_buffer);
@@ -233,15 +235,9 @@ fn fill_with_scalar(tensor: &mut Tensor, value: f64) -> Result<(), NeuraRustErro
     let numel = shape.iter().product();
 
     let new_cpu_buffer = match dtype {
-        DType::F32 => {
-            let value_f32 = value as f32;
-            let data_vec = vec![value_f32; numel];
-            CpuBuffer::F32(Arc::new(data_vec))
-        }
-        DType::F64 => {
-            let data_vec = vec![value; numel];
-            CpuBuffer::F64(Arc::new(data_vec))
-        }
+        DType::F32 => CpuBuffer::F32(Arc::new(vec![value as f32; numel])),
+        DType::F64 => CpuBuffer::F64(Arc::new(vec![value as f64; numel])),
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
     
     let new_buffer = Buffer::Cpu(new_cpu_buffer);

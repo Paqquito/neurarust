@@ -272,6 +272,7 @@ impl Tensor {
                     drop(a_guard);
                     Tensor::new_f64(new_data, output_shape)?
                 }
+                DType::I32 | DType::I64 | DType::Bool => todo!(),
             };
 
             if requires_grad {

@@ -194,7 +194,7 @@ pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
             let data_vec: Vec<f64> = vec![0.0; numel];
             Tensor::new_f64(data_vec, shape)
         }
-        // Add other dtypes later
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     }
 }
 
@@ -219,7 +219,7 @@ pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
             let data_vec: Vec<f64> = vec![1.0; numel];
             Tensor::new_f64(data_vec, shape)
         }
-        // Add other dtypes later
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     }
 }
 
@@ -449,8 +449,7 @@ pub fn randint(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        // The _ arm is removed as DType only has F32 and F64 for now.
-        // If DType is extended, the compiler will enforce updating this match.
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     }
 }
 
@@ -520,8 +519,7 @@ pub fn bernoulli_scalar(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        // The _ arm is removed as DType only has F32 and F64 for now.
-        // If DType is extended, the compiler will enforce updating this match.
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     }
 }
 
