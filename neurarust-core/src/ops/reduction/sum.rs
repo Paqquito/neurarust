@@ -287,8 +287,8 @@ pub(crate) fn sum_op(
 
     // --- DType Check ---
     let dtype = t_guard.dtype;
-    if dtype != DType::F32 && dtype != DType::F64 {
-        return Err(NeuraRustError::UnsupportedOperation(format!("Sum operation only supports F32 and F64, got {:?}", dtype)));
+    if dtype != DType::F32 && dtype != DType::F64 && dtype != DType::I32 && dtype != DType::I64 && dtype != DType::Bool {
+        return Err(NeuraRustError::UnsupportedOperation(format!("Sum operation only supports F32, F64, I32, I64, and Bool, got {:?}", dtype)));
     }
 
     // --- Process Axes --- 
@@ -311,9 +311,8 @@ pub(crate) fn sum_op(
                 &t_guard,
                 input_data_slice,
                 &axes_vec, 
-                keep_dims, // sum_kernel n'a peut-être plus besoin de keep_dims?
-                           // Non, il l'utilise pour déterminer la boucle. Gardons-le.
-                &output_shape, // Utiliser la shape calculée
+                keep_dims,
+                &output_shape,
             )?;
             drop(t_guard);
             Tensor::new(result_data, output_shape)?
@@ -325,12 +324,49 @@ pub(crate) fn sum_op(
                 input_data_slice,
                 &axes_vec, 
                 keep_dims,
-                &output_shape, // Utiliser la shape calculée
+                &output_shape,
             )?;
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let input_data_slice = t_guard.buffer().try_get_cpu_i32()?.as_slice();
+            let result_data = sum_kernel(
+                &t_guard,
+                input_data_slice,
+                &axes_vec,
+                keep_dims,
+                &output_shape,
+            )?;
+            drop(t_guard);
+            Tensor::new_i32(result_data, output_shape)?
+        }
+        DType::I64 => {
+            let input_data_slice = t_guard.buffer().try_get_cpu_i64()?.as_slice();
+            let result_data = sum_kernel(
+                &t_guard,
+                input_data_slice,
+                &axes_vec,
+                keep_dims,
+                &output_shape,
+            )?;
+            drop(t_guard);
+            Tensor::new_i64(result_data, output_shape)?
+        }
+        DType::Bool => {
+            let input_data_slice = t_guard.buffer().try_get_cpu_bool()?.as_slice();
+            // On convertit chaque booléen en i64 (true=1, false=0)
+            let input_as_i64: Vec<i64> = input_data_slice.iter().map(|&b| if b { 1 } else { 0 }).collect();
+            let result_data = sum_kernel(
+                &t_guard,
+                &input_as_i64,
+                &axes_vec,
+                keep_dims,
+                &output_shape,
+            )?;
+            drop(t_guard);
+            Tensor::new_i64(result_data, output_shape)?
+        }
     };
 
     // --- Autograd Setup --- (inchangé)

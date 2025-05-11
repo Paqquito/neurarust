@@ -110,6 +110,55 @@ mod tests {
 
         Ok(())
     }
+
+    #[test]
+    fn test_sum_i32() -> Result<(), NeuraRustError> {
+        let t = Tensor::new_i32(vec![1, 2, 3, 4, 5, 6], vec![2, 3])?;
+        let result = sum_op(&t, None, false)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, DType::I32);
+        let data = guard.buffer().try_get_cpu_i32()?.clone();
+        assert_eq!(result.shape(), &[] as &[usize]);
+        assert_eq!(data.len(), 1);
+        assert_eq!(data[0], 21);
+        Ok(())
+    }
+
+    #[test]
+    fn test_sum_i64_axis0_keepdims() -> Result<(), NeuraRustError> {
+        let t = Tensor::new_i64(vec![10, 20, 30, 40, 50, 60], vec![2, 3])?;
+        let result = sum_op(&t, Some(&[0]), true)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, DType::I64);
+        let data = guard.buffer().try_get_cpu_i64()?.clone();
+        assert_eq!(result.shape(), &[1, 3]);
+        assert_eq!(data, std::sync::Arc::new(vec![50, 70, 90]));
+        Ok(())
+    }
+
+    #[test]
+    fn test_sum_bool() -> Result<(), NeuraRustError> {
+        let t = Tensor::new_bool(vec![true, false, true, true], vec![2, 2])?;
+        let result = sum_op(&t, None, false)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, DType::I64); // Somme des booléens = I64
+        let data = guard.buffer().try_get_cpu_i64()?.clone();
+        assert_eq!(result.shape(), &[] as &[usize]);
+        assert_eq!(data[0], 3); // 3 True
+        Ok(())
+    }
+
+    #[test]
+    fn test_sum_bool_axis1() -> Result<(), NeuraRustError> {
+        let t = Tensor::new_bool(vec![true, false, true, true], vec![2, 2])?;
+        let result = sum_op(&t, Some(&[1]), false)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, DType::I64);
+        let data = guard.buffer().try_get_cpu_i64()?.clone();
+        assert_eq!(result.shape(), &[2]);
+        assert_eq!(data, std::sync::Arc::new(vec![1, 2]));
+        Ok(())
+    }
 }
 
 

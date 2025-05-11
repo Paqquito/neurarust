@@ -97,6 +97,10 @@
 │   │   │   │   └── mod.rs
 │   │   │   ├── mod.rs
 │   │   │   ├── reduction
+│   │   │   │   ├── all.rs
+│   │   │   │   ├── all_test.rs
+│   │   │   │   ├── any.rs
+│   │   │   │   ├── any_test.rs
 │   │   │   │   ├── max.rs
 │   │   │   │   ├── max_test.rs
 │   │   │   │   ├── mean.rs
@@ -228,4 +232,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-32 directories, 197 files
+32 directories, 201 files

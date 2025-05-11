@@ -575,13 +575,13 @@
             *   [ ] (Optional for this phase, more complex) `Tensor::index_put_(&mut self, indices: &[Option<&Tensor>], values: &Tensor)` for advanced assignment.
         *   **Step 2.C.7: Implement Reduction Operations for New DTypes**
             *   🎯 **Goal:** Extend reduction operations to new DTypes.
-            *   [ ] `sum_op` for IntTensors (output IntTensor) and BoolTensors (output IntTensor, counting true values).
-            *   [ ] `mean_op` for IntTensors (output FloatTensor).
-            *   [ ] (New Reduction) `all_op` for BoolTensors (output BoolScalarTensor).
-            *   [ ] (New Reduction) `any_op` for BoolTensors (output BoolScalarTensor).
-            *   [ ] Adapt `Tensor` methods (`sum`, `mean`, `all`, `any`).
-            *   [ ] Handle `dim` and `keepdim` arguments.
-            *   [ ] Add tests for correctness, different DTypes, `dim`/`keepdim`.
+            *   [✅] `sum_op` for IntTensors (output IntTensor) and BoolTensors (output IntTensor, counting true values).
+            *   [✅] `mean_op` for IntTensors (output FloatTensor).
+            *   [✅] (New Reduction) `all_op` for BoolTensors (output BoolScalarTensor).
+            *   [✅] (New Reduction) `any_op` for BoolTensors (output BoolScalarTensor).
+            *   [✅] Adapt `Tensor` methods (`sum`, `mean`, `all`, `any`).
+            *   [✅] Handle `dim` and `keepdim` arguments.
+            *   [✅] Add tests for correctness, different DTypes, `dim`/`keepdim`.
         *   **Step 2.C.8: Implement `where` Operation (Conditional Ternary)**
             *   🎯 **Goal:** Provide a conditional element selection mechanism `where(condition, x, y)`.
             *   [ ] Implement `where_op(condition: &Tensor, x: &Tensor, y: &Tensor) -> Result<Tensor, NeuraRustError>`.

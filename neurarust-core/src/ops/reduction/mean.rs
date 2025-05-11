@@ -182,14 +182,13 @@ pub(crate) fn mean_op(
         DType::F32 => {
             let input_data_slice = t_guard.buffer().try_get_cpu_f32()?.as_slice();
             let n_f32 = n as f32;
-            // Correction: appeler mean_kernel et non sum_kernel
             let result_data = mean_kernel::<f32>(
-                &t_guard, // Passer la garde du tenseur
+                &t_guard,
                 input_data_slice, 
                 &axes_vec, 
                 keep_dims, 
                 &output_shape, 
-                n_f32, // Passer n converti au bon type
+                n_f32,
             )?;
             drop(t_guard);
             Tensor::new(result_data, output_shape)?
@@ -197,19 +196,60 @@ pub(crate) fn mean_op(
         DType::F64 => {
             let input_data_slice = t_guard.buffer().try_get_cpu_f64()?.as_slice();
             let n_f64 = n as f64;
-            // Correction: appeler mean_kernel et non sum_kernel
             let result_data = mean_kernel::<f64>(
-                &t_guard, // Passer la garde du tenseur
+                &t_guard,
                 input_data_slice, 
                 &axes_vec, 
                 keep_dims, 
                 &output_shape, 
-                n_f64, // Passer n converti au bon type
+                n_f64,
             )?;
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let input_data_slice = t_guard.buffer().try_get_cpu_i32()?.as_slice();
+            let n_f32 = n as f32;
+            let sum_data = sum_kernel(
+                &t_guard,
+                input_data_slice,
+                &axes_vec,
+                keep_dims,
+                &output_shape,
+            )?;
+            let mean_data: Vec<f32> = sum_data.into_iter().map(|s| s as f32 / n_f32).collect();
+            drop(t_guard);
+            Tensor::new(mean_data, output_shape)?
+        }
+        DType::I64 => {
+            let input_data_slice = t_guard.buffer().try_get_cpu_i64()?.as_slice();
+            let n_f64 = n as f64;
+            let sum_data = sum_kernel(
+                &t_guard,
+                input_data_slice,
+                &axes_vec,
+                keep_dims,
+                &output_shape,
+            )?;
+            let mean_data: Vec<f64> = sum_data.into_iter().map(|s| s as f64 / n_f64).collect();
+            drop(t_guard);
+            Tensor::new_f64(mean_data, output_shape)?
+        }
+        DType::Bool => {
+            let input_data_slice = t_guard.buffer().try_get_cpu_bool()?.as_slice();
+            let n_f32 = n as f32;
+            let input_as_i32: Vec<i32> = input_data_slice.iter().map(|&b| if b { 1 } else { 0 }).collect();
+            let sum_data = sum_kernel(
+                &t_guard,
+                &input_as_i32,
+                &axes_vec,
+                keep_dims,
+                &output_shape,
+            )?;
+            let mean_data: Vec<f32> = sum_data.into_iter().map(|s| s as f32 / n_f32).collect();
+            drop(t_guard);
+            Tensor::new(mean_data, output_shape)?
+        }
     };
 
     // --- Autograd Setup ---

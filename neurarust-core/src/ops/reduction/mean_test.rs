@@ -155,4 +155,65 @@ mod tests {
         check_tensor_near(&input_grad.contiguous()?, expected_shape, &expected_data, 1e-6);
         Ok(())
     }
+
+    #[test]
+    fn test_mean_i32() -> Result<(), NeuraRustError> {
+        let t = crate::tensor::from_vec_i32(vec![1, 2, 3, 4, 5, 6], vec![2, 3])?;
+        let result = t.mean(None, false)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, crate::types::DType::F32);
+        let data = match &*guard.buffer {
+            crate::buffer::Buffer::Cpu(crate::buffer::CpuBuffer::F32(data_arc)) => data_arc.to_vec(),
+            _ => panic!("Buffer type not CpuF32"),
+        };
+        assert_eq!(result.shape(), &[] as &[usize]);
+        assert_eq!(data.len(), 1);
+        assert_relative_eq!(data[0], 3.5, epsilon = 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mean_i64_axis1_keepdims() -> Result<(), NeuraRustError> {
+        let t = crate::tensor::from_vec_i64(vec![10, 20, 30, 40, 50, 60], vec![2, 3])?;
+        let result = t.mean(Some(&[1]), true)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, crate::types::DType::F64);
+        let data = match &*guard.buffer {
+            crate::buffer::Buffer::Cpu(crate::buffer::CpuBuffer::F64(data_arc)) => data_arc.to_vec(),
+            _ => panic!("Buffer type not CpuF64"),
+        };
+        assert_eq!(result.shape(), &[2, 1]);
+        assert_relative_eq!(data.as_slice(), &[20.0f64, 50.0f64][..], epsilon = 1e-6);
+        Ok(())
+    }
+
+    #[test]
+    fn test_mean_bool() -> Result<(), NeuraRustError> {
+        let t = crate::tensor::from_vec_bool(vec![true, false, true, true], vec![2, 2])?;
+        let result = t.mean(None, false)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, crate::types::DType::F32);
+        let data = match &*guard.buffer {
+            crate::buffer::Buffer::Cpu(crate::buffer::CpuBuffer::F32(data_arc)) => data_arc.to_vec(),
+            _ => panic!("Buffer type not CpuF32"),
+        };
+        assert_eq!(result.shape(), &[] as &[usize]);
+        assert_eq!(data[0], 0.75); // 3/4 true
+        Ok(())
+    }
+
+    #[test]
+    fn test_mean_bool_axis1() -> Result<(), NeuraRustError> {
+        let t = crate::tensor::from_vec_bool(vec![true, false, true, true], vec![2, 2])?;
+        let result = t.mean(Some(&[1]), false)?;
+        let guard = result.read_data();
+        assert_eq!(guard.dtype, crate::types::DType::F32);
+        let data = match &*guard.buffer {
+            crate::buffer::Buffer::Cpu(crate::buffer::CpuBuffer::F32(data_arc)) => data_arc.to_vec(),
+            _ => panic!("Buffer type not CpuF32"),
+        };
+        assert_eq!(result.shape(), &[2]);
+        assert_relative_eq!(data.as_slice(), &[0.5f32, 1.0f32][..], epsilon = 1e-6);
+        Ok(())
+    }
 } 
