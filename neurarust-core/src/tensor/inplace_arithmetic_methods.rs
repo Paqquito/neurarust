@@ -83,7 +83,6 @@ impl Tensor {
     /// # assert_eq!(c.get_f32_data().unwrap(), &[0.0, 1.0]);
     /// # Ok(())
     /// # }
-    /// ```
     pub fn sub_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::sub::perform_sub_inplace(self, other)
     }
@@ -124,7 +123,6 @@ impl Tensor {
     /// # assert_eq!(c.get_f32_data().unwrap(), &[3.0, 6.0]);
     /// # Ok(())
     /// # }
-    /// ```
     pub fn mul_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::mul::perform_mul_inplace(self, other)
     }
@@ -170,7 +168,6 @@ impl Tensor {
     /// # assert!(matches!(e.div_(&f), Err(NeuraRustError::ArithmeticError(_))));
     /// # Ok(())
     /// # }
-    /// ```
     pub fn div_(&mut self, other: &Tensor) -> Result<(), NeuraRustError> {
         crate::tensor::inplace_ops::div::perform_div_inplace(self, other)
     }
@@ -215,7 +212,6 @@ impl Tensor {
     /// # assert!(matches!(c.pow_f32(0.5f32), Err(NeuraRustError::ArithmeticError(_))));
     /// # Ok(())
     /// # }
-    /// ```
     pub fn pow_f32(&mut self, exponent: f32) -> Result<(), NeuraRustError> {
         if self.dtype() != DType::F32 {
             return Err(NeuraRustError::DataTypeMismatch {
@@ -765,14 +761,16 @@ impl Tensor {
                 }
             }
             #[cfg(feature = "gpu")]
-            (Buffer::Gpu(self_gpu_buf), Buffer::Gpu(other_gpu_buf)) => {
+            (Buffer::Gpu { .. }, Buffer::Gpu { .. }) => {
                 // ... GPU implementation ...
             }
             #[cfg(feature = "gpu")]
             (Buffer::Gpu {..}, _) | (_, Buffer::Gpu {..}) => {
-                return Err(NeuraRustError::MixedDeviceOperation(
-                    "In-place operations require tensors to be on the same device.".to_string(),
-                ));
+                return Err(NeuraRustError::DeviceMismatch {
+                    expected: self.device(),
+                    actual: other.device(),
+                    operation: "direct_sub_inplace (device mismatch)".to_string(),
+                });
             }
             _ => unreachable!("Unsupported buffer combination reached in direct_sub_inplace"),
         }

@@ -568,10 +568,10 @@
                 *   [✅] Implement the core operation.
                 *   [✅] Add autograd support.
                 *   [✅] Add tests for correctness with various mask shapes, autograd.
-            *   [ ] **`Tensor::masked_fill_(&mut self, mask: &Tensor, value: S)`**: In-place fill where `mask` is true.
-                *   [ ] `S` is a scalar matching self.dtype.
-                *   [ ] Implement as an in-place operation (autograd CoW checks apply).
-                *   [ ] Add tests for correctness, autograd checks.
+            *   [✅] **`Tensor::masked_fill_(&mut self, mask: &Tensor, value: S)`**: In-place fill where `mask` is true.
+                *   [✅] `S` is a scalar matching self.dtype.
+                *   [✅] Implement as an in-place operation (autograd CoW checks apply).
+                *   [✅] Add tests for correctness, autograd checks.
             *   [ ] (Optional for this phase, more complex) `Tensor::index_put_(&mut self, indices: &[Option<&Tensor>], values: &Tensor)` for advanced assignment.
         *   **Step 2.C.7: Implement Reduction Operations for New DTypes**
             *   🎯 **Goal:** Extend reduction operations to new DTypes.

@@ -41,6 +41,7 @@ pub mod transpose;
 pub mod utils;
 pub mod index_select;
 pub mod masked_select;
+pub mod masked_fill;
 
 // Re-exports for easier access
 pub use expand::expand_op;
@@ -51,6 +52,7 @@ pub use squeeze_unsqueeze::{unsqueeze_op, squeeze_op};
 pub use transpose::transpose_op;
 pub use masked_select::masked_select_op;
 pub use index_select::index_select_op;
+pub use masked_fill::masked_fill_op;
 // Note: contiguous_op is part of Tensor::contiguous directly, not a separate op here.
 
 // The rest of the file used to contain definition for ExpandBackward etc.
