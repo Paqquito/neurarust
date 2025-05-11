@@ -560,14 +560,14 @@
             *   [✅] Add tests for all combinations, broadcasting, and output DTypes.
         *   **Step 2.C.6: Implement Indexing with Integer and Boolean Tensors**
             *   🎯 **Goal:** Allow advanced indexing similar to NumPy/PyTorch.
-            *   [ ] **`Tensor::index_select(dim: usize, indices: &Tensor)`**: Selects slices along `dim` using `indices` (which must be I32/I64).
-                *   [ ] Implement the core operation (likely in `ops/view` or `ops/indexing`).
-                *   [ ] Add autograd support (gather backward op).
-                *   [ ] Add tests for correctness, out-of-bounds handling, autograd.
-            *   [ ] **`Tensor::masked_select(mask: &Tensor)`**: Selects elements where `mask` (BoolTensor, broadcastable to self.shape) is true, returns a 1D tensor.
-                *   [ ] Implement the core operation.
-                *   [ ] Add autograd support.
-                *   [ ] Add tests for correctness with various mask shapes, autograd.
+            *   [✅] **`Tensor::index_select(dim: usize, indices: &Tensor)`**: Selects slices along `dim` using `indices` (which must be I32/I64).
+                *   [✅] Implement the core operation (likely in `ops/view` or `ops/indexing`).
+                *   [✅] Add autograd support (gather backward op).
+                *   [✅] Add tests for correctness, out-of-bounds handling, autograd.
+            *   [✅] **`Tensor::masked_select(mask: &Tensor)`**: Selects elements where `mask` (BoolTensor, broadcastable to self.shape) is true, returns a 1D tensor.
+                *   [✅] Implement the core operation.
+                *   [✅] Add autograd support.
+                *   [✅] Add tests for correctness with various mask shapes, autograd.
             *   [ ] **`Tensor::masked_fill_(&mut self, mask: &Tensor, value: S)`**: In-place fill where `mask` is true.
                 *   [ ] `S` is a scalar matching self.dtype.
                 *   [ ] Implement as an in-place operation (autograd CoW checks apply).

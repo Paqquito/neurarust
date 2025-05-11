@@ -112,6 +112,8 @@
 │   │   │       ├── contiguous.rs
 │   │   │       ├── expand.rs
 │   │   │       ├── expand_test.rs
+│   │   │       ├── index_select.rs
+│   │   │       ├── masked_select.rs
 │   │   │       ├── mod.rs
 │   │   │       ├── permute.rs
 │   │   │       ├── permute_test.rs
@@ -225,4 +227,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-32 directories, 194 files
+32 directories, 196 files

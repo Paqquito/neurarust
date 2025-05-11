@@ -6,6 +6,7 @@ use crate::tensor::iter_utils::{NdArraySimpleIter, NdArraySimpleIterF64};
 use crate::ops::view::contiguous::ContiguousBackward;
 use crate::autograd::graph::NodeId;
 use std::sync::Arc;
+use crate::ops::view::{index_select_op, masked_select_op};
 
 /// This `impl` block provides methods for creating views of a `Tensor` or manipulating its shape and layout.
 /// Many of these methods return new `Tensor` instances that share the underlying data
@@ -488,6 +489,29 @@ impl Tensor {
     pub fn expand(&self, new_shape: &[isize]) -> Result<Self, NeuraRustError> {
         crate::ops::view::expand::expand_op(self, new_shape)
     }
+
+    /// Sélectionne des éléments le long d'une dimension selon un tenseur d'indices (I64).
+    ///
+    /// # Arguments
+    /// * `dim` - La dimension le long de laquelle sélectionner.
+    /// * `indices` - Un tenseur d'indices de type I64.
+    ///
+    /// # Retour
+    /// Un tenseur résultant de la sélection.
+    pub fn index_select(&self, dim: usize, indices: &Tensor) -> Result<Tensor, NeuraRustError> {
+        index_select_op(self, dim, indices)
+    }
+
+    /// Sélectionne les éléments du tenseur d'entrée pour lesquels le masque est vrai.
+    ///
+    /// # Arguments
+    /// * `mask` - Un tenseur booléen du même shape que le tenseur d'entrée.
+    ///
+    /// # Retour
+    /// Un tenseur 1D contenant les éléments sélectionnés.
+    pub fn masked_select(&self, mask: &Tensor) -> Result<Tensor, NeuraRustError> {
+        masked_select_op(self, mask)
+    }
 }
 
 // Helper function to normalize dimension indices for flatten
@@ -530,3 +554,45 @@ fn normalize_dim_for_flatten(dim: isize, rank: usize, dim_name: &str) -> Result<
 #[cfg(test)]
 #[path = "view_methods_test.rs"]
 mod tests;
+
+#[cfg(test)]
+mod integration_tests {
+    use super::*;
+    use crate::tensor::Tensor;
+
+    #[test]
+    fn test_index_select_method_f32() {
+        let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let idx = Tensor::new_i64(vec![1, 0], vec![2]).unwrap();
+        let out = t.index_select(0, &idx).unwrap();
+        assert_eq!(out.shape(), vec![2, 2]);
+        assert_eq!(out.get_f32_data().unwrap(), vec![3.0, 4.0, 1.0, 2.0]);
+    }
+
+    #[test]
+    fn test_masked_select_method_f32() {
+        let t = Tensor::new(vec![1.0f32, 2.0, 3.0, 4.0], vec![2, 2]).unwrap();
+        let mask = Tensor::new_bool(vec![true, false, false, true], vec![2, 2]).unwrap();
+        let out = t.masked_select(&mask).unwrap();
+        assert_eq!(out.shape(), vec![2]);
+        assert_eq!(out.get_f32_data().unwrap(), vec![1.0, 4.0]);
+    }
+
+    #[test]
+    fn test_index_select_method_i32() {
+        let t = Tensor::new_i32(vec![1, 2, 3, 4], vec![2, 2]).unwrap();
+        let idx = Tensor::new_i64(vec![1, 1], vec![2]).unwrap();
+        let out = t.index_select(0, &idx).unwrap();
+        assert_eq!(out.shape(), vec![2, 2]);
+        assert_eq!(out.get_i32_data().unwrap(), vec![3, 4, 3, 4]);
+    }
+
+    #[test]
+    fn test_masked_select_method_bool() {
+        let t = Tensor::new_bool(vec![true, false, true, false], vec![2, 2]).unwrap();
+        let mask = Tensor::new_bool(vec![false, true, true, false], vec![2, 2]).unwrap();
+        let out = t.masked_select(&mask).unwrap();
+        assert_eq!(out.shape(), vec![2]);
+        assert_eq!(out.get_bool_data().unwrap(), vec![false, true]);
+    }
+}

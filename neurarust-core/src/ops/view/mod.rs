@@ -39,6 +39,8 @@ pub mod slice;
 pub mod squeeze_unsqueeze;
 pub mod transpose;
 pub mod utils;
+pub mod index_select;
+pub mod masked_select;
 
 // Re-exports for easier access
 pub use expand::expand_op;
@@ -47,6 +49,8 @@ pub use reshape::reshape_op;
 pub use slice::SliceArg; // slice_op and SliceRange are kept crate-public for now
 pub use squeeze_unsqueeze::{unsqueeze_op, squeeze_op};
 pub use transpose::transpose_op;
+pub use masked_select::masked_select_op;
+pub use index_select::index_select_op;
 // Note: contiguous_op is part of Tensor::contiguous directly, not a separate op here.
 
 // The rest of the file used to contain definition for ExpandBackward etc.
