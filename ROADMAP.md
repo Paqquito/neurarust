@@ -584,14 +584,14 @@
             *   [✅] Add tests for correctness, different DTypes, `dim`/`keepdim`.
         *   **Step 2.C.8: Implement `where` Operation (Conditional Ternary)**
             *   🎯 **Goal:** Provide a conditional element selection mechanism `where(condition, x, y)`.
-            *   [ ] Implement `where_op(condition: &Tensor, x: &Tensor, y: &Tensor) -> Result<Tensor, NeuraRustError>`.
+            *   [✅] Implement `where_op(condition: &Tensor, x: &Tensor, y: &Tensor) -> Result<Tensor, NeuraRustError>`.
                 *   `condition` must be `DType::Bool`.
                 *   `x` and `y` must be broadcastable with `condition` and each other, and have the same DType.
                 *   Result has elements from `x` where `condition` is true, else from `y`.
-            *   [ ] Add `Tensor::where_cond(condition: &Tensor, y: &Tensor)` (self is `x`).
-            *   [ ] Implement autograd (gradients flow through the chosen branch).
-            *   [ ] Add tests for correctness, broadcasting, DTypes, autograd.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Add `Tensor::where_cond(condition: &Tensor, y: &Tensor)` (self is `x`).
+            *   [✅] Implement autograd (gradients flow through the chosen branch).
+            *   [✅] Add tests for correctness, broadcasting, DTypes, autograd.
+            *   [✅] Add `rustdoc`.
         *   **Step 2.C.9: Implement `bincount` for Integer Tensors**
             *   🎯 **Goal:** Count frequency of values in an integer tensor.
             *   [ ] Implement `bincount_op(input: &Tensor, weights: Option<&Tensor>, minlength: usize) -> Result<Tensor, NeuraRustError>`.

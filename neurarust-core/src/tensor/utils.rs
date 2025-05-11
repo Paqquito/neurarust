@@ -209,6 +209,62 @@ pub fn index_to_coord(index: usize, shape: &[usize]) -> Vec<usize> {
     coord
 }
 
+/// Converts multi-dimensional coordinates into a linear index based on shape.
+///
+/// Given coordinates in the multi-dimensional tensor space, this function
+/// calculates the corresponding linear index into the tensor's underlying 1D data buffer.
+/// It assumes a standard row-major layout (C-style).
+///
+/// # Arguments
+/// * `coords`: A slice representing the multi-dimensional coordinates.
+/// * `shape`: A slice representing the dimensions of the tensor.
+///
+/// # Returns
+/// A `usize` representing the linear index into the flattened data array.
+///
+/// # Panics
+/// Panics if the coordinates are out of bounds for the given shape.
+///
+/// # Example
+/// ```
+/// use neurarust_core::tensor::utils::coord_to_index;
+///
+/// let shape = &[2, 3, 4]; // 2*3*4 = 24 elements
+/// assert_eq!(coord_to_index(&[0, 0, 0], shape), 0);
+/// assert_eq!(coord_to_index(&[0, 1, 0], shape), 4); // Start of the second row in the first plane
+/// assert_eq!(coord_to_index(&[0, 2, 3], shape), 11);// Last element of the first plane
+/// assert_eq!(coord_to_index(&[1, 0, 0], shape), 12);// First element of the second plane
+/// assert_eq!(coord_to_index(&[1, 2, 3], shape), 23);// Last element
+///
+/// // Scalar case
+/// assert_eq!(coord_to_index(&[], &[]), 0);
+/// ```
+/// ```should_panic
+/// use neurarust_core::tensor::utils::coord_to_index;
+///
+/// let shape = &[2, 3];
+/// coord_to_index(&[2, 0], shape); // First coordinate out of bounds
+/// ```
+pub fn coord_to_index(coords: &[usize], shape: &[usize]) -> usize {
+    if shape.is_empty() {
+        // Handle scalar tensor case
+        assert!(coords.is_empty(), "Coordinates must be empty for scalar tensor");
+        return 0;
+    }
+    assert_eq!(coords.len(), shape.len(), "Number of coordinates must match shape rank");
+    
+    let mut index = 0;
+    let mut stride = 1;
+    
+    for i in (0..shape.len()).rev() {
+        assert!(coords[i] < shape[i], "Coordinate {} out of bounds for dimension {} with size {}", coords[i], i, shape[i]);
+        index += coords[i] * stride;
+        stride *= shape[i];
+    }
+    
+    index
+}
+
 // Link the external tests file
 #[cfg(test)]
 #[path = "utils_test.rs"] mod tests;

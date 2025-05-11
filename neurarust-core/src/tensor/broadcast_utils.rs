@@ -202,4 +202,34 @@ where
     }
 
     Ok(expanded_data)
+}
+
+/// Réduit un gradient broadcasté à la forme d'origine en sommant sur tous les axes où la forme diffère.
+pub fn reduce_broadcasted_gradient(
+    grad: &Tensor,
+    original_shape: &[usize],
+) -> Result<Tensor, NeuraRustError> {
+    let grad_shape = grad.shape();
+    if grad_shape == original_shape {
+        return Ok(grad.clone());
+    }
+    let mut axes_to_reduce = Vec::new();
+    let rank_diff = grad_shape.len() as isize - original_shape.len() as isize;
+    for (i, &gdim) in grad_shape.iter().enumerate() {
+        let oidx = i as isize - rank_diff;
+        let odim = if oidx < 0 { 1 } else { original_shape[oidx as usize] };
+        if gdim != odim {
+            axes_to_reduce.push(i);
+        }
+    }
+    if axes_to_reduce.is_empty() {
+        Ok(grad.clone())
+    } else {
+        let reduced = crate::ops::reduction::sum_op(grad, Some(&axes_to_reduce), true)?;
+        if reduced.shape() == original_shape {
+            Ok(reduced)
+        } else {
+            crate::ops::view::reshape_op(&reduced, original_shape.to_vec())
+        }
+    }
 } 

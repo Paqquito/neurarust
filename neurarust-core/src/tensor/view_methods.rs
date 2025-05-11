@@ -273,7 +273,75 @@ impl Tensor {
                     drop(a_guard);
                     Tensor::new_f64(new_data, output_shape)?
                 }
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                DType::I32 => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_i32()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = crate::tensor::iter_utils::NdArraySimpleIterI32::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<i32> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                    if new_data.len() != numel {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (I32): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new_i32(new_data, output_shape)?
+                }
+                DType::I64 => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_i64()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = crate::tensor::iter_utils::NdArraySimpleIterI64::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<i64> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                    if new_data.len() != numel {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (I64): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new_i64(new_data, output_shape)?
+                }
+                DType::Bool => {
+                    let buffer_arc_ref = a_guard.buffer();
+                    let buffer_ref = (&*buffer_arc_ref).try_get_cpu_bool()?;
+                    let data_slice = buffer_ref.as_slice();
+                    let iter = crate::tensor::iter_utils::NdArraySimpleIterBool::new(
+                        data_slice,
+                        &output_shape,
+                        &strides,
+                        offset,
+                    )?;
+                    let mut new_data: Vec<bool> = Vec::with_capacity(numel);
+                    for value in iter {
+                        new_data.push(value);
+                    }
+                    if new_data.len() != numel {
+                        return Err(NeuraRustError::InternalError(format!(
+                            "Contiguous copy loop resulted in wrong number of elements (Bool): expected {}, got {}",
+                            numel, new_data.len()
+                        )));
+                    }
+                    drop(a_guard);
+                    Tensor::new_bool(new_data, output_shape)?
+                }
             };
 
             if requires_grad {

@@ -205,4 +205,9 @@ impl Tensor {
     pub fn logical_not(&self) -> Result<Tensor, NeuraRustError> {
         crate::ops::comparison::logical_not_op(self)
     }
+
+    /// Renvoie un tenseur où chaque élément provient de `self` si `condition` est vrai, sinon de `y` (broadcast supporté).
+    pub fn where_cond(&self, condition: &Tensor, y: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::where_op(condition, self, y)
+    }
 }

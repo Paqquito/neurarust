@@ -80,7 +80,9 @@
 │   │   │   │   ├── lt_test.rs
 │   │   │   │   ├── mod.rs
 │   │   │   │   ├── ne.rs
-│   │   │   │   └── ne_test.rs
+│   │   │   │   ├── ne_test.rs
+│   │   │   │   ├── where_op.rs
+│   │   │   │   └── where_op_test.rs
 │   │   │   ├── dtype
 │   │   │   │   ├── cast.rs
 │   │   │   │   ├── cast_test.rs
@@ -232,4 +234,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-32 directories, 201 files
+32 directories, 203 files

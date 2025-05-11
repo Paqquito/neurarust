@@ -33,6 +33,7 @@ pub mod logical_or;
 pub mod logical_xor;
 pub mod lt;
 pub mod ne;
+pub mod where_op;
 
 // Re-export the operation functions
 pub use equal::equal_op;
@@ -45,10 +46,13 @@ pub use logical_or::logical_or_op;
 pub use logical_xor::logical_xor_op;
 pub use lt::lt_op;
 pub use ne::ne_op;
+pub use where_op::where_op;
 
 #[cfg(test)]
 mod gt_test;
 #[cfg(test)]
 mod le_test;
 #[cfg(test)]
-mod lt_test; 
+mod lt_test;
+#[cfg(test)]
+mod where_op_test; 

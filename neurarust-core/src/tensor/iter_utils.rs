@@ -382,6 +382,152 @@ impl<'a> Iterator for NdArraySimpleIterF64<'a> {
     }
 }
 
+// --- I32 Version ---
+pub struct NdArraySimpleIterI32<'a> {
+    pub(crate) buffer: &'a [i32],
+    pub(crate) shape: &'a [usize],
+    pub(crate) strides: &'a [usize],
+    pub(crate) offset: usize,
+    pub(crate) current_logical_index: Vec<usize>,
+    pub(crate) current_physical_offset: usize,
+    pub(crate) is_done: bool,
+    pub(crate) numel: usize,
+    pub(crate) counter: usize,
+}
+
+impl<'a> NdArraySimpleIterI32<'a> {
+    pub fn new(
+        buffer: &'a [i32],
+        shape: &'a [usize],
+        strides: &'a [usize],
+        offset: usize,
+    ) -> Result<Self, NeuraRustError> {
+        if shape.len() != strides.len() {
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: "Matching shape and strides length".to_string(),
+                actual: format!("Shape len: {}, Strides len: {}", shape.len(), strides.len()),
+                operation: "NdArraySimpleIterI32::new".to_string(),
+            });
+        }
+        let numel = shape.iter().product();
+        let initial_physical_offset = offset + calculate_physical_offset(&vec![0; shape.len()], strides)?;
+
+        Ok(NdArraySimpleIterI32 {
+            buffer,
+            shape,
+            strides,
+            offset,
+            current_logical_index: vec![0; shape.len()],
+            current_physical_offset: initial_physical_offset,
+            is_done: numel == 0,
+            numel,
+            counter: 0,
+        })
+    }
+
+    #[inline]
+    fn advance(&mut self) {
+        if self.is_done || self.shape.is_empty() { return; }
+        for i in (0..self.shape.len()).rev() {
+            self.current_physical_offset -= self.current_logical_index[i] * self.strides[i];
+            self.current_logical_index[i] += 1;
+            if self.current_logical_index[i] < self.shape[i] {
+                self.current_physical_offset += self.current_logical_index[i] * self.strides[i];
+                return;
+            }
+            self.current_logical_index[i] = 0;
+        }
+        self.is_done = true;
+        self.current_physical_offset = self.offset;
+    }
+}
+
+impl<'a> Iterator for NdArraySimpleIterI32<'a> {
+    type Item = i32;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_done || self.counter >= self.numel {
+            return None;
+        }
+        let value = self.buffer[self.current_physical_offset];
+        self.counter += 1;
+        self.advance();
+        Some(value)
+    }
+}
+
+// --- I64 Version ---
+pub struct NdArraySimpleIterI64<'a> {
+    pub(crate) buffer: &'a [i64],
+    pub(crate) shape: &'a [usize],
+    pub(crate) strides: &'a [usize],
+    pub(crate) offset: usize,
+    pub(crate) current_logical_index: Vec<usize>,
+    pub(crate) current_physical_offset: usize,
+    pub(crate) is_done: bool,
+    pub(crate) numel: usize,
+    pub(crate) counter: usize,
+}
+
+impl<'a> NdArraySimpleIterI64<'a> {
+    pub fn new(
+        buffer: &'a [i64],
+        shape: &'a [usize],
+        strides: &'a [usize],
+        offset: usize,
+    ) -> Result<Self, NeuraRustError> {
+        if shape.len() != strides.len() {
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: "Matching shape and strides length".to_string(),
+                actual: format!("Shape len: {}, Strides len: {}", shape.len(), strides.len()),
+                operation: "NdArraySimpleIterI64::new".to_string(),
+            });
+        }
+        let numel = shape.iter().product();
+        let initial_physical_offset = offset + calculate_physical_offset(&vec![0; shape.len()], strides)?;
+
+        Ok(NdArraySimpleIterI64 {
+            buffer,
+            shape,
+            strides,
+            offset,
+            current_logical_index: vec![0; shape.len()],
+            current_physical_offset: initial_physical_offset,
+            is_done: numel == 0,
+            numel,
+            counter: 0,
+        })
+    }
+
+    #[inline]
+    fn advance(&mut self) {
+        if self.is_done || self.shape.is_empty() { return; }
+        for i in (0..self.shape.len()).rev() {
+            self.current_physical_offset -= self.current_logical_index[i] * self.strides[i];
+            self.current_logical_index[i] += 1;
+            if self.current_logical_index[i] < self.shape[i] {
+                self.current_physical_offset += self.current_logical_index[i] * self.strides[i];
+                return;
+            }
+            self.current_logical_index[i] = 0;
+        }
+        self.is_done = true;
+        self.current_physical_offset = self.offset;
+    }
+}
+
+impl<'a> Iterator for NdArraySimpleIterI64<'a> {
+    type Item = i64;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_done || self.counter >= self.numel {
+            return None;
+        }
+        let value = self.buffer[self.current_physical_offset];
+        self.counter += 1;
+        self.advance();
+        Some(value)
+    }
+}
+
 // NdArrayBroadcastingIter for i32
 #[derive(Debug)]
 pub struct NdArrayBroadcastingIterI32<'a> {
@@ -617,6 +763,79 @@ impl<'a> Iterator for NdArrayBroadcastingIterBool<'a> {
         }
         let value = self.buffer[physical_offset];
         self.current_index += 1;
+        Some(value)
+    }
+}
+
+// --- Bool Version ---
+pub struct NdArraySimpleIterBool<'a> {
+    pub(crate) buffer: &'a [bool],
+    pub(crate) shape: &'a [usize],
+    pub(crate) strides: &'a [usize],
+    pub(crate) offset: usize,
+    pub(crate) current_logical_index: Vec<usize>,
+    pub(crate) current_physical_offset: usize,
+    pub(crate) is_done: bool,
+    pub(crate) numel: usize,
+    pub(crate) counter: usize,
+}
+
+impl<'a> NdArraySimpleIterBool<'a> {
+    pub fn new(
+        buffer: &'a [bool],
+        shape: &'a [usize],
+        strides: &'a [usize],
+        offset: usize,
+    ) -> Result<Self, NeuraRustError> {
+        if shape.len() != strides.len() {
+            return Err(NeuraRustError::ShapeMismatch {
+                expected: "Matching shape and strides length".to_string(),
+                actual: format!("Shape len: {}, Strides len: {}", shape.len(), strides.len()),
+                operation: "NdArraySimpleIterBool::new".to_string(),
+            });
+        }
+        let numel = shape.iter().product();
+        let initial_physical_offset = offset + calculate_physical_offset(&vec![0; shape.len()], strides)?;
+
+        Ok(NdArraySimpleIterBool {
+            buffer,
+            shape,
+            strides,
+            offset,
+            current_logical_index: vec![0; shape.len()],
+            current_physical_offset: initial_physical_offset,
+            is_done: numel == 0,
+            numel,
+            counter: 0,
+        })
+    }
+
+    #[inline]
+    fn advance(&mut self) {
+        if self.is_done || self.shape.is_empty() { return; }
+        for i in (0..self.shape.len()).rev() {
+            self.current_physical_offset -= self.current_logical_index[i] * self.strides[i];
+            self.current_logical_index[i] += 1;
+            if self.current_logical_index[i] < self.shape[i] {
+                self.current_physical_offset += self.current_logical_index[i] * self.strides[i];
+                return;
+            }
+            self.current_logical_index[i] = 0;
+        }
+        self.is_done = true;
+        self.current_physical_offset = self.offset;
+    }
+}
+
+impl<'a> Iterator for NdArraySimpleIterBool<'a> {
+    type Item = bool;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.is_done || self.counter >= self.numel {
+            return None;
+        }
+        let value = self.buffer[self.current_physical_offset];
+        self.counter += 1;
+        self.advance();
         Some(value)
     }
 } 

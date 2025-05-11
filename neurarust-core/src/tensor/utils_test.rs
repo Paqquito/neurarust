@@ -134,4 +134,33 @@ fn test_index_to_coord_with_zero_dim() {
 #[should_panic]
 fn test_index_to_coord_with_zero_dim_panic() {
     index_to_coord(1, &[2, 0, 3]); // Index > 0 for empty tensor
+}
+
+#[test]
+fn test_coord_to_index_basic() {
+    let shape = &[2, 3, 4];
+    assert_eq!(coord_to_index(&[0, 0, 0], shape), 0);
+    assert_eq!(coord_to_index(&[0, 1, 0], shape), 4);
+    assert_eq!(coord_to_index(&[0, 2, 3], shape), 11);
+    assert_eq!(coord_to_index(&[1, 0, 0], shape), 12);
+    assert_eq!(coord_to_index(&[1, 2, 3], shape), 23);
+}
+
+#[test]
+fn test_coord_to_index_scalar() {
+    assert_eq!(coord_to_index(&[], &[]), 0);
+}
+
+#[test]
+#[should_panic(expected = "Coordinate 2 out of bounds for dimension 0 with size 2")]
+fn test_coord_to_index_out_of_bounds() {
+    let shape = &[2, 3];
+    coord_to_index(&[2, 0], shape);
+}
+
+#[test]
+#[should_panic(expected = "Number of coordinates must match shape rank")]
+fn test_coord_to_index_rank_mismatch() {
+    let shape = &[2, 3];
+    coord_to_index(&[0], shape);
 } 
