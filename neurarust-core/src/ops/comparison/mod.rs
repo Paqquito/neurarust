@@ -19,8 +19,27 @@
 // Declare comparison operations
 pub mod equal;
 pub mod ge;
+pub mod ne;
+pub mod lt;
+pub mod gt;
+pub mod le;
 // Add others like greater, less, etc. later
 
 // Re-export the operation functions
 pub use equal::equal_op;
-pub use ge::ge_op; 
+pub use ge::ge_op;
+pub use ne::ne_op;
+pub use lt::lt_op;
+pub use gt::gt_op;
+pub use le::le_op;
+
+// Ajout des opérations logiques
+pub mod logical_and;
+pub mod logical_or;
+pub mod logical_xor;
+pub mod logical_not;
+
+pub use logical_and::logical_and_op;
+pub use logical_or::logical_or_op;
+pub use logical_xor::logical_xor_op;
+pub use logical_not::logical_not_op; 

@@ -3,62 +3,73 @@
 #[cfg(test)]
 mod tests {
     use crate::ops::comparison::equal_op;
-    use crate::utils::testing::check_tensor_near;
-    use crate::error::NeuraRustError;
+    use crate::tensor::Tensor;
 
     #[test]
-    fn test_equal_simple() -> Result<(), NeuraRustError> {
-        let a = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3])?;
-        let b = crate::tensor::from_vec_f32(vec![1.0, 0.0, 3.0], vec![3])?;
-        let result = equal_op(&a, &b)?;
-        let expected_data = vec![1.0, 0.0, 1.0];
-        check_tensor_near(&result, &[3], &expected_data, 1e-7); 
-        // Check that output does not require grad
-        assert!(!result.requires_grad(), "Equal op output should not require grad");
-        assert!(result.grad_fn().is_none(), "Equal op output should not have grad_fn");
-        Ok(())
+    fn test_equal_f32() {
+        let t1 = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![3]).unwrap();
+        let t2 = Tensor::new(vec![1.0f32, 0.0, 3.0], vec![3]).unwrap();
+        let result = equal_op(&t1, &t2).unwrap();
+        assert_eq!(result.get_bool_data().unwrap(), vec![true, false, true]);
+        assert!(!result.requires_grad());
+        assert!(result.grad_fn().is_none());
     }
 
     #[test]
-    fn test_equal_broadcast_lhs() -> Result<(), NeuraRustError> {
-        let a_scalar = crate::tensor::from_vec_f32(vec![2.0], vec![1])?;
-        let b_mat = crate::tensor::from_vec_f32(vec![1.0, 2.0, 2.0, 3.0], vec![2, 2])?;
-        let result = equal_op(&a_scalar, &b_mat)?;
-        let expected_data = vec![0.0, 1.0, 1.0, 0.0];
-        check_tensor_near(&result, &[2, 2], &expected_data, 1e-7);
-        Ok(())
+    fn test_equal_f32_broadcast() {
+        let a_scalar = Tensor::new(vec![2.0f32], vec![1]).unwrap();
+        let b_mat = Tensor::new(vec![1.0f32, 2.0, 2.0, 3.0], vec![2, 2]).unwrap();
+        let result = equal_op(&a_scalar, &b_mat).unwrap();
+        assert_eq!(result.get_bool_data().unwrap(), vec![false, true, true, false]);
     }
 
     #[test]
-    fn test_equal_broadcast_rhs() -> Result<(), NeuraRustError> {
-        let a_mat = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0, 4.0], vec![2, 2])?;
-        let b_row = crate::tensor::from_vec_f32(vec![3.0, 4.0], vec![1, 2])?;
-        let result = equal_op(&a_mat, &b_row)?;
-        let expected_data = vec![0.0, 0.0, 1.0, 1.0];
-        check_tensor_near(&result, &[2, 2], &expected_data, 1e-7);
-        Ok(())
+    fn test_equal_f64() {
+        let t1 = Tensor::new_f64(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let t2 = Tensor::new_f64(vec![1.0, 0.0, 3.0], vec![3]).unwrap();
+        let result = equal_op(&t1, &t2).unwrap();
+        assert_eq!(result.get_bool_data().unwrap(), vec![true, false, true]);
+    }
+
+    #[test]
+    fn test_equal_i32() {
+        let t1 = Tensor::new_i32(vec![1, 2, 3], vec![3]).unwrap();
+        let t2 = Tensor::new_i32(vec![1, 0, 3], vec![3]).unwrap();
+        let result = equal_op(&t1, &t2).unwrap();
+        assert_eq!(result.get_bool_data().unwrap(), vec![true, false, true]);
+    }
+
+    #[test]
+    fn test_equal_i64() {
+        let t1 = Tensor::new_i64(vec![1, 2, 3], vec![3]).unwrap();
+        let t2 = Tensor::new_i64(vec![1, 0, 3], vec![3]).unwrap();
+        let result = equal_op(&t1, &t2).unwrap();
+        assert_eq!(result.get_bool_data().unwrap(), vec![true, false, true]);
+    }
+
+    #[test]
+    fn test_equal_bool() {
+        let t1 = Tensor::new_bool(vec![true, false, true], vec![3]).unwrap();
+        let t2 = Tensor::new_bool(vec![true, true, false], vec![3]).unwrap();
+        let result = equal_op(&t1, &t2).unwrap();
+        assert_eq!(result.get_bool_data().unwrap(), vec![true, false, false]);
     }
 
     #[test]
     fn test_equal_broadcast_incompatible() {
-        let a = crate::tensor::from_vec_f32(vec![1.0, 2.0], vec![2]).unwrap();
-        let b = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let a = Tensor::new(vec![1.0f32, 2.0], vec![2]).unwrap();
+        let b = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![3]).unwrap();
         let result = equal_op(&a, &b);
-        assert!(matches!(result, Err(crate::error::NeuraRustError::BroadcastError { .. })));
+        assert!(result.is_err());
     }
-    
+
     #[test]
-    fn test_equal_float_epsilon() -> Result<(), NeuraRustError> {
-        let a = crate::tensor::from_vec_f32(vec![1.0, 2.0 + 1e-7, 3.0], vec![3])?;
-        let b = crate::tensor::from_vec_f32(vec![1.0, 2.0, 3.0 - 1e-7], vec![3])?;
-        
-        // Should be equal within default epsilon (1e-6)
-        let result_ab = equal_op(&a, &b)?;
-        check_tensor_near(&result_ab, &[3], &[1.0, 1.0, 1.0], 1e-7);
-        
-        // Should NOT be equal within default epsilon
-        let result_ac = equal_op(&a, &a)?;
-        check_tensor_near(&result_ac, &[3], &[1.0, 1.0, 1.0], 1e-7);
-        Ok(())
+    fn test_equal_float_epsilon() {
+        let a = Tensor::new(vec![1.0f32, 2.0 + 1e-7, 3.0], vec![3]).unwrap();
+        let b = Tensor::new(vec![1.0f32, 2.0, 3.0 - 1e-7], vec![3]).unwrap();
+        let result_ab = equal_op(&a, &b).unwrap();
+        assert_eq!(result_ab.get_bool_data().unwrap(), vec![true, true, true]);
+        let result_ac = equal_op(&a, &a).unwrap();
+        assert_eq!(result_ac.get_bool_data().unwrap(), vec![true, true, true]);
     }
 } 

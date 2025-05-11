@@ -68,7 +68,19 @@
 │   │   │   │   ├── equal.rs
 │   │   │   │   ├── equal_test.rs
 │   │   │   │   ├── ge.rs
-│   │   │   │   └── mod.rs
+│   │   │   │   ├── gt.rs
+│   │   │   │   ├── gt_test.rs
+│   │   │   │   ├── le.rs
+│   │   │   │   ├── le_test.rs
+│   │   │   │   ├── logical_and.rs
+│   │   │   │   ├── logical_not.rs
+│   │   │   │   ├── logical_or.rs
+│   │   │   │   ├── logical_xor.rs
+│   │   │   │   ├── lt.rs
+│   │   │   │   ├── lt_test.rs
+│   │   │   │   ├── mod.rs
+│   │   │   │   ├── ne.rs
+│   │   │   │   └── ne_test.rs
 │   │   │   ├── dtype
 │   │   │   │   ├── cast.rs
 │   │   │   │   ├── cast_test.rs
@@ -213,4 +225,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-32 directories, 182 files
+32 directories, 194 files

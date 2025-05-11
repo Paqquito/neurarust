@@ -3,36 +3,26 @@ use crate::error::NeuraRustError;
 use crate::tensor::utils::broadcast_shapes;
 use crate::tensor::Tensor;
 use crate::types::DType;
-use crate::ops::traits::NeuraNumeric;
-use approx::AbsDiffEq;
-use crate::tensor::iter_utils::NdArrayBroadcastingIter;
 
-/// Compare deux valeurs NeuraNumeric pour l'égalité, avec tolérance pour les flottants.
-#[inline]
-fn equal_kernel<T>(a: T, b: T) -> bool
-where
-    T: NeuraNumeric + AbsDiffEq<Epsilon = T>,
-{
-    a.abs_diff_eq(&b, T::default_epsilon())
-}
-
-/// Effectue une comparaison élément par élément (a == b) entre deux tenseurs.
-/// Le résultat est un tensor Bool (true si égalité, false sinon).
-pub fn equal_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
+/// Effectue une comparaison élément par élément (a <= b) entre deux tenseurs.
+/// Le résultat est un tensor Bool (true si a <= b, false sinon).
+pub fn le_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();
 
     if a_guard.device != StorageDevice::CPU || b_guard.device != StorageDevice::CPU {
         return Err(NeuraRustError::DeviceMismatch {
-            operation: "equal_op".to_string(),
+            operation: "le_op".to_string(),
             expected: StorageDevice::CPU,
             actual: if a_guard.device != StorageDevice::CPU { a_guard.device } else { b_guard.device },
         });
     }
     if a_guard.dtype != b_guard.dtype {
-        return Err(NeuraRustError::UnsupportedOperation(
-            format!("equal_op requires same dtype, got {:?} and {:?}", a_guard.dtype, b_guard.dtype)
-        ));
+        return Err(NeuraRustError::DataTypeMismatch {
+            operation: "le_op".to_string(),
+            expected: a_guard.dtype,
+            actual: b_guard.dtype,
+        });
     }
     let dtype = a_guard.dtype;
     let output_shape = broadcast_shapes(&a_guard.shape, &b_guard.shape)?;
@@ -41,53 +31,48 @@ pub fn equal_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
         DType::F32 => {
             let a_buffer = a_guard.buffer.try_get_cpu_f32()?;
             let b_buffer = b_guard.buffer.try_get_cpu_f32()?;
-            let iter_a = NdArrayBroadcastingIter::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
-            let iter_b = NdArrayBroadcastingIter::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
-            iter_a.zip(iter_b)
-                .map(|(va, vb)| equal_kernel::<f32>(va, vb))
-                .collect()
+            let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIter::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
+            let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIter::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
+            iter_a.zip(iter_b).map(|(va, vb)| va <= vb).collect()
         }
         DType::F64 => {
             let a_buffer = a_guard.buffer.try_get_cpu_f64()?;
             let b_buffer = b_guard.buffer.try_get_cpu_f64()?;
             let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIterF64::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
             let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterF64::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
-            iter_a.zip(iter_b)
-                .map(|(va, vb)| (va - vb).abs() < 1e-12)
-                .collect()
+            iter_a.zip(iter_b).map(|(va, vb)| va <= vb).collect()
         }
         DType::I32 => {
             let a_buffer = a_guard.buffer.try_get_cpu_i32()?;
             let b_buffer = b_guard.buffer.try_get_cpu_i32()?;
             let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIterI32::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
             let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterI32::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
-            iter_a.zip(iter_b)
-                .map(|(va, vb)| va == vb)
-                .collect()
+            iter_a.zip(iter_b).map(|(va, vb)| va <= vb).collect()
         }
         DType::I64 => {
             let a_buffer = a_guard.buffer.try_get_cpu_i64()?;
             let b_buffer = b_guard.buffer.try_get_cpu_i64()?;
             let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIterI64::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
             let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterI64::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
-            iter_a.zip(iter_b)
-                .map(|(va, vb)| va == vb)
-                .collect()
+            iter_a.zip(iter_b).map(|(va, vb)| va <= vb).collect()
         }
         DType::Bool => {
             let a_buffer = a_guard.buffer.try_get_cpu_bool()?;
             let b_buffer = b_guard.buffer.try_get_cpu_bool()?;
             let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIterBool::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
             let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterBool::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
-            iter_a.zip(iter_b)
-                .map(|(va, vb)| va == vb)
-                .collect()
+            iter_a.zip(iter_b).map(|(va, vb)| !va || vb).collect()
         }
+        // _ => return Err(NeuraRustError::DataTypeMismatch {
+        //     operation: "le_op".to_string(),
+        //     expected: dtype,
+        //     actual: dtype,
+        // }),
     };
     if result_data_vec.len() != numel {
-         return Err(NeuraRustError::InternalError(format!(
-            "equal_op: Output vec len {} mismatch with expected numel {}",
-             result_data_vec.len(), numel
+        return Err(NeuraRustError::InternalError(format!(
+            "le_op: Output vec len {} mismatch with expected numel {}",
+            result_data_vec.len(), numel
         )));
     }
     drop(a_guard);
@@ -96,5 +81,15 @@ pub fn equal_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
 }
 
 #[cfg(test)]
-#[path = "equal_test.rs"]
-mod tests; 
+mod tests {
+    use super::*;
+    use crate::tensor::create::from_vec_f32;
+    #[test]
+    fn test_le_op_basic() {
+        let a = from_vec_f32(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+        let b = from_vec_f32(vec![2.0, 2.0, 2.0], vec![3]).unwrap();
+        let out = le_op(&a, &b).unwrap();
+        assert_eq!(out.dtype(), DType::Bool);
+        assert_eq!(out.get_bool_data().unwrap(), vec![true, true, false]);
+    }
+} 

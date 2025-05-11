@@ -9,6 +9,7 @@ use crate::types::DType;
 use crate::ops::comparison::equal_op; 
 use crate::ops::arithmetic::mul_op; 
 use crate::ops::view::{expand_op, reshape_op}; 
+use crate::ops::dtype::cast_op;
 
 // Importer les utilitaires de réduction
 use super::utils::{process_reduction_axes, calculate_reduction_output_shape, calculate_grad_broadcast_shape};
@@ -112,9 +113,14 @@ impl BackwardOp for MaxBackward {
 
         // 6. Create the mask: (input == expanded_output)
         let mask = equal_op(&input_tensor, &expanded_output)?;
-        
-        // 7. Calculate grad_input = expanded_grad_output * mask
-        let grad_input = mul_op(&expanded_grad_output, &mask)?;
+        // 6b. Cast mask to F32 si besoin
+        let mask_f32 = if mask.dtype() == DType::Bool {
+            cast_op(&mask, DType::F32)?
+        } else {
+            mask
+        };
+        // 7. Calculate grad_input = expanded_grad_output * mask_f32
+        let grad_input = mul_op(&expanded_grad_output, &mask_f32)?;
 
         Ok(vec![grad_input])
     }

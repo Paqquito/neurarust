@@ -6,8 +6,6 @@ use crate::{
     tensor_data::TensorData,
     types::DType,
     ops::arithmetic::mul_op,
-    ops::dtype::cast_op, // Need cast_op for backward
-    tensor::create, // Import create module
 };
 use std::sync::{Arc, RwLock};
 use std::fmt::Debug;
@@ -38,44 +36,23 @@ struct MaxElementwiseBackward {
 impl BackwardOp for MaxElementwiseBackward {
     fn backward(&self, grad_output: &Tensor) -> Result<Vec<Tensor>, NeuraRustError> {
         let mut result_grads = Vec::new();
-        let grad_dtype = grad_output.dtype();
 
-        // Calculate mask: a >= b. This is calculated once.
-        // ge_op returns F32 tensor with 1.0 where a >= b, 0.0 otherwise.
-        let mask_a_ge_b_f32 = ge_op(&self.a_clone, &self.b_clone)?;
-        
-        // Gradient for a: grad_output * (a >= b)
-        // In case of equality a==b, the gradient flows to a.
+        // Calcul du masque : a >= b (désormais un tenseur Bool)
+        let mask_a_ge_b_bool = ge_op(&self.a_clone, &self.b_clone)?;
+        // On caste le masque en F32 pour le backward
+        let mask_a_ge_b = crate::ops::dtype::cast_op(&mask_a_ge_b_bool, DType::F32)?;
+
         if self.a_requires_grad {
-            // Cast mask F32 to grad_dtype if necessary
-            let mask_a_ge_b = if grad_dtype == DType::F64 {
-                cast_op(&mask_a_ge_b_f32, DType::F64)? 
-            } else {
-                mask_a_ge_b_f32.clone() // Clone the original mask for safety
-            };
-
             let grad_a_unreduced = mul_op(grad_output, &mask_a_ge_b)?;
             let grad_a = grad_a_unreduced.reduce_to_shape(&self.a_shape)?;
             result_grads.push(grad_a);
         }
 
-        // Gradient for b: grad_output * (a < b)
-        // (a < b) is equivalent to (1.0 - (a >= b))
+        // Gradient pour b : grad_output * (a < b) = grad_output * (1.0 - (a >= b))
         if self.b_requires_grad {
-            let one_tensor = create::ones_like(grad_output)?; // Create tensor of 1.0s
-            
-            // Cast the F32 mask (a >= b) to the gradient's dtype
-            let mask_a_ge_b_casted = if grad_dtype == DType::F64 {
-                cast_op(&mask_a_ge_b_f32, DType::F64)?
-            } else {
-                mask_a_ge_b_f32.clone() // Clone the original mask again
-            };
-
-            // Calculate mask for b: (1.0 - (a >= b)) which is (a < b)
-            let mask_b_gt_a = crate::ops::arithmetic::sub::sub_op(&one_tensor, &mask_a_ge_b_casted)?;
-            
-            // Calculate gradient for b
-            let grad_b_unreduced = mul_op(grad_output, &mask_b_gt_a)?;
+            let ones = crate::tensor::Tensor::new(vec![1.0; mask_a_ge_b.numel()], mask_a_ge_b.shape().to_vec())?;
+            let mask_a_lt_b = crate::ops::arithmetic::sub_op(&ones, &mask_a_ge_b)?;
+            let grad_b_unreduced = mul_op(grad_output, &mask_a_lt_b)?;
             let grad_b = grad_b_unreduced.reduce_to_shape(&self.b_shape)?;
             result_grads.push(grad_b);
         }

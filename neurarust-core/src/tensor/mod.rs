@@ -152,4 +152,54 @@ impl Tensor {
             data: Arc::new(RwLock::new(tensor_data)),
         })
     }
+
+    /// Teste l'égalité élément par élément avec un autre tenseur. Retourne un tenseur Bool.
+    pub fn eq(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::equal_op(self, other)
+    }
+
+    /// Teste la différence élément par élément avec un autre tenseur. Retourne un tenseur Bool.
+    pub fn ne(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::ne_op(self, other)
+    }
+
+    /// Teste l'infériorité stricte élément par élément avec un autre tenseur. Retourne un tenseur Bool.
+    pub fn lt(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::lt_op(self, other)
+    }
+
+    /// Teste la supériorité stricte élément par élément avec un autre tenseur. Retourne un tenseur Bool.
+    pub fn gt(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::gt_op(self, other)
+    }
+
+    /// Teste l'infériorité ou égalité élément par élément avec un autre tenseur. Retourne un tenseur Bool.
+    pub fn le(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::le_op(self, other)
+    }
+
+    /// Teste la supériorité ou égalité élément par élément avec un autre tenseur. Retourne un tenseur Bool.
+    pub fn ge(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::ge_op(self, other)
+    }
+
+    /// Effectue un ET logique élément par élément avec un autre tenseur Bool. Retourne un tenseur Bool.
+    pub fn logical_and(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::logical_and_op(self, other)
+    }
+
+    /// Effectue un OU logique élément par élément avec un autre tenseur Bool. Retourne un tenseur Bool.
+    pub fn logical_or(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::logical_or_op(self, other)
+    }
+
+    /// Effectue un XOR logique élément par élément avec un autre tenseur Bool. Retourne un tenseur Bool.
+    pub fn logical_xor(&self, other: &Tensor) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::logical_xor_op(self, other)
+    }
+
+    /// Effectue un NON logique élément par élément sur ce tenseur Bool. Retourne un tenseur Bool.
+    pub fn logical_not(&self) -> Result<Tensor, NeuraRustError> {
+        crate::ops::comparison::logical_not_op(self)
+    }
 }

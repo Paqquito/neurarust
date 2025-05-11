@@ -548,16 +548,16 @@
             *   [✅] Add tests for correctness, broadcasting, and autograd (if applicable for int ops).
         *   **Step 2.C.5: Implement Comparison and Logical Operations**
             *   🎯 **Goal:** Enable comparisons producing Boolean tensors, and logical operations on Boolean tensors.
-            *   [ ] Implement comparison ops (`eq_op`, `ne_op`, `lt_op`, `gt_op`, `le_op`, `ge_op`):
-                *   (Int, Int) -> BoolTensor
-                *   (Float, Float) -> BoolTensor (already exists, ensure output is BoolTensor if not already)
-                *   (Bool, Bool) -> BoolTensor
-            *   [ ] Implement `Tensor` methods for comparisons (`eq`, `ne`, `lt`, `gt`, `le`, `ge`).
-            *   [ ] Implement scalar versions for comparisons.
-            *   [ ] Implement logical ops (`logical_and_op`, `logical_or_op`, `logical_xor_op`, `logical_not_op`) for (Bool, Bool) -> Bool or (Bool) -> Bool.
-            *   [ ] Implement `Tensor` methods for logical ops.
-            *   [ ] Handle broadcasting for binary logical/comparison ops.
-            *   [ ] Add tests for all combinations, broadcasting, and output DTypes.
+            *   [✅] Implement comparison ops (`eq_op`, `ne_op`, `lt_op`, `gt_op`, `le_op`, `ge_op`):
+                *   [✅] (Int, Int) -> BoolTensor
+                *   [✅] (Float, Float) -> BoolTensor (déjà existant, vérifié)
+                *   [✅] (Bool, Bool) -> BoolTensor
+            *   [✅] Implement `Tensor` methods for comparisons (`eq`, `ne`, `lt`, `gt`, `le`, `ge`).
+            *   [✅] Implement scalar versions for comparisons.
+            *   [✅] Implement logical ops (`logical_and_op`, `logical_or_op`, `logical_xor_op`, `logical_not_op`) for (Bool, Bool) -> Bool or (Bool) -> Bool.
+            *   [✅] Implement `Tensor` methods for logical ops.
+            *   [✅] Handle broadcasting for binary logical/comparison ops.
+            *   [✅] Add tests for all combinations, broadcasting, and output DTypes.
         *   **Step 2.C.6: Implement Indexing with Integer and Boolean Tensors**
             *   🎯 **Goal:** Allow advanced indexing similar to NumPy/PyTorch.
             *   [ ] **`Tensor::index_select(dim: usize, indices: &Tensor)`**: Selects slices along `dim` using `indices` (which must be I32/I64).
