@@ -100,6 +100,7 @@ impl AdagradOptimizer {
             let initial_sum_sq = match p_tensor.dtype() {
                 DType::F32 => full(&p_tensor.shape(), initial_accumulator_value)?,
                 DType::F64 => full_f64(&p_tensor.shape(), initial_accumulator_value as f64)?,
+                DType::I32 | DType::I64 | DType::Bool => todo!(),
             };
             state.insert(p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 });
         }
@@ -166,6 +167,7 @@ impl Optimizer for AdagradOptimizer {
                          let initial_sum_sq = match p_tensor.dtype() {
                             DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("State init failed"),
                             DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("State init failed"),
+                            DType::I32 | DType::I64 | DType::Bool => todo!(),
                          };
                          AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }
                     });
@@ -251,6 +253,7 @@ impl Optimizer for AdagradOptimizer {
             let initial_sum_sq = match p_tensor.dtype() {
                 DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("Failed to create state tensor F32"),
                 DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("Failed to create state tensor F64"),
+                DType::I32 | DType::I64 | DType::Bool => todo!(),
             };
             new_state_entries.push((p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }));
         }

@@ -148,6 +148,7 @@ where
             drop(a_guard);
             Tensor::new_f64(output_data, output_shape)?
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     // Set Autograd Metadata

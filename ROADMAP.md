@@ -520,14 +520,14 @@
             *   [✅] Add tests for new DType enum values and buffer variants.
         *   **Step 2.C.2: Adapt Tensor Creation Functions**
             *   🎯 **Goal:** Allow creation of tensors with new DTypes.
-            *   [ ] Implement `Tensor::new_i64(data: Vec<i64>, shape: &[usize])`, `Tensor::new_i32(...)`, `Tensor::new_bool(...)`.
-            *   [ ] Implement `Tensor::from_vec_i64(...)`, etc., that take `Vec<S>` and `shape` and `DType`.
-            *   [ ] Adapt `zeros(shape, dtype, device)`, `ones(...)`, `full(shape, value, dtype, device)` to support new DTypes.
-                *   `full` with boolean `value` for `DType::Bool`.
-                *   `full` with integer `value` for integer DTypes.
-            *   [ ] Implement `randint(low, high, shape, dtype, device)` (moved from 1.B.9) for I32/I64 DTypes.
-            *   [ ] Implement `bernoulli(p, shape, dtype, device)` or `bernoulli_scalar(p_scalar, ...)` (moved from 1.B.9) for Bool DType.
-            *   [ ] Add tests for creating tensors of each new DType using all relevant methods.
+            *   [✅] Implement `Tensor::new_i64(data: Vec<i64>, shape: &[usize])`, `Tensor::new_i32(...)`, `Tensor::new_bool(...)`.
+            *   [✅] Implement `Tensor::from_vec_i64(...)`, etc., that take `Vec<S>` and `shape` and `DType`.
+            *   [✅] Adapt `zeros(shape, dtype, device)`, `ones(...)`, `full(shape, value, dtype, device)` to support new DTypes.
+                *   [✅] `full` with boolean `value` for `DType::Bool`.
+                *   [✅] `full` with integer `value` for integer DTypes.
+            *   [✅] Implement `randint(low, high, shape, dtype, device)` (moved from 1.B.9) for I32/I64 DTypes.
+            *   [✅] Implement `bernoulli(p, shape, dtype, device)` or `bernoulli_scalar(p_scalar, ...)` (moved from 1.B.9) for Bool DType.
+            *   [✅] Add tests for creating tensors of each new DType using all relevant methods.
         *   **Step 2.C.3: Adapt Core Tensor Methods**
             *   🎯 **Goal:** Ensure core tensor functionalities work with new DTypes.
             *   [ ] Implement scalar extraction: `item_i64()`, `item_i32()`, `item_bool()`.

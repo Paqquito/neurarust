@@ -144,10 +144,12 @@ impl Optimizer for AdamOptimizer {
                 let m_hat = match param_dtype {
                     DType::F32 => div_op(&m_t, &full(&[], bias_correction1)?)?,
                     DType::F64 => div_op(&m_t, &full_f64(&[], bias_correction1 as f64)?)?,
+                    DType::I32 | DType::I64 | DType::Bool => todo!(),
                 };
                 let v_hat = match param_dtype {
                     DType::F32 => div_op(&v_t, &full(&[], bias_correction2)?)?,
                     DType::F64 => div_op(&v_t, &full_f64(&[], bias_correction2 as f64)?)?,
+                    DType::I32 | DType::I64 | DType::Bool => todo!(),
                 };
     
                 let v_hat_for_update = if amsgrad {
@@ -162,11 +164,13 @@ impl Optimizer for AdamOptimizer {
                 let sqrt_v_hat = match param_dtype {
                     DType::F32 => pow_op(&v_hat_for_update, &full(&[], 0.5f32)?)?,
                     DType::F64 => pow_op(&v_hat_for_update, &full_f64(&[], 0.5f64)?)?,
+                    DType::I32 | DType::I64 | DType::Bool => todo!(),
                 };
                 
                 let denom = match param_dtype {
                     DType::F32 => add_op(&sqrt_v_hat, &full(&[], eps)?)?,
                     DType::F64 => add_op(&sqrt_v_hat, &full_f64(&[], eps as f64)?)?,
+                    DType::I32 | DType::I64 | DType::Bool => todo!(),
                 };
                 
                 let update_num = mul_op_scalar(&m_hat, lr)?;

@@ -147,6 +147,7 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                  Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "item_f32() - GPU not yet supported".to_string() })
             }
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
         }
     }
 
@@ -199,6 +200,7 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                 Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "item_f64() - GPU not yet supported".to_string() })
             }
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
         }
     }
 
@@ -277,6 +279,7 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                 Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "at_f32() - GPU not yet supported".to_string() })
             }
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
         }
     }
 
@@ -354,6 +357,7 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                 Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "at_f64() - GPU not yet supported".to_string() })
             }
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
         }
     }
 
@@ -527,18 +531,13 @@ impl Tensor {
                     result_vec.push(underlying_data[physical_offset] as f64);
                  }
             }
-             // Future: Add other types if conversion is meaningful
-             // DType::I64 => { ... }
-             // The below pattern is unreachable because DType only has F32 and F64 variants currently.
-             /*
-             other_dtype => {
-                 return Err(NeuraRustError::DataTypeMismatch {
-                    expected: DType::F64, // Or F32 if we only allow that conversion
-                    actual: other_dtype,
+            DType::I32 | DType::I64 | DType::Bool => {
+                return Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::F64,
+                    actual: guard.dtype,
                     operation: "get_f64_data requires F64 or F32".to_string(),
                 });
             }
-            */
         }
 
         Ok(result_vec)

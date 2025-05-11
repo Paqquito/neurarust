@@ -128,6 +128,30 @@ impl Tensor {
         })
     }
 
+    /// Creates a new CPU tensor with the given `i32` data and shape.
+    pub fn new_i32(data_vec: Vec<i32>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let tensor_data = TensorData::new_i32(data_vec, shape)?;
+        Ok(Tensor {
+            data: Arc::new(RwLock::new(tensor_data)),
+        })
+    }
+
+    /// Creates a new CPU tensor with the given `i64` data and shape.
+    pub fn new_i64(data_vec: Vec<i64>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let tensor_data = TensorData::new_i64(data_vec, shape)?;
+        Ok(Tensor {
+            data: Arc::new(RwLock::new(tensor_data)),
+        })
+    }
+
+    /// Creates a new CPU tensor with the given `bool` data and shape.
+    pub fn new_bool(data_vec: Vec<bool>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
+        let tensor_data = TensorData::new_bool(data_vec, shape)?;
+        Ok(Tensor {
+            data: Arc::new(RwLock::new(tensor_data)),
+        })
+    }
+
     // Methods for accessing shape, dtype, device, strides, data, etc.,
     // are implemented in `src/tensor/accessors.rs`.
     

@@ -94,7 +94,7 @@ pub(crate) fn perform_fill_inplace<S: NeuraNumeric>(
                     let data_slice = buffer_mut.try_get_cpu_f64_mut()?;
                     data_slice.fill(scalar_val);
                 }
-                // Add other CpuBuffer variants here when supported
+                &mut CpuBuffer::I32(_) | &mut CpuBuffer::I64(_) | &mut CpuBuffer::Bool(_) => todo!(),
             }
         }
         Buffer::Gpu { .. } => { // Handle GPU case

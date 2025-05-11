@@ -240,6 +240,7 @@ impl Tensor {
                     match self_dtype {
                         DType::F32 => crate::tensor::create::full(&[], 1.0f32)?,
                         DType::F64 => crate::tensor::create::full_f64(&[], 1.0f64)?,
+                        DType::I32 | DType::I64 | DType::Bool => todo!(),
                         // TODO: Add other DType variants if necessary or return an error
                     }
                 } else if is_empty {

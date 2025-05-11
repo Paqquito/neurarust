@@ -51,6 +51,18 @@ pub fn cast_op(tensor: &Tensor, new_dtype: DType) -> Result<Tensor, NeuraRustErr
             drop(tensor_guard);
             Tensor::new(output_data, output_shape)?
         }
+        (DType::I32, _) | (DType::I64, _) | (DType::Bool, _) => {
+            return Err(NeuraRustError::UnsupportedOperation(format!(
+                "cast_op from {:?} to {:?} is not supported encore.",
+                tensor_guard.dtype, new_dtype
+            )));
+        }
+        (_, DType::I32) | (_, DType::I64) | (_, DType::Bool) => {
+            return Err(NeuraRustError::UnsupportedOperation(format!(
+                "cast_op from {:?} to {:?} is not supported encore.",
+                tensor_guard.dtype, new_dtype
+            )));
+        }
         _ => {
             return Err(NeuraRustError::UnsupportedOperation(format!(
                 "cast_op from {:?} to {:?} is not supported yet.",

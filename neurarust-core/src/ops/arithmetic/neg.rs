@@ -129,6 +129,7 @@ pub fn neg_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
                 _ => return Err(NeuraRustError::InternalError("Buffer type mismatch for F64 DType in neg_op".to_string())),
             }
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
     
     let new_strides = if output_shape.is_empty() {

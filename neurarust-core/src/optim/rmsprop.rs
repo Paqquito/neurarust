@@ -39,6 +39,7 @@ impl Clone for RmsPropParamState {
                 self.square_avg.get_f64_data().expect("Failed to get F64 data for square_avg clone"),
                 self.square_avg.shape(),
             ).expect("Failed to create new F64 Tensor for square_avg clone"),
+            DType::I32 | DType::I64 | DType::Bool => todo!(),
         };
 
         let new_grad_avg = self.grad_avg.as_ref().map(|ga| {
@@ -51,6 +52,7 @@ impl Clone for RmsPropParamState {
                     ga.get_f64_data().expect("Failed to get F64 data for grad_avg clone"),
                     ga.shape(),
                 ).expect("Failed to create new F64 Tensor for grad_avg clone"),
+                DType::I32 | DType::I64 | DType::Bool => todo!(),
             }
         });
 
@@ -64,6 +66,7 @@ impl Clone for RmsPropParamState {
                     mb.get_f64_data().expect("Failed to get F64 data for momentum_buffer clone"),
                     mb.shape(),
                 ).expect("Failed to create new F64 Tensor for momentum_buffer clone"),
+                DType::I32 | DType::I64 | DType::Bool => todo!(),
             }
         });
 
@@ -135,6 +138,7 @@ fn full_like_with_val(other: &Tensor, value: f32) -> Result<Tensor, NeuraRustErr
     match other.dtype() {
         DType::F32 => full(&[], value),
         DType::F64 => full_f64(&[], value as f64),
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     }
 }
 

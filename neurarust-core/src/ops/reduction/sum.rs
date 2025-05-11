@@ -113,6 +113,7 @@ impl BackwardOp for SumAxesBackward {
                 drop(contiguous_grad_guard);
                 Tensor::new_f64(expanded_data, self.input_shape.clone())?
             }
+            DType::I32 | DType::I64 | DType::Bool => todo!(),
         };
 
         Ok(vec![input_gradient])
@@ -329,6 +330,7 @@ pub(crate) fn sum_op(
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     // --- Autograd Setup --- (inchangé)

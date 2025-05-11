@@ -300,6 +300,7 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
             )?;
             Tensor::new_f64(output_data, output_shape)?
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     Ok(output_tensor)

@@ -210,6 +210,7 @@ where
                     first_input_dtype = Some(dtype);
                 }
             }
+            DType::I32 | DType::I64 | DType::Bool => todo!(),
         }
 
         // Check contiguity
@@ -243,6 +244,7 @@ where
         // No inputs, check if output_grad is F32 or F64
         match output_grad_dtype {
             DType::F32 | DType::F64 => { /* Ok */ }
+            DType::I32 | DType::I64 | DType::Bool => todo!(),
         }
     }
 
@@ -331,6 +333,7 @@ where
             DType::F64 => {
                 contiguous_analytical_grad.get_f64_data()? // Get Vec<f64>
             }
+            DType::I32 | DType::I64 | DType::Bool => todo!(),
         };
 
         // Ensure analytical grad data is valid

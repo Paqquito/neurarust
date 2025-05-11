@@ -297,4 +297,31 @@ fn test_bernoulli_scalar() {
     assert!(matches!(err_p_high, Err(NeuraRustError::ArithmeticError(_))));
     let err_p_low = bernoulli_scalar(-0.1, vec![1], DType::F32, StorageDevice::CPU);
     assert!(matches!(err_p_low, Err(NeuraRustError::ArithmeticError(_))));
+}
+
+#[test]
+fn test_tensor_new_i32() {
+    let data = vec![1i32, 2, 3, 4];
+    let shape = vec![2, 2];
+    let t = crate::tensor::Tensor::new_i32(data.clone(), shape.clone()).unwrap();
+    assert_eq!(t.shape(), &[2, 2]);
+    assert_eq!(t.dtype(), crate::types::DType::I32);
+}
+
+#[test]
+fn test_tensor_new_i64() {
+    let data = vec![10i64, 20, 30, 40];
+    let shape = vec![2, 2];
+    let t = crate::tensor::Tensor::new_i64(data.clone(), shape.clone()).unwrap();
+    assert_eq!(t.shape(), &[2, 2]);
+    assert_eq!(t.dtype(), crate::types::DType::I64);
+}
+
+#[test]
+fn test_tensor_new_bool() {
+    let data = vec![true, false, true, false];
+    let shape = vec![2, 2];
+    let t = crate::tensor::Tensor::new_bool(data.clone(), shape.clone()).unwrap();
+    assert_eq!(t.shape(), &[2, 2]);
+    assert_eq!(t.dtype(), crate::types::DType::Bool);
 } 

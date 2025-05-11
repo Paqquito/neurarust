@@ -67,6 +67,7 @@ impl BackwardOp for MeanBackward {
         let scale_tensor = match grad_output.dtype() {
              DType::F32 => full(&[], scale_factor as f32)?,
              DType::F64 => full_f64(&[], scale_factor)?,
+             DType::I32 | DType::I64 | DType::Bool => todo!(),
         };
 
         let scaled_grad = mul_op(grad_output, &scale_tensor)?;
@@ -208,6 +209,7 @@ pub(crate) fn mean_op(
             drop(t_guard);
             Tensor::new_f64(result_data, output_shape)?
         }
+        DType::I32 | DType::I64 | DType::Bool => todo!(),
     };
 
     // --- Autograd Setup ---

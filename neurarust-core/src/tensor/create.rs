@@ -28,21 +28,35 @@ use crate::device::StorageDevice;
 /// ```
 pub fn zeros(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f32> = vec![0.0; numel]; // Create f32 data
+    let data_vec: Vec<f32> = vec![0.0; numel];
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new CPU tensor filled with zeros with the specified shape and `DType::F64`.
-///
-/// # Arguments
-/// * `shape`: A slice defining the dimensions of the tensor.
-///
-/// # Returns
-/// A `Result` containing the new F64 tensor or a `NeuraRustError`.
-pub fn zeros_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+/// Version générique : zeros avec DType
+pub fn zeros_dtype(shape: &[usize], dtype: DType) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f64> = vec![0.0; numel]; // Create f64 data
-    Tensor::new_f64(data_vec, shape.to_vec())
+    match dtype {
+        DType::F32 => {
+            let data_vec: Vec<f32> = vec![0.0; numel];
+            Tensor::new(data_vec, shape.to_vec())
+        }
+        DType::F64 => {
+            let data_vec: Vec<f64> = vec![0.0; numel];
+            Tensor::new_f64(data_vec, shape.to_vec())
+        }
+        DType::I32 => {
+            let data_vec: Vec<i32> = vec![0; numel];
+            Tensor::new_i32(data_vec, shape.to_vec())
+        }
+        DType::I64 => {
+            let data_vec: Vec<i64> = vec![0; numel];
+            Tensor::new_i64(data_vec, shape.to_vec())
+        }
+        DType::Bool => {
+            let data_vec: Vec<bool> = vec![false; numel];
+            Tensor::new_bool(data_vec, shape.to_vec())
+        }
+    }
 }
 
 /// Creates a new CPU tensor filled with ones with the specified shape.
@@ -65,21 +79,35 @@ pub fn zeros_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
 /// ```
 pub fn ones(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f32> = vec![1.0; numel]; // Create f32 data
+    let data_vec: Vec<f32> = vec![1.0; numel];
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new CPU tensor filled with ones with the specified shape and `DType::F64`.
-///
-/// # Arguments
-/// * `shape`: A slice defining the dimensions of the tensor.
-///
-/// # Returns
-/// A `Result` containing the new F64 tensor or a `NeuraRustError`.
-pub fn ones_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+/// Version générique : ones avec DType
+pub fn ones_dtype(shape: &[usize], dtype: DType) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f64> = vec![1.0; numel]; // Create f64 data
-    Tensor::new_f64(data_vec, shape.to_vec())
+    match dtype {
+        DType::F32 => {
+            let data_vec: Vec<f32> = vec![1.0; numel];
+            Tensor::new(data_vec, shape.to_vec())
+        }
+        DType::F64 => {
+            let data_vec: Vec<f64> = vec![1.0; numel];
+            Tensor::new_f64(data_vec, shape.to_vec())
+        }
+        DType::I32 => {
+            let data_vec: Vec<i32> = vec![1; numel];
+            Tensor::new_i32(data_vec, shape.to_vec())
+        }
+        DType::I64 => {
+            let data_vec: Vec<i64> = vec![1; numel];
+            Tensor::new_i64(data_vec, shape.to_vec())
+        }
+        DType::Bool => {
+            let data_vec: Vec<bool> = vec![true; numel];
+            Tensor::new_bool(data_vec, shape.to_vec())
+        }
+    }
 }
 
 /// Creates a new CPU tensor filled with a specific value with the specified shape.
@@ -101,24 +129,37 @@ pub fn ones_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
 /// assert_eq!(t.shape(), &[2, 2]);
 /// assert_eq!(t.get_f32_data().unwrap(), vec![3.14, 3.14, 3.14, 3.14]);
 /// ```
-pub fn full(shape: &[usize], value: f32) -> Result<Tensor, NeuraRustError> { // value is now f32
+pub fn full(shape: &[usize], value: f32) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f32> = vec![value; numel]; // Create f32 data
+    let data_vec: Vec<f32> = vec![value; numel];
     Tensor::new(data_vec, shape.to_vec())
 }
 
-/// Creates a new CPU tensor filled with a specific value with the specified shape and `DType::F64`.
-///
-/// # Arguments
-/// * `shape`: A slice defining the dimensions of the tensor.
-/// * `value`: The `f64` value to fill the tensor with.
-///
-/// # Returns
-/// A `Result` containing the new F64 tensor or a `NeuraRustError`.
-pub fn full_f64(shape: &[usize], value: f64) -> Result<Tensor, NeuraRustError> {
+/// Version générique : full avec DType (spécialisée par type)
+pub fn full_dtype_f32(shape: &[usize], value: f32) -> Result<Tensor, NeuraRustError> {
     let numel = shape.iter().product();
-    let data_vec: Vec<f64> = vec![value; numel]; // Create f64 data
+    let data_vec: Vec<f32> = vec![value; numel];
+    Tensor::new(data_vec, shape.to_vec())
+}
+pub fn full_dtype_f64(shape: &[usize], value: f64) -> Result<Tensor, NeuraRustError> {
+    let numel = shape.iter().product();
+    let data_vec: Vec<f64> = vec![value; numel];
     Tensor::new_f64(data_vec, shape.to_vec())
+}
+pub fn full_dtype_i32(shape: &[usize], value: i32) -> Result<Tensor, NeuraRustError> {
+    let numel = shape.iter().product();
+    let data_vec: Vec<i32> = vec![value; numel];
+    Tensor::new_i32(data_vec, shape.to_vec())
+}
+pub fn full_dtype_i64(shape: &[usize], value: i64) -> Result<Tensor, NeuraRustError> {
+    let numel = shape.iter().product();
+    let data_vec: Vec<i64> = vec![value; numel];
+    Tensor::new_i64(data_vec, shape.to_vec())
+}
+pub fn full_dtype_bool(shape: &[usize], value: bool) -> Result<Tensor, NeuraRustError> {
+    let numel = shape.iter().product();
+    let data_vec: Vec<bool> = vec![value; numel];
+    Tensor::new_bool(data_vec, shape.to_vec())
 }
 
 /// Creates a new CPU tensor with `DType::F32` from a `Vec<f32>` and shape.
@@ -181,7 +222,6 @@ pub fn from_vec_f64(data_vec: Vec<f64>, shape: Vec<usize>) -> Result<Tensor, Neu
 /// assert_eq!(z1.get_f64_data().unwrap(), vec![0.0, 0.0]);
 /// ```
 pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
-    // TODO: Later, use tensor.device() to create on the same device.
     let shape = tensor.shape();
     match tensor.dtype() {
         DType::F32 => {
@@ -194,7 +234,21 @@ pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
             let data_vec: Vec<f64> = vec![0.0; numel];
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<i32> = vec![0; numel];
+            Tensor::new_i32(data_vec, shape)
+        }
+        DType::I64 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<i64> = vec![0; numel];
+            Tensor::new_i64(data_vec, shape)
+        }
+        DType::Bool => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<bool> = vec![false; numel];
+            Tensor::new_bool(data_vec, shape)
+        }
     }
 }
 
@@ -206,7 +260,6 @@ pub fn zeros_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
 /// # Returns
 /// A `Result` containing the new tensor of ones or a `NeuraRustError`.
 pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
-    // TODO: Later, use tensor.device() to create on the same device.
     let shape = tensor.shape();
     match tensor.dtype() {
         DType::F32 => {
@@ -219,8 +272,64 @@ pub fn ones_like(tensor: &Tensor) -> Result<Tensor, NeuraRustError> {
             let data_vec: Vec<f64> = vec![1.0; numel];
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<i32> = vec![1; numel];
+            Tensor::new_i32(data_vec, shape)
+        }
+        DType::I64 => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<i64> = vec![1; numel];
+            Tensor::new_i64(data_vec, shape)
+        }
+        DType::Bool => {
+            let numel = shape.iter().product();
+            let data_vec: Vec<bool> = vec![true; numel];
+            Tensor::new_bool(data_vec, shape)
+        }
     }
+}
+
+/// Crée un tenseur CPU avec DType::I32 à partir d'un Vec<i32> et d'une forme.
+///
+/// Cette fonction prend possession du vecteur de données.
+///
+/// # Arguments
+/// * `data_vec`: Le Vec<i32> contenant les données du tenseur en ordre row-major.
+/// * `shape`: La forme désirée du tenseur sous forme de Vec<usize>.
+///
+/// # Erreurs
+/// Retourne NeuraRustError::TensorCreationError si le nombre d'éléments ne correspond pas à la forme.
+pub fn from_vec_i32(data_vec: Vec<i32>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+    Tensor::new_i32(data_vec, shape)
+}
+
+/// Crée un tenseur CPU avec DType::I64 à partir d'un Vec<i64> et d'une forme.
+///
+/// Cette fonction prend possession du vecteur de données.
+///
+/// # Arguments
+/// * `data_vec`: Le Vec<i64> contenant les données du tenseur en ordre row-major.
+/// * `shape`: La forme désirée du tenseur sous forme de Vec<usize>.
+///
+/// # Erreurs
+/// Retourne NeuraRustError::TensorCreationError si le nombre d'éléments ne correspond pas à la forme.
+pub fn from_vec_i64(data_vec: Vec<i64>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+    Tensor::new_i64(data_vec, shape)
+}
+
+/// Crée un tenseur CPU avec DType::Bool à partir d'un Vec<bool> et d'une forme.
+///
+/// Cette fonction prend possession du vecteur de données.
+///
+/// # Arguments
+/// * `data_vec`: Le Vec<bool> contenant les données du tenseur en ordre row-major.
+/// * `shape`: La forme désirée du tenseur sous forme de Vec<usize>.
+///
+/// # Erreurs
+/// Retourne NeuraRustError::TensorCreationError si le nombre d'éléments ne correspond pas à la forme.
+pub fn from_vec_bool(data_vec: Vec<bool>, shape: Vec<usize>) -> Result<Tensor, NeuraRustError> {
+    Tensor::new_bool(data_vec, shape)
 }
 
 // --- Keep other creation functions like arange, linspace, eye, rand, randn --- 
@@ -449,7 +558,27 @@ pub fn randint(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(rng.gen_range(low..high) as i32);
+            }
+            Tensor::new_i32(data_vec, shape)
+        }
+        DType::I64 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(rng.gen_range(low..high) as i64);
+            }
+            Tensor::new_i64(data_vec, shape)
+        }
+        DType::Bool => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(rng.gen_range(low..high) != 0);
+            }
+            Tensor::new_bool(data_vec, shape)
+        }
     }
 }
 
@@ -519,8 +648,43 @@ pub fn bernoulli_scalar(
             }
             Tensor::new_f64(data_vec, shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(if rng.gen_bool(p) { 1 } else { 0 });
+            }
+            Tensor::new_i32(data_vec, shape)
+        }
+        DType::I64 => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(if rng.gen_bool(p) { 1 } else { 0 });
+            }
+            Tensor::new_i64(data_vec, shape)
+        }
+        DType::Bool => {
+            let mut data_vec = Vec::with_capacity(numel);
+            for _ in 0..numel {
+                data_vec.push(rng.gen_bool(p));
+            }
+            Tensor::new_bool(data_vec, shape)
+        }
     }
+}
+
+/// Wrapper pour compatibilité : zeros_f64
+pub fn zeros_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+    full_dtype_f64(shape, 0.0)
+}
+
+/// Wrapper pour compatibilité : ones_f64
+pub fn ones_f64(shape: &[usize]) -> Result<Tensor, NeuraRustError> {
+    full_dtype_f64(shape, 1.0)
+}
+
+/// Wrapper pour compatibilité : full_f64
+pub fn full_f64(shape: &[usize], value: f64) -> Result<Tensor, NeuraRustError> {
+    full_dtype_f64(shape, value)
 }
 
 // Link the external tests file
