@@ -538,14 +538,14 @@
             *   [✅] Add tests for `item_*`, `cast` across various DType combinations.
         *   **Step 2.C.4: Implement Arithmetic Operations for Integer DTypes**
             *   🎯 **Goal:** Enable basic arithmetic for integer tensors.
-            *   [ ] Implement `add_op`, `sub_op`, `mul_op` for (Int, Int) -> Int.
-            *   [ ] Implement `div_op` for (Int, Int) -> Int (integer division, define behavior e.g. truncation towards zero).
-            *   [ ] (Optional for this phase) Consider `pow_op` for (Int, Int_scalar_exponent) -> Int.
-            *   [ ] Implement corresponding `Tensor` methods (`add`, `sub`, `mul`, `div`).
-            *   [ ] Implement scalar versions: `add_scalar(IntTensor, IntScalar)`, etc.
-            *   [ ] Handle broadcasting.
-            *   [ ] Add autograd support (gradients would typically be float, or error if trying to get int gradients for int ops without specific context).
-            *   [ ] Add tests for correctness, broadcasting, and autograd (if applicable for int ops).
+            *   [✅] Implement `add_op`, `sub_op`, `mul_op` for (Int, Int) -> Int.
+            *   [✅] Implement `div_op` for (Int, Int) -> Int (integer division, define behavior e.g. truncation towards zero).
+            *   [✅] (Optional for this phase) Consider `pow_op` for (Int, Int_scalar_exponent) -> Int.
+            *   [✅] Implement corresponding `Tensor` methods (`add`, `sub`, `mul`, `div`).
+            *   [✅] Implement scalar versions: `add_scalar(IntTensor, IntScalar)`, etc.
+            *   [✅] Handle broadcasting.
+            *   [✅] Add autograd support (gradients would typically be float, or error if trying to get int gradients for int ops without specific context).
+            *   [✅] Add tests for correctness, broadcasting, and autograd (if applicable for int ops).
         *   **Step 2.C.5: Implement Comparison and Logical Operations**
             *   🎯 **Goal:** Enable comparisons producing Boolean tensors, and logical operations on Boolean tensors.
             *   [ ] Implement comparison ops (`eq_op`, `ne_op`, `lt_op`, `gt_op`, `le_op`, `ge_op`):

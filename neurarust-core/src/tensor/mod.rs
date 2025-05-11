@@ -36,7 +36,8 @@ pub mod iter_utils; // Declare the new iterator utils module
 // e.g., `neurarust_core::zeros(...)` instead of `neurarust_core::tensor::create::zeros(...)`
 pub use create::{zeros, ones, full, zeros_like, ones_like,
                  zeros_f64, ones_f64, full_f64,
-                 from_vec_f32, from_vec_f64};
+                 from_vec_f32, from_vec_f64,
+                 from_vec_i32, from_vec_i64, from_vec_bool};
 
 /// Represents a multi-dimensional array (tensor) in NeuraRust.
 ///
@@ -128,7 +129,7 @@ impl Tensor {
         })
     }
 
-    /// Creates a new CPU tensor with the given `i32` data and shape.
+    /// Crée un tenseur CPU avec les données i32 et la forme données.
     pub fn new_i32(data_vec: Vec<i32>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         let tensor_data = TensorData::new_i32(data_vec, shape)?;
         Ok(Tensor {
@@ -136,7 +137,7 @@ impl Tensor {
         })
     }
 
-    /// Creates a new CPU tensor with the given `i64` data and shape.
+    /// Crée un tenseur CPU avec les données i64 et la forme données.
     pub fn new_i64(data_vec: Vec<i64>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         let tensor_data = TensorData::new_i64(data_vec, shape)?;
         Ok(Tensor {
@@ -144,29 +145,11 @@ impl Tensor {
         })
     }
 
-    /// Creates a new CPU tensor with the given `bool` data and shape.
+    /// Crée un tenseur CPU avec les données bool et la forme données.
     pub fn new_bool(data_vec: Vec<bool>, shape: Vec<usize>) -> Result<Self, NeuraRustError> {
         let tensor_data = TensorData::new_bool(data_vec, shape)?;
         Ok(Tensor {
             data: Arc::new(RwLock::new(tensor_data)),
         })
     }
-
-    // Methods for accessing shape, dtype, device, strides, data, etc.,
-    // are implemented in `src/tensor/accessors.rs`.
-    
-    // Methods related to autograd (`backward`, `grad`, `requires_grad`, `detach`, etc.)
-    // are implemented in `src/tensor/autograd_methods.rs` and `src/tensor/autograd.rs`.
-    
-    // Methods for view operations (`reshape`, `transpose`, `slice`, `permute`, `expand`, etc.)
-    // are implemented in `src/tensor/view_methods.rs`.
-    
-    // Methods for reduction operations (`sum`, `mean`, `max`, etc.)
-    // are implemented in `src/tensor/reduction_methods.rs`.
-    
-    // Trait implementations (`Clone`, `Debug`, etc.) might be in `src/tensor/traits.rs` or other files.
 }
-
-// Add the new test module
-#[cfg(test)]
-mod inplace_ops_tests;

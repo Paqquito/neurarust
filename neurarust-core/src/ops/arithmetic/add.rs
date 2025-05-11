@@ -108,6 +108,8 @@ pub(crate) fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
         b,
         |va, vb| add_kernel::<f32>(va, vb),
         |va, vb| add_kernel::<f64>(va, vb),
+        |va, vb| va + vb, // I32
+        |va, vb| va + vb, // I64
         |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
             let a_node = a_node_opt.expect("a_node must be Some if requires_grad is true");
             let b_node = b_node_opt.expect("b_node must be Some if requires_grad is true");

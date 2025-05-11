@@ -852,6 +852,46 @@ impl Tensor {
         }
         Ok(())
     }
+
+    /// Ajoute un scalaire i32 à chaque élément du tenseur (in-place).
+    pub fn add_scalar_i32(&mut self, scalar: i32) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::add_scalar::perform_add_scalar_inplace_i32(self, scalar)
+    }
+
+    /// Ajoute un scalaire i64 à chaque élément du tenseur (in-place).
+    pub fn add_scalar_i64(&mut self, scalar: i64) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::add_scalar::perform_add_scalar_inplace_i64(self, scalar)
+    }
+
+    /// Soustrait un scalaire i32 à chaque élément du tenseur (in-place).
+    pub fn sub_scalar_i32(&mut self, scalar: i32) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::sub_scalar::perform_sub_scalar_inplace_i32(self, scalar)
+    }
+
+    /// Soustrait un scalaire i64 à chaque élément du tenseur (in-place).
+    pub fn sub_scalar_i64(&mut self, scalar: i64) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::sub_scalar::perform_sub_scalar_inplace_i64(self, scalar)
+    }
+
+    /// Multiplie chaque élément du tenseur par un scalaire i32 (in-place).
+    pub fn mul_scalar_i32(&mut self, scalar: i32) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::mul_scalar::perform_mul_scalar_inplace_i32(self, scalar)
+    }
+
+    /// Multiplie chaque élément du tenseur par un scalaire i64 (in-place).
+    pub fn mul_scalar_i64(&mut self, scalar: i64) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::mul_scalar::perform_mul_scalar_inplace_i64(self, scalar)
+    }
+
+    /// Divise chaque élément du tenseur par un scalaire i32 (in-place).
+    pub fn div_scalar_i32(&mut self, scalar: i32) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::div_scalar::perform_div_scalar_inplace_i32(self, scalar)
+    }
+
+    /// Divise chaque élément du tenseur par un scalaire i64 (in-place).
+    pub fn div_scalar_i64(&mut self, scalar: i64) -> Result<(), NeuraRustError> {
+        crate::tensor::inplace_ops::div_scalar::perform_div_scalar_inplace_i64(self, scalar)
+    }
 }
 
 // The test module declaration previously here is now removed,

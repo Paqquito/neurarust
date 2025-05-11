@@ -137,4 +137,88 @@ pub fn perform_div_scalar_inplace_f64(current_tensor: &mut Tensor, scalar: f64) 
 
     apply_div_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), &self_strides_cloned, self_offset_val, numel_self)?;
     Ok(())
+}
+
+pub fn perform_div_scalar_inplace_i32(current_tensor: &mut Tensor, scalar: i32) -> Result<(), NeuraRustError> {
+    if current_tensor.dtype() != DType::I32 {
+        return Err(NeuraRustError::DataTypeMismatch {
+            expected: DType::I32,
+            actual: current_tensor.dtype(),
+            operation: "in-place div_scalar_i32".to_string()
+        });
+    }
+    if scalar == 0 {
+        return Err(NeuraRustError::ArithmeticError("Division by zero in div_scalar_i32.".to_string()));
+    }
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
+        return Err(NeuraRustError::InplaceModificationError {
+            operation: "div_scalar_i32".to_string(),
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
+        });
+    }
+    let self_shape_vec = current_tensor.shape().clone();
+    let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
+        lock_type: "write (self)".to_string(), 
+        reason: "Failed to acquire write lock for self.data in div_scalar_i32".to_string()
+    })?;
+    let self_strides_cloned = self_tensor_data_guard.strides.clone();
+    let self_offset_val = self_tensor_data_guard.offset;
+    let self_device_for_error = self_tensor_data_guard.device;
+    let numel_self = self_shape_vec.iter().product();
+    let buffer_enum_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+    let self_vec_mut: &mut Vec<i32> = match buffer_enum_mut_ref {
+        Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+            CpuBuffer::I32(ref mut arc_vec) => Arc::make_mut(arc_vec),
+            _ => return Err(NeuraRustError::DataTypeMismatch { 
+                expected: DType::I32, actual: current_tensor.dtype(), operation: "div_scalar_i32 inplace (self buffer is not I32)".to_string()
+            }),
+        },
+        _ => return Err(NeuraRustError::DeviceMismatch { 
+            expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "div_scalar_i32 inplace (self buffer is not CPU)".to_string()
+        }),
+    };
+    apply_div_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), &self_strides_cloned, self_offset_val, numel_self)?;
+    Ok(())
+}
+
+pub fn perform_div_scalar_inplace_i64(current_tensor: &mut Tensor, scalar: i64) -> Result<(), NeuraRustError> {
+    if current_tensor.dtype() != DType::I64 {
+        return Err(NeuraRustError::DataTypeMismatch {
+            expected: DType::I64,
+            actual: current_tensor.dtype(),
+            operation: "in-place div_scalar_i64".to_string()
+        });
+    }
+    if scalar == 0 {
+        return Err(NeuraRustError::ArithmeticError("Division by zero in div_scalar_i64.".to_string()));
+    }
+    if current_tensor.grad_fn().is_some() || (current_tensor.grad_fn().is_none() && current_tensor.requires_grad()) {
+        return Err(NeuraRustError::InplaceModificationError {
+            operation: "div_scalar_i64".to_string(),
+            reason: "In-place operation is not allowed on a non-leaf tensor or a leaf tensor that requires grad.".to_string()
+        });
+    }
+    let self_shape_vec = current_tensor.shape().clone();
+    let mut self_tensor_data_guard = current_tensor.data.write().map_err(|_| NeuraRustError::LockError{
+        lock_type: "write (self)".to_string(), 
+        reason: "Failed to acquire write lock for self.data in div_scalar_i64".to_string()
+    })?;
+    let self_strides_cloned = self_tensor_data_guard.strides.clone();
+    let self_offset_val = self_tensor_data_guard.offset;
+    let self_device_for_error = self_tensor_data_guard.device;
+    let numel_self = self_shape_vec.iter().product();
+    let buffer_enum_mut_ref: &mut Buffer = Arc::make_mut(&mut self_tensor_data_guard.buffer);
+    let self_vec_mut: &mut Vec<i64> = match buffer_enum_mut_ref {
+        Buffer::Cpu(ref mut cpu_buf) => match cpu_buf {
+            CpuBuffer::I64(ref mut arc_vec) => Arc::make_mut(arc_vec),
+            _ => return Err(NeuraRustError::DataTypeMismatch { 
+                expected: DType::I64, actual: current_tensor.dtype(), operation: "div_scalar_i64 inplace (self buffer is not I64)".to_string()
+            }),
+        },
+        _ => return Err(NeuraRustError::DeviceMismatch { 
+            expected: crate::device::StorageDevice::CPU, actual: self_device_for_error, operation: "div_scalar_i64 inplace (self buffer is not CPU)".to_string()
+        }),
+    };
+    apply_div_scalar_to_vec(self_vec_mut, scalar, self_shape_vec.as_slice(), &self_strides_cloned, self_offset_val, numel_self)?;
+    Ok(())
 } 

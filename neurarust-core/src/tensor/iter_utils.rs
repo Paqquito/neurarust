@@ -380,4 +380,164 @@ impl<'a> Iterator for NdArraySimpleIterF64<'a> {
         self.advance();
         Some(value)
     }
+}
+
+// NdArrayBroadcastingIter for i32
+#[derive(Debug)]
+pub struct NdArrayBroadcastingIterI32<'a> {
+    buffer: &'a Arc<Vec<i32>>,
+    original_shape: &'a [usize],
+    original_strides: &'a [usize],
+    original_offset: usize,
+    target_shape: &'a [usize],
+    current_index: usize,
+    total_elements: usize,
+}
+
+impl<'a> NdArrayBroadcastingIterI32<'a> {
+    pub fn new(
+        buffer: &'a Arc<Vec<i32>>,
+        original_shape: &'a [usize],
+        original_strides: &'a [usize],
+        original_offset: usize,
+        target_shape: &'a [usize],
+    ) -> Result<Self, NeuraRustError> {
+        let total_elements = target_shape.iter().product();
+        Ok(Self {
+            buffer,
+            original_shape,
+            original_strides,
+            original_offset,
+            target_shape,
+            current_index: 0,
+            total_elements,
+        })
+    }
+}
+
+impl<'a> Iterator for NdArrayBroadcastingIterI32<'a> {
+    type Item = i32;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.total_elements {
+            return None;
+        }
+        let target_rank = self.target_shape.len();
+        let original_rank = self.original_shape.len();
+        let mut target_multi_index = vec![0; target_rank];
+        let mut current_linear = self.current_index;
+        for dim in (0..target_rank).rev() {
+            let shape_val = self.target_shape[dim];
+            if shape_val > 0 {
+                target_multi_index[dim] = current_linear % shape_val;
+                current_linear /= shape_val;
+            } else {
+                target_multi_index[dim] = 0;
+            }
+        }
+        let mut original_multi_index = vec![0; original_rank];
+        let rank_diff = target_rank as isize - original_rank as isize;
+        for original_dim in 0..original_rank {
+            let target_dim = (original_dim as isize + rank_diff) as usize;
+            if self.original_shape[original_dim] == 1 {
+                original_multi_index[original_dim] = 0;
+            } else if target_dim < target_multi_index.len() {
+                original_multi_index[original_dim] = target_multi_index[target_dim];
+            } else {
+                original_multi_index[original_dim] = 0;
+            }
+        }
+        let physical_offset = self.original_offset
+            + original_multi_index
+                .iter()
+                .zip(self.original_strides.iter())
+                .map(|(&idx, &stride)| idx * stride)
+                .sum::<usize>();
+        if physical_offset >= self.buffer.len() {
+            self.current_index = self.total_elements;
+            return None;
+        }
+        let value = self.buffer[physical_offset];
+        self.current_index += 1;
+        Some(value)
+    }
+}
+
+// NdArrayBroadcastingIter for i64
+#[derive(Debug)]
+pub struct NdArrayBroadcastingIterI64<'a> {
+    buffer: &'a Arc<Vec<i64>>,
+    original_shape: &'a [usize],
+    original_strides: &'a [usize],
+    original_offset: usize,
+    target_shape: &'a [usize],
+    current_index: usize,
+    total_elements: usize,
+}
+
+impl<'a> NdArrayBroadcastingIterI64<'a> {
+    pub fn new(
+        buffer: &'a Arc<Vec<i64>>,
+        original_shape: &'a [usize],
+        original_strides: &'a [usize],
+        original_offset: usize,
+        target_shape: &'a [usize],
+    ) -> Result<Self, NeuraRustError> {
+        let total_elements = target_shape.iter().product();
+        Ok(Self {
+            buffer,
+            original_shape,
+            original_strides,
+            original_offset,
+            target_shape,
+            current_index: 0,
+            total_elements,
+        })
+    }
+}
+
+impl<'a> Iterator for NdArrayBroadcastingIterI64<'a> {
+    type Item = i64;
+    fn next(&mut self) -> Option<Self::Item> {
+        if self.current_index >= self.total_elements {
+            return None;
+        }
+        let target_rank = self.target_shape.len();
+        let original_rank = self.original_shape.len();
+        let mut target_multi_index = vec![0; target_rank];
+        let mut current_linear = self.current_index;
+        for dim in (0..target_rank).rev() {
+            let shape_val = self.target_shape[dim];
+            if shape_val > 0 {
+                target_multi_index[dim] = current_linear % shape_val;
+                current_linear /= shape_val;
+            } else {
+                target_multi_index[dim] = 0;
+            }
+        }
+        let mut original_multi_index = vec![0; original_rank];
+        let rank_diff = target_rank as isize - original_rank as isize;
+        for original_dim in 0..original_rank {
+            let target_dim = (original_dim as isize + rank_diff) as usize;
+            if self.original_shape[original_dim] == 1 {
+                original_multi_index[original_dim] = 0;
+            } else if target_dim < target_multi_index.len() {
+                original_multi_index[original_dim] = target_multi_index[target_dim];
+            } else {
+                original_multi_index[original_dim] = 0;
+            }
+        }
+        let physical_offset = self.original_offset
+            + original_multi_index
+                .iter()
+                .zip(self.original_strides.iter())
+                .map(|(&idx, &stride)| idx * stride)
+                .sum::<usize>();
+        if physical_offset >= self.buffer.len() {
+            self.current_index = self.total_elements;
+            return None;
+        }
+        let value = self.buffer[physical_offset];
+        self.current_index += 1;
+        Some(value)
+    }
 } 

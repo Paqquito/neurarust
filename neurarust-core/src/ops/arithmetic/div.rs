@@ -109,15 +109,17 @@ pub fn div_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_clone = a.clone();
     let b_clone = b.clone();
 
-    // Call the centralized helper
     crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,
-        // Closure for F32, calling the generic kernel
+        // Closure pour F32
         |va, vb| div_kernel::<f32>(va, vb),
-        // Closure for F64, calling the generic kernel
+        // Closure pour F64
         |va, vb| div_kernel::<f64>(va, vb),
-        // Closure captures and moves the clones
+        // I32 : closure simple, la gestion d'erreur sera dans apply_binary_op_broadcasted
+        |va, vb| va / vb,
+        // I64 : closure simple, la gestion d'erreur sera dans apply_binary_op_broadcasted
+        |va, vb| va / vb,
         move |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
             Arc::new(DivBackward {
                 a: a_clone,
@@ -130,7 +132,7 @@ pub fn div_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 b_requires_grad: b_req,
             })
         },
-        "div_op", // Operation name for errors
+        "div_op",
     )
 }
 

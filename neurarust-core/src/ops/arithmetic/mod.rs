@@ -46,6 +46,8 @@ use std::sync::{Arc, RwLock};
 /// * `b`: The second input tensor.
 /// * `op_f32`: Closure performing the operation for F32: `|f32, f32| -> f32`.
 /// * `op_f64`: Closure performing the operation for F64: `|f64, f64| -> f64`.
+/// * `op_i32`: Closure performing the operation for I32: `|i32, i32| -> i32`.
+/// * `op_i64`: Closure performing the operation for I64: `|i64, i64| -> i64`.
 /// * `build_backward_op`: Closure to build the specific `BackwardOp` struct for autograd.
 ///   It receives the necessary context (input nodes, shapes, requires_grad flags).
 /// * `op_name`: Static string representing the operation name (for error messages).
@@ -55,18 +57,24 @@ use std::sync::{Arc, RwLock};
 pub(crate) fn apply_binary_op_broadcasted<
     OpF32,
     OpF64,
+    OpI32,
+    OpI64,
     BuildBackward
 >(
     a: &Tensor,
     b: &Tensor,
     op_f32: OpF32,
     op_f64: OpF64,
+    op_i32: OpI32,
+    op_i64: OpI64,
     build_backward_op: BuildBackward,
     op_name: &'static str,
 ) -> Result<Tensor, NeuraRustError>
 where
     OpF32: Fn(f32, f32) -> f32,
     OpF64: Fn(f64, f64) -> f64,
+    OpI32: Fn(i32, i32) -> i32,
+    OpI64: Fn(i64, i64) -> i64,
     BuildBackward: FnOnce(
         Option<Arc<RwLock<TensorData>>>, // a_node_arc
         Option<Arc<RwLock<TensorData>>>, // b_node_arc
@@ -149,7 +157,49 @@ where
             drop(a_guard); drop(b_guard);
             Tensor::new_f64(output_data_vec, output_shape)?
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 => {
+            let a_buffer = a_guard.buffer.try_get_cpu_i32()?;
+            let b_buffer = b_guard.buffer.try_get_cpu_i32()?;
+            let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIterI32::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
+            let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterI32::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
+            let mut output_data_vec = Vec::with_capacity(numel);
+            for (va, vb) in iter_a.zip(iter_b) {
+                if vb == 0 {
+                    return Err(NeuraRustError::ArithmeticError("Tentative de division entière par zéro (I32)".to_string()));
+                }
+                output_data_vec.push(op_i32(va, vb));
+            }
+            if output_data_vec.len() != numel {
+                return Err(NeuraRustError::InternalError(format!(
+                    "{}: Output vec len {} mismatch with expected numel {}",
+                    op_name, output_data_vec.len(), numel
+                )));
+            }
+            drop(a_guard); drop(b_guard);
+            Tensor::new_i32(output_data_vec, output_shape)?
+        }
+        DType::I64 => {
+            let a_buffer = a_guard.buffer.try_get_cpu_i64()?;
+            let b_buffer = b_guard.buffer.try_get_cpu_i64()?;
+            let iter_a = crate::tensor::iter_utils::NdArrayBroadcastingIterI64::new(a_buffer, &a_guard.shape, &a_guard.strides, a_guard.offset, &output_shape)?;
+            let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterI64::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
+            let mut output_data_vec = Vec::with_capacity(numel);
+            for (va, vb) in iter_a.zip(iter_b) {
+                if vb == 0 {
+                    return Err(NeuraRustError::ArithmeticError("Tentative de division entière par zéro (I64)".to_string()));
+                }
+                output_data_vec.push(op_i64(va, vb));
+            }
+            if output_data_vec.len() != numel {
+                return Err(NeuraRustError::InternalError(format!(
+                    "{}: Output vec len {} mismatch with expected numel {}",
+                    op_name, output_data_vec.len(), numel
+                )));
+            }
+            drop(a_guard); drop(b_guard);
+            Tensor::new_i64(output_data_vec, output_shape)?
+        }
+        DType::Bool => todo!(),
     };
 
     // --- Autograd Setup --- 

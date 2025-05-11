@@ -118,4 +118,54 @@ fn test_mul_backward_broadcast_f64() -> Result<(), GradCheckError> {
     let output_grad = Tensor::new_f64(vec![0.1, 0.2, 0.3, 0.4], output_shape)?;
 
     check_grad(func, &vec![a, b], &output_grad, 1e-6, 1e-9, 1e-7)
+}
+
+#[test]
+fn test_mul_tensors_i32() {
+    let t1 = crate::tensor::from_vec_i32(vec![2, 3, 4, 5], vec![2, 2]).unwrap();
+    let t2 = crate::tensor::from_vec_i32(vec![10, 20, 30, 40], vec![2, 2]).unwrap();
+    let result = crate::ops::arithmetic::mul::mul_op(&t1, &t2).unwrap();
+    let result_data = result.get_i32_data().unwrap();
+    assert_eq!(result_data, vec![20, 60, 120, 200]);
+    assert_eq!(result.shape(), vec![2, 2]);
+    assert_eq!(result.dtype(), crate::DType::I32);
+}
+
+#[test]
+fn test_mul_tensors_i64() {
+    let t1 = crate::tensor::from_vec_i64(vec![2, 3, 4, 5], vec![2, 2]).unwrap();
+    let t2 = crate::tensor::from_vec_i64(vec![10, 20, 30, 40], vec![2, 2]).unwrap();
+    let result = crate::ops::arithmetic::mul::mul_op(&t1, &t2).unwrap();
+    let result_data = result.get_i64_data().unwrap();
+    assert_eq!(result_data, vec![20, 60, 120, 200]);
+    assert_eq!(result.shape(), vec![2, 2]);
+    assert_eq!(result.dtype(), crate::DType::I64);
+}
+
+#[test]
+fn test_mul_broadcasting_i32() {
+    let matrix = crate::tensor::from_vec_i32(vec![2, 3, 4, 5], vec![2, 2]).unwrap();
+    let row_vector = crate::tensor::from_vec_i32(vec![10, 20], vec![1, 2]).unwrap();
+    let result = crate::ops::arithmetic::mul::mul_op(&matrix, &row_vector).unwrap();
+    let result_data = result.get_i32_data().unwrap();
+    assert_eq!(result_data, vec![20, 60, 40, 100]);
+    assert_eq!(result.shape(), vec![2, 2]);
+}
+
+#[test]
+fn test_mul_broadcasting_i64() {
+    let matrix = crate::tensor::from_vec_i64(vec![2, 3, 4, 5], vec![2, 2]).unwrap();
+    let row_vector = crate::tensor::from_vec_i64(vec![10, 20], vec![1, 2]).unwrap();
+    let result = crate::ops::arithmetic::mul::mul_op(&matrix, &row_vector).unwrap();
+    let result_data = result.get_i64_data().unwrap();
+    assert_eq!(result_data, vec![20, 60, 40, 100]);
+    assert_eq!(result.shape(), vec![2, 2]);
+}
+
+#[test]
+fn test_mul_tensors_shape_mismatch_i32() {
+    let t1 = crate::tensor::from_vec_i32(vec![1, 2], vec![2]).unwrap();
+    let t2 = crate::tensor::from_vec_i32(vec![1, 2, 3], vec![3]).unwrap();
+    let result = crate::ops::arithmetic::mul::mul_op(&t1, &t2);
+    assert!(matches!(result, Err(crate::NeuraRustError::BroadcastError { .. })));
 } 

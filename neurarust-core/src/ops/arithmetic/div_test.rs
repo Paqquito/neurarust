@@ -202,4 +202,71 @@ mod tests {
         check_tensor_near(&grad_b_contig, &b_shape, &expected_grad_b, 1e-6);
         Ok(())
     }
+
+    #[test]
+    fn test_div_tensors_i32() {
+        let t1 = crate::tensor::from_vec_i32(vec![10, 20, 30, 40], vec![2, 2]).unwrap();
+        let t2 = crate::tensor::from_vec_i32(vec![2, 4, 5, 8], vec![2, 2]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&t1, &t2).unwrap();
+        let result_data = result.get_i32_data().unwrap();
+        assert_eq!(result_data, vec![5, 5, 6, 5]);
+        assert_eq!(result.shape(), vec![2, 2]);
+        assert_eq!(result.dtype(), crate::DType::I32);
+    }
+
+    #[test]
+    fn test_div_tensors_i64() {
+        let t1 = crate::tensor::from_vec_i64(vec![10, 20, 30, 40], vec![2, 2]).unwrap();
+        let t2 = crate::tensor::from_vec_i64(vec![2, 4, 5, 8], vec![2, 2]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&t1, &t2).unwrap();
+        let result_data = result.get_i64_data().unwrap();
+        assert_eq!(result_data, vec![5, 5, 6, 5]);
+        assert_eq!(result.shape(), vec![2, 2]);
+        assert_eq!(result.dtype(), crate::DType::I64);
+    }
+
+    #[test]
+    fn test_div_broadcasting_i32() {
+        let matrix = crate::tensor::from_vec_i32(vec![10, 20, 30, 40], vec![2, 2]).unwrap();
+        let row_vector = crate::tensor::from_vec_i32(vec![2, 4], vec![1, 2]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&matrix, &row_vector).unwrap();
+        let result_data = result.get_i32_data().unwrap();
+        assert_eq!(result_data, vec![5, 5, 15, 10]);
+        assert_eq!(result.shape(), vec![2, 2]);
+    }
+
+    #[test]
+    fn test_div_broadcasting_i64() {
+        let matrix = crate::tensor::from_vec_i64(vec![10, 20, 30, 40], vec![2, 2]).unwrap();
+        let row_vector = crate::tensor::from_vec_i64(vec![2, 4], vec![1, 2]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&matrix, &row_vector).unwrap();
+        let result_data = result.get_i64_data().unwrap();
+        assert_eq!(result_data, vec![5, 5, 15, 10]);
+        assert_eq!(result.shape(), vec![2, 2]);
+    }
+
+    #[test]
+    fn test_div_by_zero_i32() {
+        let t1 = crate::tensor::from_vec_i32(vec![1, -1, 0], vec![3]).unwrap();
+        let t2 = crate::tensor::from_vec_i32(vec![0, 0, 0], vec![3]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&t1, &t2);
+        // Division entière par zéro : comportement Rust = panic, mais ici on attend une erreur gérée
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_div_by_zero_i64() {
+        let t1 = crate::tensor::from_vec_i64(vec![1, -1, 0], vec![3]).unwrap();
+        let t2 = crate::tensor::from_vec_i64(vec![0, 0, 0], vec![3]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&t1, &t2);
+        assert!(result.is_err());
+    }
+
+    #[test]
+    fn test_div_tensors_shape_mismatch_i32() {
+        let t1 = crate::tensor::from_vec_i32(vec![1, 2], vec![2]).unwrap();
+        let t2 = crate::tensor::from_vec_i32(vec![1, 2, 3], vec![3]).unwrap();
+        let result = crate::ops::arithmetic::div::div_op(&t1, &t2);
+        assert!(matches!(result, Err(crate::NeuraRustError::BroadcastError { .. })));
+    }
 } 

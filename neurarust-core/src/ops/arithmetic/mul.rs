@@ -117,6 +117,10 @@ pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
         |va, vb| mul_kernel::<f32>(va, vb),
         // Closure for F64, calling the generic kernel
         |va, vb| mul_kernel::<f64>(va, vb),
+        // I32
+        |va, vb| va * vb,
+        // I64
+        |va, vb| va * vb,
         // Closure captures and moves the clones
         move |a_node_opt, b_node_opt, a_shape, b_shape, a_req, b_req| {
             Arc::new(MulBackward {
