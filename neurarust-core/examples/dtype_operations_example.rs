@@ -2,9 +2,10 @@
 //! Ce script illustre la création de tenseurs, les opérations arithmétiques et logiques, et les fonctions avancées.
 
 use neurarust_core::{DType, StorageDevice, NeuraRustError};
-use neurarust_core::tensor::create::{zeros_dtype, ones_dtype, full_dtype_i32, full_dtype_i64, full_dtype_bool, randint, bernoulli_scalar};
+use neurarust_core::tensor::create::{zeros_dtype, ones_dtype, full_dtype_i32, full_dtype_i64, full_dtype_bool, randint, bernoulli_scalar, from_vec_i32, from_vec_i64, from_vec_bool};
 use neurarust_core::ops::arithmetic::{add_op, sub_op, mul_op, div_op};
 use neurarust_core::tensor::Tensor;
+use neurarust_core::ops::comparison::where_op::where_op;
 
 fn main() -> Result<(), NeuraRustError> {
     println!("--- Création de tenseurs Integer et Bool ---");
@@ -145,6 +146,51 @@ fn main() -> Result<(), NeuraRustError> {
     let res = t.masked_select(&bad_mask);
     assert!(res.is_err());
     println!("masked_select avec masque de mauvaise forme : {:?}", res);
+
+    // --- Opérations avancées : index_select ---
+    println!("\n--- index_select sur un tenseur I32 ---");
+    let t = from_vec_i32(vec![10, 20, 30, 40, 50], vec![5]).unwrap();
+    let indices = from_vec_i64(vec![0, 2, 4], vec![3]).unwrap();
+    let selected = t.index_select(0, &indices).unwrap();
+    println!("index_select: {:?}", selected);
+    assert_eq!(selected.shape(), &[3]);
+    assert_eq!(selected.dtype(), DType::I32);
+    assert_eq!(selected.get_i32_data().unwrap(), vec![10, 30, 50]);
+
+    // --- masked_select sur un tenseur I32 ---
+    println!("\n--- masked_select sur un tenseur I32 ---");
+    let t = from_vec_i32(vec![1, 2, 3, 4, 5], vec![5]).unwrap();
+    let mask = from_vec_bool(vec![false, true, false, true, false], vec![5]).unwrap();
+    let masked = t.masked_select(&mask).unwrap();
+    println!("masked_select: {:?}", masked);
+    assert_eq!(masked.shape(), &[2]);
+    assert_eq!(masked.dtype(), DType::I32);
+    assert_eq!(masked.get_i32_data().unwrap(), vec![2, 4]);
+
+    // --- masked_fill_ sur un tenseur I32 ---
+    println!("\n--- masked_fill_ sur un tenseur I32 ---");
+    let mut t = from_vec_i32(vec![1, 2, 3, 4, 5], vec![5]).unwrap();
+    let mask = from_vec_bool(vec![false, true, false, true, false], vec![5]).unwrap();
+    t.masked_fill_(&mask, 99).unwrap();
+    println!("masked_fill_: {:?}", t);
+    assert_eq!(t.get_i32_data().unwrap(), vec![1, 99, 3, 99, 5]);
+
+    // --- where_op sur des tenseurs I32 ---
+    println!("\n--- where_op sur des tenseurs I32 ---");
+    let cond = from_vec_bool(vec![true, false, true, false], vec![4]).unwrap();
+    let x = from_vec_i32(vec![1, 2, 3, 4], vec![4]).unwrap();
+    let y = from_vec_i32(vec![10, 20, 30, 40], vec![4]).unwrap();
+    let out = where_op(&cond, &x, &y).unwrap();
+    println!("where_op: {:?}", out);
+    assert_eq!(out.get_i32_data().unwrap(), vec![1, 20, 3, 40]);
+
+    // --- bincount sur un tenseur I32 ---
+    println!("\n--- bincount sur un tenseur I32 ---");
+    let t = from_vec_i32(vec![0, 1, 1, 2, 2, 2, 3], vec![7]).unwrap();
+    let bincount = t.bincount(None, 0).unwrap();
+    println!("bincount: {:?}", bincount);
+    assert_eq!(bincount.dtype(), DType::I32);
+    assert_eq!(bincount.get_i32_data().unwrap(), vec![1, 2, 3, 1]);
 
     Ok(())
 } 

@@ -609,11 +609,11 @@
             *   [✅] Show creation of Integer and Boolean tensors (`zeros`, `ones`, `full`, `randint`, `bernoulli`).
             *   [✅] Démontrer les opérations arithmétiques sur Integer et logiques sur Bool.
             *   [✅] Demonstrate Integer arithmetic and Boolean logical operations.
-            *   [ ] Demonstrate `index_select`, `masked_select`, `masked_fill_`.
-            *   [ ] Demonstrate `where_op` usage.
-            *   [ ] Demonstrate `bincount` usage.
-            *   [ ] Ensure the example(s) run and output expected results, showcasing the API.
-            *   [ ] Add to `Cargo.toml` and document the example(s).
+            *   [✅] Demonstrate `index_select`, `masked_select`, `masked_fill_`.
+            *   [✅] Demonstrate `where_op` usage.
+            *   [✅] Demonstrate `bincount` usage.
+            *   [✅] Ensure the example(s) run and output expected results, showcasing the API.
+            *   [✅] Add to `Cargo.toml` and document the example(s).
         *   **Step 2.C.11: Review and Update `NeuraNumeric` (and potentially add `NeuraIntegral`, `NeuraBoolean`)**
             *   🎯 **Goal:** Ensure trait abstractions are suitable for new DTypes or extend them.
             *   [ ] Evaluate if current `NeuraNumeric` (designed for Floats) can be used/adapted for Integer ops, or if specific integer kernels are simpler.
