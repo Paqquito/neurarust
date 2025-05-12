@@ -66,9 +66,11 @@ where
                     from_vec_f64(clamped_data, shape)?
                 }
                 DType::I32 | DType::I64 | DType::Bool => {
-                    return Err(NeuraRustError::UnsupportedOperation(
-                        "clip_grad_value n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
-                    );
+                    return Err(NeuraRustError::DataTypeMismatch {
+                        expected: DType::F32,
+                        actual: dtype,
+                        operation: "clip_grad_value_".to_string(),
+                    });
                 }
             };
             tensor_data_guard.grad = Some(new_grad_tensor);
@@ -124,6 +126,18 @@ where
         let param_name_for_error_display = param_guard.name().unwrap_or_default();
 
         if let Some(grad_tensor) = param_guard.tensor.grad().as_ref() {
+            // Vérifier le type de données immédiatement
+            match grad_tensor.dtype() {
+                DType::I32 | DType::I64 | DType::Bool => {
+                    return Err(NeuraRustError::DataTypeMismatch {
+                        expected: DType::F32,
+                        actual: grad_tensor.dtype(),
+                        operation: "clip_grad_norm_".to_string(),
+                    });
+                }
+                _ => {}
+            }
+
             // Stocker l'Arc et un clone du grad pour la deuxième passe
             // Cloner le tenseur grad ici pour éviter des problèmes de double emprunt mutable plus tard
             // si on essayait de lire le grad à nouveau dans la boucle de scaling.
@@ -192,9 +206,11 @@ where
                         mul_op_scalar(&original_grad_clone, clip_coef)?
                     }
                     DType::I32 | DType::I64 | DType::Bool => {
-                        return Err(NeuraRustError::UnsupportedOperation(
-                            "clip_grad_norm n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
-                        );
+                        return Err(NeuraRustError::DataTypeMismatch {
+                            expected: DType::F32,
+                            actual: original_grad_clone.dtype(),
+                            operation: "clip_grad_norm_".to_string(),
+                        });
                     }
                 };
                 

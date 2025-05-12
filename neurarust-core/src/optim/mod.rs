@@ -59,4 +59,6 @@ pub use lr_scheduler::LRScheduler;
 // pub use lr_scheduler::{OptimizerInterface, ParamGroupInterface}; 
 
 pub mod grad_clipping;
+#[cfg(test)]
+mod grad_clipping_test;
 pub use grad_clipping::*; 
