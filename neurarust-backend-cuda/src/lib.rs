@@ -6,6 +6,8 @@ use rustacuda::prelude::*;
 use rustacuda::device::Device;
 use rustacuda::error::CudaError;
 use rustacuda::device::DeviceAttribute;
+use rustacuda::stream::{Stream, StreamFlags};
+use rustacuda::context::{Context, ContextFlags, CurrentContext};
 
 /// Initialise le contexte CUDA (doit être appelé avant toute opération CUDA)
 ///
@@ -64,6 +66,58 @@ pub fn device_properties(index: usize) -> Result<DeviceProperties, CudaError> {
     })
 }
 
+/// Crée et active un contexte CUDA sur le device donné (par défaut device 0)
+///
+/// # Arguments
+/// * `device_index` - L'index du device CUDA (0 par défaut)
+///
+/// # Errors
+/// Retourne une erreur si la création ou l'activation du contexte échoue
+pub fn create_cuda_context(device_index: usize) -> Result<Context, CudaError> {
+    let device = get_device(device_index)?;
+    Context::create_and_push(ContextFlags::MAP_HOST | ContextFlags::SCHED_AUTO, device)
+}
+
+/// Wrapper sûr pour un stream CUDA
+///
+/// ⚠️ Un contexte CUDA doit être actif (CurrentContext) lors de la création/destruction du stream !
+#[derive(Debug)]
+pub struct CudaStream {
+    stream: Stream,
+}
+
+impl CudaStream {
+    /// Crée un nouveau stream CUDA (par défaut, non-blocking si précisé)
+    ///
+    /// # Arguments
+    /// * `non_blocking` - Si vrai, crée un stream non-bloquant
+    ///
+    /// # Errors
+    /// Retourne une erreur si la création du stream échoue
+    pub fn new(non_blocking: bool) -> Result<Self, CudaError> {
+        let flags = if non_blocking {
+            StreamFlags::NON_BLOCKING
+        } else {
+            StreamFlags::DEFAULT
+        };
+        let stream = Stream::new(flags, None)?;
+        Ok(CudaStream { stream })
+    }
+
+    /// Synchronise ce stream CUDA (attend la fin de toutes les opérations soumises)
+    ///
+    /// # Errors
+    /// Retourne une erreur si la synchronisation échoue
+    pub fn synchronize(&self) -> Result<(), CudaError> {
+        self.stream.synchronize()
+    }
+
+    /// Accès interne au stream rustacuda (pour usage avancé)
+    pub fn inner(&self) -> &Stream {
+        &self.stream
+    }
+}
+
 // D'autres fonctions viendront ici (énumération, propriétés, etc.)
 
 pub fn add(left: u64, right: u64) -> u64 {
@@ -98,6 +152,19 @@ mod tests {
             assert!(!props.name.is_empty());
             assert!(props.total_memory > 0);
         }
+    }
+
+    #[test]
+    fn test_cuda_stream_create_and_sync() {
+        init_cuda().expect("CUDA init failed");
+        let _ctx = create_cuda_context(0).expect("Context creation failed");
+        // Création d'un stream par défaut
+        let s = CudaStream::new(false).expect("Stream creation failed");
+        s.synchronize().expect("Stream synchronize failed");
+        // Création d'un stream non-bloquant
+        let s2 = CudaStream::new(true).expect("Non-blocking stream creation failed");
+        s2.synchronize().expect("Non-blocking stream synchronize failed");
+        // Le contexte sera détruit à la fin du scope
     }
 
     #[test]

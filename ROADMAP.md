@@ -646,14 +646,13 @@
             *   [✅] Add `rustdoc` for CUDA setup and basic context functions.
             *   [✅] Add tests for context initialization, device enumeration, and property queries.
         *   **Step 3.A.2: CUDA Stream Management & Asynchronous Operations Focus**
-            *   🎯 **Goal:** Establish robust CUDA stream handling for asynchronous execution of GPU tasks.
-            *   [ ] Define a `CudaStream` wrapper struct around `CUstream` (or equivalent from binding crate).
-            *   [ ] Implement creation (`cuStreamCreateWithFlags` - e.g., non-blocking), destruction (`cuStreamDestroy`).
-            *   [ ] Implement synchronization methods: `synchronize()` (`cuStreamSynchronize`), `wait_event(event: &CudaEvent)` (`cuStreamWaitEvent`).
-            *   [ ] Define a mechanism for managing a "current" or "default" stream (per-thread or per-device context).
-            *   [ ] Subsequent memory copies and kernel launches (Steps 3.A.4, 3.B.x) should be designed to operate on a given `CudaStream` to enable asynchronicity.
-            *   [ ] Add tests for stream creation, destruction, and basic synchronization.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Define a `CudaStream` wrapper struct around `CUstream` (or equivalent from binding crate).
+            *   [✅] Implement creation (`cuStreamCreateWithFlags` - e.g., non-blocking), destruction (`cuStreamDestroy`).
+            *   [✅] Implement synchronization methods: `synchronize()` (`cuStreamSynchronize`), `wait_event(event: &CudaEvent)` (`cuStreamWaitEvent`).
+            *   [✅] Define a mechanism for managing a "current" or "default" stream (per-thread or per-device context).
+            *   [✅] Subsequent memory copies and kernel launches (Steps 3.A.4, 3.B.x) should be designed to operate on a given `CudaStream` to enable asynchronicity.
+            *   [✅] Add tests for stream creation, destruction, and basic synchronization.
+            *   [✅] Add `rustdoc`.
         *   **Step 3.A.3: Extend `StorageDevice` and `Buffer` for CUDA with Caching Allocator**
             *   🎯 **Goal:** Adapt core data structures for CUDA memory and implement a caching allocator for performance.
             *   [ ] Add `StorageDevice::Cuda(deviceId: u32)` variant.
