@@ -783,6 +783,7 @@ impl Tensor {
                     operation: "direct_sub_inplace (device mismatch)".to_string(),
                 });
             }
+            (&mut Buffer::Cuda(_), &Buffer::Cpu(_)) | (&mut Buffer::Cuda(_), &Buffer::Cuda(_)) | (&mut Buffer::Cpu(_), &Buffer::Cuda(_)) => todo!(),
         }
         Ok(())
     }

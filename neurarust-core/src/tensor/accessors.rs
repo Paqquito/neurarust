@@ -154,6 +154,11 @@ impl Tensor {
                     operation: "item_f32() appelé sur un tenseur non-f32".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "item_f32() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -213,6 +218,11 @@ impl Tensor {
                     operation: "item_f64() appelé sur un tenseur non-f64".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "item_f64() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -298,6 +308,11 @@ impl Tensor {
                     operation: "at_f32() appelé sur un tenseur non-f32".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "at_f32() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -382,6 +397,11 @@ impl Tensor {
                     operation: "at_f64() appelé sur un tenseur non-f64".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "at_f64() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -563,6 +583,14 @@ impl Tensor {
                 });
             }
         }
+        // Gestion explicite du buffer CUDA (hors match sur dtype)
+        if let Buffer::Cuda(_) = &*guard.buffer {
+            return Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "get_f64_data - accès CPU sur buffer CUDA non supporté".to_string(),
+            });
+        }
 
         Ok(result_vec)
     }
@@ -593,6 +621,11 @@ impl Tensor {
                     operation: "item_i32()".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "item_i32() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -622,6 +655,11 @@ impl Tensor {
                     operation: "item_i64()".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "item_i64() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -651,6 +689,11 @@ impl Tensor {
                     operation: "item_bool()".to_string(),
                 })
             }
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "item_bool() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -690,7 +733,12 @@ impl Tensor {
                 expected: DType::I32,
                 actual: guard.dtype,
                 operation: "at_i32()".to_string(),
-            })
+            }),
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "at_i32() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -730,7 +778,12 @@ impl Tensor {
                 expected: DType::I64,
                 actual: guard.dtype,
                 operation: "at_i64()".to_string(),
-            })
+            }),
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "at_i64() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 
@@ -770,7 +823,12 @@ impl Tensor {
                 expected: DType::Bool,
                 actual: guard.dtype,
                 operation: "at_bool()".to_string(),
-            })
+            }),
+            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
+                expected: StorageDevice::CPU,
+                actual: StorageDevice::Cuda(0),
+                operation: "at_bool() - accès CPU sur buffer CUDA non supporté".to_string(),
+            }),
         }
     }
 

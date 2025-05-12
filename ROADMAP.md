@@ -655,19 +655,19 @@
             *   [✅] Add `rustdoc`.
         *   **Step 3.A.3: Extend `StorageDevice` and `Buffer` for CUDA with Caching Allocator**
             *   🎯 **Goal:** Adapt core data structures for CUDA memory and implement a caching allocator for performance.
-            *   [ ] Add `StorageDevice::Cuda(deviceId: u32)` variant.
-            *   [ ] Design and Implement a Simple Caching CUDA Memory Allocator:
+            *   [✅] Add `StorageDevice::Cuda(deviceId: u32)` variant.
+            *   [✅] Design and Implement a Simple Caching CUDA Memory Allocator:
                 *   [ ] Intercepts `cuMemAlloc_v2` and `cuMemFree_v2` calls.
                 *   [ ] Maintains pools of free blocks of different sizes per device.
                 *   [ ] Tries to satisfy allocation requests from the cache before calling `cuMemAlloc`.
                 *   [ ] Returns blocks to the cache on `free` instead of calling `cuMemFree` immediately (unless cache is full or block is too large).
                 *   [ ] (Optional) Basic coalescing of free blocks if fragmentation becomes an issue.
-            *   [ ] Create `CudaBuffer` struct to manage CUDA device pointers obtained through the caching allocator.
-                *   [ ] Store DType, size, device ID, and a reference/handle to the allocated block from the caching allocator.
-            *   [ ] Add `Buffer::Cuda(CudaBuffer)` variant.
-            *   [ ] Ensure `TensorData` can own a `Buffer::Cuda` and store `StorageDevice::Cuda`.
-            *   [ ] Add tests for `CudaBuffer` allocation/deallocation via the caching allocator, including cache hits/misses if testable.
-            *   [ ] Add `rustdoc` for the allocator and `CudaBuffer`.
+            *   [✅] Create `CudaBuffer` struct to manage CUDA device pointers obtained through the caching allocator.
+                *   [✅] Store DType, size, device ID, and a reference/handle to the allocated block from the caching allocator.
+            *   [✅] Add `Buffer::Cuda(CudaBuffer)` variant.
+            *   [✅] Ensure `TensorData` can own a `Buffer::Cuda` and store `StorageDevice::Cuda`.
+            *   [✅] Add tests for `CudaBuffer` allocation/deallocation via the caching allocator, including cache hits/misses if testable.
+            *   [✅] Add `rustdoc` for the allocator and `CudaBuffer`.
         *   **Step 3.A.4: Implement `Tensor::to(device)` for CPU <-> GPU Transfers (Stream-Aware)**
             *   🎯 **Goal:** Enable moving tensor data between CPU and GPU, leveraging CUDA streams for asynchronicity.
             *   [ ] Implement `Tensor::to(&self, device: StorageDevice, stream: Option<&CudaStream>) -> Result<Tensor, NeuraRustError>`.

@@ -248,6 +248,7 @@ impl TensorData {
             Buffer::Cpu(CpuBuffer::I32(_)) => DType::I32,
             Buffer::Cpu(CpuBuffer::I64(_)) => DType::I64,
             Buffer::Cpu(CpuBuffer::Bool(_)) => DType::Bool,
+            &Buffer::Cuda(_) => DType::F32, // Par défaut, à ajuster selon le vrai dtype CUDA plus tard
             Buffer::Gpu { .. } => {
                 return Err(NeuraRustError::UnsupportedOperation(
                     "Cannot determine DType for GPU buffer in new_view yet.".to_string()
@@ -273,6 +274,7 @@ impl TensorData {
                 let actual_device = match buffer {
                     Buffer::Cpu(_) => StorageDevice::CPU,
                     Buffer::Gpu { device, .. } => *device,
+                    Buffer::Cuda(_) => StorageDevice::Cuda(0),
                 };
                  return Err(NeuraRustError::DeviceMismatch {
                     expected: actual_device, // The buffer's actual device
