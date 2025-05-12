@@ -25,6 +25,7 @@ pub mod max;
 pub mod utils;
 pub mod all;
 pub mod any;
+pub mod bincount;
 
 // Re-export the adapted reduction operations using pub(crate)
 pub(crate) use sum::sum_op;
@@ -39,3 +40,7 @@ pub(crate) use sum::sum_op;
 mod all_test;
 #[cfg(test)]
 mod any_test;
+#[cfg(test)]
+mod bincount_test;
+
+pub use bincount::bincount_op;

@@ -103,6 +103,8 @@
 │   │   │   │   ├── all_test.rs
 │   │   │   │   ├── any.rs
 │   │   │   │   ├── any_test.rs
+│   │   │   │   ├── bincount.rs
+│   │   │   │   ├── bincount_test.rs
 │   │   │   │   ├── max.rs
 │   │   │   │   ├── max_test.rs
 │   │   │   │   ├── mean.rs
@@ -234,4 +236,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-32 directories, 203 files
+32 directories, 205 files

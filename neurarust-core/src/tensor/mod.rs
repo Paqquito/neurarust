@@ -210,4 +210,9 @@ impl Tensor {
     pub fn where_cond(&self, condition: &Tensor, y: &Tensor) -> Result<Tensor, NeuraRustError> {
         crate::ops::comparison::where_op(condition, self, y)
     }
+
+    /// Compte la fréquence des valeurs dans un tenseur d'entiers (I32/I64).
+    pub fn bincount(&self, weights: Option<&Tensor>, minlength: usize) -> Result<Tensor, crate::error::NeuraRustError> {
+        crate::ops::reduction::bincount_op(self, weights, minlength)
+    }
 }

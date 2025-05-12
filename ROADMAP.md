@@ -594,15 +594,15 @@
             *   [✅] Add `rustdoc`.
         *   **Step 2.C.9: Implement `bincount` for Integer Tensors**
             *   🎯 **Goal:** Count frequency of values in an integer tensor.
-            *   [ ] Implement `bincount_op(input: &Tensor, weights: Option<&Tensor>, minlength: usize) -> Result<Tensor, NeuraRustError>`.
-                *   `input` must be 1D, non-negative IntTensor (I32/I64).
-                *   `weights` (optional) same shape as `input`.
-                *   `minlength` ensures output tensor has at least this size.
-                *   Output DType: same as `weights` if provided, else I64 (for counts).
-            *   [ ] Add `Tensor::bincount(...)` method.
-            *   [ ] Evaluate autograd necessity (often non-differentiable use case).
-            *   [ ] Add tests for counts, weights, `minlength`.
-            *   [ ] Add `rustdoc`.
+            *   [✅] Implement `bincount_op(input: &Tensor, weights: Option<&Tensor>, minlength: usize) -> Result<Tensor, NeuraRustError>`.
+                *   [✅] `input` must be 1D, non-negative IntTensor (I32/I64).
+                *   [✅] `weights` (optional) same shape as `input`.
+                *   [✅] `minlength` ensures output tensor has at least this size.
+                *   [✅] Output DType: same as `weights` if provided, else I64 (for counts).
+            *   [✅] Add `Tensor::bincount(...)` method.
+            *   [✅] Evaluate autograd necessity (often non-differentiable use case).
+            *   [✅] Add tests for counts, weights, `minlength`.
+            *   [✅] Add `rustdoc`.
         *   **Step 2.C.10: Create DType and Advanced Operations Example(s)**
             *   🎯 **Goal:** Demonstrate usage of Integer/Boolean DTypes and new tensor operations.
             *   [ ] Create a new example file (e.g., `examples/dtype_operations_example.rs`) or multiple smaller ones.
