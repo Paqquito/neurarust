@@ -605,8 +605,8 @@
             *   [✅] Add `rustdoc`.
         *   **Step 2.C.10: Create DType and Advanced Operations Example(s)**
             *   🎯 **Goal:** Demonstrate usage of Integer/Boolean DTypes and new tensor operations.
-            *   [ ] Create a new example file (e.g., `examples/dtype_operations_example.rs`) or multiple smaller ones.
-            *   [ ] Show creation of Integer and Boolean tensors (`zeros`, `ones`, `full`, `randint`, `bernoulli`).
+            *   [✅] Create a new example file (e.g., `examples/dtype_operations_example.rs`) or multiple smaller ones.
+            *   [✅] Show creation of Integer and Boolean tensors (`zeros`, `ones`, `full`, `randint`, `bernoulli`).
             *   [ ] Demonstrate Integer arithmetic and Boolean logical operations.
             *   [ ] Demonstrate `index_select`, `masked_select`, `masked_fill_`.
             *   [ ] Demonstrate `where_op` usage.

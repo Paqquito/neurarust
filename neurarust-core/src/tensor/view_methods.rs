@@ -642,3 +642,7 @@ mod masked_fill_integration_tests {
     // use crate::tensor::Tensor;
     // ... existing code ...
 }
+
+// Link the external tests file
+#[cfg(test)]
+#[path = "view_methods_test.rs"] mod tests;
