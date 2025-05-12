@@ -217,7 +217,11 @@ pub fn mul_op_scalar<T: NeuraNumeric + Debug>(tensor: &Tensor, scalar: T) -> Res
             drop(tensor_guard);
             Tensor::new_f64(new_data, output_shape)?
         }
-        crate::types::DType::I32 | crate::types::DType::I64 | crate::types::DType::Bool => todo!(),
+        crate::types::DType::I32 | crate::types::DType::I64 | crate::types::DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "mul_op_scalar n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
         // Add other DTypes if supported by NeuraNumeric and Tensor creation
     };
 

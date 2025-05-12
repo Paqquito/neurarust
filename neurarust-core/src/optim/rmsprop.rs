@@ -28,53 +28,71 @@ pub struct RmsPropParamState {
     pub momentum_buffer: Option<Tensor>,
 }
 
-impl Clone for RmsPropParamState {
-    fn clone(&self) -> Self {
+impl RmsPropParamState {
+    pub fn try_clone(&self) -> Result<Self, NeuraRustError> {
         let new_square_avg = match self.square_avg.dtype() {
-            DType::F32 => Tensor::new(
+            DType::F32 => Ok(Tensor::new(
                 self.square_avg.get_f32_data().expect("Failed to get F32 data for square_avg clone"),
                 self.square_avg.shape(),
-            ).expect("Failed to create new F32 Tensor for square_avg clone"),
-            DType::F64 => Tensor::new_f64(
+            ).expect("Failed to create new F32 Tensor for square_avg clone")),
+            DType::F64 => Ok(Tensor::new_f64(
                 self.square_avg.get_f64_data().expect("Failed to get F64 data for square_avg clone"),
                 self.square_avg.shape(),
-            ).expect("Failed to create new F64 Tensor for square_avg clone"),
-            DType::I32 | DType::I64 | DType::Bool => todo!(),
-        };
+            ).expect("Failed to create new F64 Tensor for square_avg clone")),
+            DType::I32 | DType::I64 | DType::Bool => {
+                Err(NeuraRustError::UnsupportedOperation(
+                    "RmsProp n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                )
+            }
+        }?;
 
         let new_grad_avg = self.grad_avg.as_ref().map(|ga| {
             match ga.dtype() {
-                DType::F32 => Tensor::new(
+                DType::F32 => Ok(Tensor::new(
                     ga.get_f32_data().expect("Failed to get F32 data for grad_avg clone"),
                     ga.shape(),
-                ).expect("Failed to create new F32 Tensor for grad_avg clone"),
-                DType::F64 => Tensor::new_f64(
+                ).expect("Failed to create new F32 Tensor for grad_avg clone")),
+                DType::F64 => Ok(Tensor::new_f64(
                     ga.get_f64_data().expect("Failed to get F64 data for grad_avg clone"),
                     ga.shape(),
-                ).expect("Failed to create new F64 Tensor for grad_avg clone"),
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                ).expect("Failed to create new F64 Tensor for grad_avg clone")),
+                DType::I32 | DType::I64 | DType::Bool => {
+                    Err(NeuraRustError::UnsupportedOperation(
+                        "RmsProp n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                    )
+                }
             }
-        });
+        }).transpose()?;
 
         let new_momentum_buffer = self.momentum_buffer.as_ref().map(|mb| {
             match mb.dtype() {
-                DType::F32 => Tensor::new(
+                DType::F32 => Ok(Tensor::new(
                     mb.get_f32_data().expect("Failed to get F32 data for momentum_buffer clone"),
                     mb.shape(),
-                ).expect("Failed to create new F32 Tensor for momentum_buffer clone"),
-                DType::F64 => Tensor::new_f64(
+                ).expect("Failed to create new F32 Tensor for momentum_buffer clone")),
+                DType::F64 => Ok(Tensor::new_f64(
                     mb.get_f64_data().expect("Failed to get F64 data for momentum_buffer clone"),
                     mb.shape(),
-                ).expect("Failed to create new F64 Tensor for momentum_buffer clone"),
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                ).expect("Failed to create new F64 Tensor for momentum_buffer clone")),
+                DType::I32 | DType::I64 | DType::Bool => {
+                    Err(NeuraRustError::UnsupportedOperation(
+                        "RmsProp n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                    )
+                }
             }
-        });
+        }).transpose()?;
 
-        RmsPropParamState {
+        Ok(RmsPropParamState {
             square_avg: new_square_avg,
             grad_avg: new_grad_avg,
             momentum_buffer: new_momentum_buffer,
-        }
+        })
+    }
+}
+
+impl Clone for RmsPropParamState {
+    fn clone(&self) -> Self {
+        self.try_clone().expect("Erreur lors du clone de RmsPropParamState : type non supporté")
     }
 }
 
@@ -138,7 +156,11 @@ fn full_like_with_val(other: &Tensor, value: f32) -> Result<Tensor, NeuraRustErr
     match other.dtype() {
         DType::F32 => full(&[], value),
         DType::F64 => full_f64(&[], value as f64),
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "RmsProp n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     }
 }
 

@@ -118,7 +118,36 @@ impl Debug for Tensor {
                         if numel > preview_len { write!(f, ", ...")?; }
                         write!(f, "]")?;
                     }
-                    &CpuBuffer::I32(_) | &CpuBuffer::I64(_) | &CpuBuffer::Bool(_) => todo!(),
+                    CpuBuffer::I32(ref data_arc) => {
+                        let numel = td.numel();
+                        let preview_len = std::cmp::min(numel, 10);
+                        write!(f, "[... ~{} elements (I32): ", numel)?;
+                        for i in 0..preview_len {
+                            write!(f, "{:?}{}", data_arc.get(i).unwrap_or(&0), if i < preview_len - 1 { ", " } else { "" })?;
+                        }
+                        if numel > preview_len { write!(f, ", ...")?; }
+                        write!(f, "]")?;
+                    }
+                    CpuBuffer::I64(ref data_arc) => {
+                        let numel = td.numel();
+                        let preview_len = std::cmp::min(numel, 10);
+                        write!(f, "[... ~{} elements (I64): ", numel)?;
+                        for i in 0..preview_len {
+                            write!(f, "{:?}{}", data_arc.get(i).unwrap_or(&0), if i < preview_len - 1 { ", " } else { "" })?;
+                        }
+                        if numel > preview_len { write!(f, ", ...")?; }
+                        write!(f, "]")?;
+                    }
+                    CpuBuffer::Bool(ref data_arc) => {
+                        let numel = td.numel();
+                        let preview_len = std::cmp::min(numel, 10);
+                        write!(f, "[... ~{} elements (Bool): ", numel)?;
+                        for i in 0..preview_len {
+                            write!(f, "{:?}{}", data_arc.get(i).unwrap_or(&false), if i < preview_len - 1 { ", " } else { "" })?;
+                        }
+                        if numel > preview_len { write!(f, ", ...")?; }
+                        write!(f, "]")?;
+                    }
                     // Add arms for other CpuBuffer types later
                     // _ => write!(f, "<Other CPU Buffer Type>")?,
                 }

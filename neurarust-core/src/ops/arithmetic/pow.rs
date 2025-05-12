@@ -207,7 +207,11 @@ pub fn pow_op(base: &Tensor, exponent: &Tensor) -> Result<Tensor, NeuraRustError
             drop(base_guard); drop(exponent_guard);
             Tensor::new_f64(output_data_vec, output_shape)?
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "pow_op n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     };
 
     // --- Autograd Setup --- 

@@ -148,7 +148,11 @@ where
             drop(a_guard);
             Tensor::new_f64(output_data, output_shape)?
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                format!("{} n'est pas supporté pour le type {:?}", op_name, a.dtype())
+            ));
+        }
     };
 
     // Set Autograd Metadata

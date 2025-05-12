@@ -157,7 +157,11 @@ pub fn perform_sub_inplace(current_tensor: &mut Tensor, other: &Tensor) -> Resul
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "sub_ n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     }
     Ok(())
 } 

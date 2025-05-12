@@ -113,7 +113,11 @@ impl BackwardOp for SumAxesBackward {
                 drop(contiguous_grad_guard);
                 Tensor::new_f64(expanded_data, self.input_shape.clone())?
             }
-            DType::I32 | DType::I64 | DType::Bool => todo!(),
+            DType::I32 | DType::I64 | DType::Bool => {
+                return Err(NeuraRustError::UnsupportedOperation(
+                    "sum_op n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                );
+            }
         };
 
         Ok(vec![input_gradient])

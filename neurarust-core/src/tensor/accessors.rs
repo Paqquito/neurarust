@@ -147,7 +147,13 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                  Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "item_f32() - GPU not yet supported".to_string() })
             }
-            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::F32,
+                    actual: self.dtype(),
+                    operation: "item_f32() appelé sur un tenseur non-f32".to_string(),
+                })
+            }
         }
     }
 
@@ -200,7 +206,13 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                 Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "item_f64() - GPU not yet supported".to_string() })
             }
-            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::F64,
+                    actual: self.dtype(),
+                    operation: "item_f64() appelé sur un tenseur non-f64".to_string(),
+                })
+            }
         }
     }
 
@@ -279,7 +291,13 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                 Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "at_f32() - GPU not yet supported".to_string() })
             }
-            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::F32,
+                    actual: self.dtype(),
+                    operation: "at_f32() appelé sur un tenseur non-f32".to_string(),
+                })
+            }
         }
     }
 
@@ -357,7 +375,13 @@ impl Tensor {
             Buffer::Gpu { .. } => {
                 Err(NeuraRustError::DeviceMismatch { expected: StorageDevice::CPU, actual: StorageDevice::GPU, operation: "at_f64() - GPU not yet supported".to_string() })
             }
-            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => todo!(),
+            &Buffer::Cpu(CpuBuffer::I32(_)) | &Buffer::Cpu(CpuBuffer::I64(_)) | &Buffer::Cpu(CpuBuffer::Bool(_)) => {
+                Err(NeuraRustError::DataTypeMismatch {
+                    expected: DType::F64,
+                    actual: self.dtype(),
+                    operation: "at_f64() appelé sur un tenseur non-f64".to_string(),
+                })
+            }
         }
     }
 

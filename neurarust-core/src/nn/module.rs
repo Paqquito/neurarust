@@ -5,7 +5,6 @@ use crate::error::NeuraRustError;
 use crate::types::DType;
 use std::sync::{Arc, RwLock};
 use std::any::Any;
-// use crate::tensor::{zeros, zeros_f64, ones, ones_f64}; // Import global supprimé
 
 /// The base trait for all neural network modules (layers, containers, etc.).
 ///
@@ -119,7 +118,7 @@ mod tests {
     use crate::NeuraRustError;
     use crate::nn::parameter::Parameter;
     use std::sync::{Arc, RwLock};
-    use crate::tensor::create::{zeros, zeros_f64};
+    use crate::tensor::create::{zeros, zeros_f64, zeros_dtype};
     use std::any::Any; // Any est importé implicitement via le trait mais l'avoir ici peut aider
 
     // Mock Module pour les tests
@@ -135,7 +134,7 @@ mod tests {
             let data = match dtype {
                 DType::F32 => zeros(&[1])?,
                 DType::F64 => zeros_f64(&[1])?,
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                DType::I32 | DType::I64 | DType::Bool => zeros_dtype(&[1], dtype)?,
             };
             let param = Parameter::new(data, Some("mock_param".to_string()));
             Ok(MockModule {

@@ -67,7 +67,11 @@ impl BackwardOp for MeanBackward {
         let scale_tensor = match grad_output.dtype() {
              DType::F32 => full(&[], scale_factor as f32)?,
              DType::F64 => full_f64(&[], scale_factor)?,
-             DType::I32 | DType::I64 | DType::Bool => todo!(),
+             DType::I32 | DType::I64 | DType::Bool => {
+                 return Err(NeuraRustError::UnsupportedOperation(
+                     "mean_backward n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                 );
+             },
         };
 
         let scaled_grad = mul_op(grad_output, &scale_tensor)?;

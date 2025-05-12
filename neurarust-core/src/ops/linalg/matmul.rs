@@ -284,7 +284,7 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 a_buffer_slice, &a_strides, a_offset,
                 b_buffer_slice, &b_strides, b_offset,
             )?;
-            Tensor::new(output_data, output_shape)?
+            Tensor::new(output_data, output_shape)
         }
         DType::F64 => {
             let a_buffer_arc = a_guard.buffer().try_get_cpu_f64()?.clone();
@@ -298,10 +298,14 @@ fn matmul_internal(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
                 a_buffer_slice, &a_strides, a_offset,
                 b_buffer_slice, &b_strides, b_offset,
             )?;
-            Tensor::new_f64(output_data, output_shape)?
+            Tensor::new_f64(output_data, output_shape)
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
-    };
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "matmul_op n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
+    }?;
 
     Ok(output_tensor)
 }

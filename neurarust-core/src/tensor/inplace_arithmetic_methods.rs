@@ -628,7 +628,11 @@ impl Tensor {
                 })?;
                 crate::tensor::inplace_ops::clamp::clamp_tensor_data::<f64>(&mut *tensor_data_guard, min_val, max_val)?;
             }
-            DType::I32 | DType::I64 | DType::Bool => todo!(),
+            DType::I32 | DType::I64 | DType::Bool => {
+                return Err(NeuraRustError::UnsupportedOperation(
+                    "clamp_ n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                );
+            }
             // No `_` arm is needed if DType only contains F32 and F64.
             // The compiler will enforce exhaustiveness if DType is extended.
         }

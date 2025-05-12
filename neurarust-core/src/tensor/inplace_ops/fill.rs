@@ -94,7 +94,11 @@ pub(crate) fn perform_fill_inplace<S: NeuraNumeric>(
                     let data_slice = buffer_mut.try_get_cpu_f64_mut()?;
                     data_slice.fill(scalar_val);
                 }
-                &mut CpuBuffer::I32(_) | &mut CpuBuffer::I64(_) | &mut CpuBuffer::Bool(_) => todo!(),
+                &mut CpuBuffer::I32(_) | &mut CpuBuffer::I64(_) | &mut CpuBuffer::Bool(_) => {
+                    return Err(NeuraRustError::UnsupportedOperation(
+                        "fill_ n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                    );
+                }
             }
         }
         Buffer::Gpu { .. } => { // Handle GPU case

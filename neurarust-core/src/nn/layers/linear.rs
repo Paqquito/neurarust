@@ -33,7 +33,11 @@ impl Linear {
         let neg_k_tensor = match weight_data.dtype() {
             DType::F32 => full(&[], -k_val as f32)?,
             DType::F64 => full_f64(&[], -k_val)?,
-            DType::I32 | DType::I64 | DType::Bool => todo!(),
+            DType::I32 | DType::I64 | DType::Bool => {
+                return Err(NeuraRustError::UnsupportedOperation(
+                    "Linear::new n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                );
+            }
         };
         weight_data = crate::ops::arithmetic::add::add_op(&weight_data, &neg_k_tensor)?;
 
@@ -52,7 +56,11 @@ impl Linear {
             let neg_k_tensor_bias = match bias_data.dtype() {
                 DType::F32 => full(&[], -k_val as f32)?,
                 DType::F64 => full_f64(&[], -k_val)?,
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                DType::I32 | DType::I64 | DType::Bool => {
+                    return Err(NeuraRustError::UnsupportedOperation(
+                        "Linear::new n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                    );
+                }
             };
             bias_data = crate::ops::arithmetic::add::add_op(&bias_data, &neg_k_tensor_bias)?;
 

@@ -240,12 +240,15 @@ impl Tensor {
                     match self_dtype {
                         DType::F32 => crate::tensor::create::full(&[], 1.0f32)?,
                         DType::F64 => crate::tensor::create::full_f64(&[], 1.0f64)?,
-                        DType::I32 | DType::I64 | DType::Bool => todo!(),
+                        DType::I32 | DType::I64 | DType::Bool => {
+                            return Err(NeuraRustError::UnsupportedOperation(
+                                format!("backward() n'est pas supporté pour le type {:?}", self_dtype)
+                            ));
+                        }
                         // TODO: Add other DType variants if necessary or return an error
                     }
                 } else if is_empty {
-                     // TODO: Replace with Tensor::zeros_like(self) or similar factory function
-                     todo!("Create empty tensor with correct shape/dtype/device");
+                    crate::tensor::create::zeros_like(self)?
                 } else {
                     return Err(NeuraRustError::BackwardNonScalar);
                 }

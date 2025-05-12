@@ -199,7 +199,11 @@ where
             drop(a_guard); drop(b_guard);
             Tensor::new_i64(output_data_vec, output_shape)?
         }
-        DType::Bool => todo!(),
+        DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "L'opération arithmétique n'est pas supportée pour les tenseurs de type Bool".to_string())
+            );
+        }
     };
 
     // --- Autograd Setup --- 

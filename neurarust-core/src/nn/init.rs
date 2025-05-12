@@ -152,7 +152,11 @@ where
             }
             CpuBuffer::F64(Arc::new(data_vec))
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "fill_with_distribution n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     };
 
     // Créer le nouveau Buffer (CPU seulement pour l'instant)
@@ -208,7 +212,11 @@ where
             }
             CpuBuffer::F64(Arc::new(data_vec))
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "fill_with_distribution_scaled n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     };
 
     let new_buffer = Buffer::Cpu(new_cpu_buffer);
@@ -237,7 +245,11 @@ fn fill_with_scalar(tensor: &mut Tensor, value: f64) -> Result<(), NeuraRustErro
     let new_cpu_buffer = match dtype {
         DType::F32 => CpuBuffer::F32(Arc::new(vec![value as f32; numel])),
         DType::F64 => CpuBuffer::F64(Arc::new(vec![value as f64; numel])),
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "fill_with_scalar n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     };
     
     let new_buffer = Buffer::Cpu(new_cpu_buffer);

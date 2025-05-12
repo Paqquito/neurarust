@@ -100,7 +100,11 @@ impl AdagradOptimizer {
             let initial_sum_sq = match p_tensor.dtype() {
                 DType::F32 => full(&p_tensor.shape(), initial_accumulator_value)?,
                 DType::F64 => full_f64(&p_tensor.shape(), initial_accumulator_value as f64)?,
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                DType::I32 | DType::I64 | DType::Bool => {
+                    return Err(NeuraRustError::UnsupportedOperation(
+                        "AdagradOptimizer n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                    );
+                }
             };
             state.insert(p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 });
         }
@@ -162,15 +166,23 @@ impl Optimizer for AdagradOptimizer {
                         grad_tensor = add_op(&grad_tensor, &wd_term)?;
                     }
                     
-                    let state_entry = self.state.entry(param_name.clone()).or_insert_with(|| {
-                         let p_tensor = &param_locked.tensor;
-                         let initial_sum_sq = match p_tensor.dtype() {
+                    let state_entry_result = (|| {
+                        let p_tensor = &param_locked.tensor;
+                        let initial_sum_sq = match p_tensor.dtype() {
                             DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("State init failed"),
                             DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("State init failed"),
-                            DType::I32 | DType::I64 | DType::Bool => todo!(),
-                         };
-                         AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }
-                    });
+                            DType::I32 | DType::I64 | DType::Bool => {
+                                return Err(NeuraRustError::UnsupportedOperation(
+                                    "AdagradOptimizer n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                                );
+                            }
+                        };
+                        Ok(AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 })
+                    })();
+                    let state_entry = match state_entry_result {
+                        Ok(val) => self.state.entry(param_name.clone()).or_insert(val),
+                        Err(e) => return Err(e),
+                    };
 
                     state_entry.step += 1;
 
@@ -253,7 +265,9 @@ impl Optimizer for AdagradOptimizer {
             let initial_sum_sq = match p_tensor.dtype() {
                 DType::F32 => full(&p_tensor.shape(), self.initial_accumulator_value).expect("Failed to create state tensor F32"),
                 DType::F64 => full_f64(&p_tensor.shape(), self.initial_accumulator_value as f64).expect("Failed to create state tensor F64"),
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                DType::I32 | DType::I64 | DType::Bool => {
+                    panic!("AdagradOptimizer n'est pas supporté pour les tenseurs de type I32, I64 ou Bool");
+                }
             };
             new_state_entries.push((p_name, AdagradState { sum_sq_grads: Some(initial_sum_sq), step: 0 }));
         }

@@ -112,7 +112,11 @@ pub fn perform_pow_inplace<E: NeuraNumeric + Copy + Debug>(
                 }
             }
         }
-        DType::I32 | DType::I64 | DType::Bool => todo!(),
+        DType::I32 | DType::I64 | DType::Bool => {
+            return Err(NeuraRustError::UnsupportedOperation(
+                "pow_ n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+            );
+        }
     }
     Ok(())
 } 

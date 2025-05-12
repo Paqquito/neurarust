@@ -65,7 +65,11 @@ where
                     let clamped_data: Vec<f64> = current_data.into_iter().map(|x| x.clamp(min_f64, max_f64)).collect();
                     from_vec_f64(clamped_data, shape)?
                 }
-                DType::I32 | DType::I64 | DType::Bool => todo!(),
+                DType::I32 | DType::I64 | DType::Bool => {
+                    return Err(NeuraRustError::UnsupportedOperation(
+                        "clip_grad_value n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                    );
+                }
             };
             tensor_data_guard.grad = Some(new_grad_tensor);
         } // grad_tensor est droppé ici s'il a été pris
@@ -187,7 +191,11 @@ where
                     DType::F64 => {
                         mul_op_scalar(&original_grad_clone, clip_coef)?
                     }
-                    DType::I32 | DType::I64 | DType::Bool => todo!(),
+                    DType::I32 | DType::I64 | DType::Bool => {
+                        return Err(NeuraRustError::UnsupportedOperation(
+                            "clip_grad_norm n'est pas supporté pour les tenseurs de type I32, I64 ou Bool".to_string())
+                        );
+                    }
                 };
                 
                 // Mettre à jour le gradient dans le paramètre
