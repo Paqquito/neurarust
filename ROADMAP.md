@@ -824,36 +824,64 @@
 
 *   **Sub-Phase 3.D: Extensions et Robustesse GPU :**
     *   🎯 **Goal:** Renforcer la robustesse, la flexibilité et l'interopérabilité du backend CUDA, tout en facilitant le debug et l'utilisation avancée.
-    *   **Detailed Steps:**
-        *   **Step 3.D.1: Gestion avancée des erreurs CUDA**
-            *   Conversion systématique des erreurs CUDA en `NeuraRustError` avec mapping des codes d'erreur et messages explicites.
-            *   Ajout de tests unitaires pour la gestion des erreurs (device non dispo, OOM, kernel launch failure, etc.).
-        *   **Step 3.D.2: Profilage et synchronisation GPU**
-            *   Ajout d'une méthode explicite de synchronisation (`Tensor::synchronize()`, `CudaStream::synchronize()`).
-            *   Intégration d'un système de profilage simple (temps d'exécution des kernels, occupation mémoire GPU, nombre d'allocations).
-            *   Exemple d'utilisation du profilage sur des opérations GPU.
-        *   **Step 3.D.3: Support multi-GPU (multi-device)**
-            *   Allocation et exécution sur plusieurs GPUs dans un même processus.
-            *   Helpers pour la répartition de tensors sur plusieurs devices (`Tensor::to(device_id)`), collecte des résultats.
-            *   Exemple simple de calcul distribué sur 2 GPUs (si disponibles).
-        *   **Step 3.D.4: Gestion des streams et des événements CUDA**
-            *   Création et utilisation de plusieurs streams CUDA pour l'exécution asynchrone.
-            *   Gestion des événements CUDA pour la synchronisation fine (`CudaEvent`).
-            *   Exemple montrant l'utilisation de plusieurs streams et la synchronisation via événements.
-        *   **Step 3.D.5: Interopérabilité avec d'autres frameworks**
-            *   Import/export de buffers CUDA vers d'autres frameworks (interopérabilité avec PyTorch via DLPack, par exemple).
-            *   Exemple d'échange de tensors entre NeuraRust et PyTorch (si possible).
-        *   **Step 3.D.6: Gestion avancée de la mémoire GPU**
-            *   Outils pour monitorer la fragmentation mémoire, la taille du cache, et la libération manuelle de la mémoire GPU.
-            *   Fonction pour "vider" le cache CUDA (utile pour les tests ou le debug).
-        *   **Step 3.D.7: Support des DTypes avancés sur GPU**
-            *   Extension du support GPU à d'autres DTypes (int, bool, float16/bfloat16).
-            *   Tests de cohérence CPU/GPU pour ces nouveaux types.
-        *   **Step 3.D.8: Tests de robustesse et fuzzing GPU**
-            *   Tests de robustesse/fuzzing sur les kernels CUDA (entrées aléatoires, stress tests mémoire).
-        *   **Step 3.D.9: Documentation et guides GPU**
-            *   Rédaction d'un guide d'utilisation GPU (meilleures pratiques, limitations connues, debug courant).
-            *   Ajout de liens vers des ressources externes (NVIDIA, Rust CUDA, etc.).
+    *   **Step 3.D.1: Gestion avancée des erreurs CUDA**
+        *   🎯 **Goal:** Garantir une gestion fiable et explicite de toutes les erreurs CUDA dans NeuraRust.
+        *   **Detailed Steps:**
+            *   [ ] Mapper tous les codes d'erreur CUDA vers `NeuraRustError` avec des messages explicites.
+            *   [ ] Ajouter des tests unitaires pour chaque type d'erreur courante (device non dispo, OOM, kernel launch failure, etc.).
+            *   [ ] Documenter les erreurs CUDA dans la rustdoc et le guide utilisateur.
+    *   **Step 3.D.2: Profilage et synchronisation GPU**
+        *   🎯 **Goal:** Permettre la synchronisation explicite et le profilage des opérations GPU pour le debug et l'optimisation.
+        *   **Detailed Steps:**
+            *   [ ] Implémenter `Tensor::synchronize()` et `CudaStream::synchronize()`.
+            *   [ ] Intégrer un système de profilage simple (mesure du temps d'exécution des kernels, occupation mémoire GPU, nombre d'allocations).
+            *   [ ] Ajouter un exemple d'utilisation du profilage sur des opérations GPU.
+            *   [ ] Documenter l'utilisation du profilage et de la synchronisation.
+    *   **Step 3.D.3: Support multi-GPU (multi-device)**
+        *   🎯 **Goal:** Permettre l'utilisation de plusieurs GPUs dans un même processus et la répartition des calculs.
+        *   **Detailed Steps:**
+            *   [ ] Permettre l'allocation et l'exécution de tensors sur plusieurs GPUs.
+            *   [ ] Ajouter des helpers pour la répartition et la collecte de tensors (`Tensor::to(device_id)`).
+            *   [ ] Ajouter un exemple de calcul distribué sur 2 GPUs (si disponibles).
+            *   [ ] Documenter les bonnes pratiques multi-GPU.
+    *   **Step 3.D.4: Gestion des streams et des événements CUDA**
+        *   🎯 **Goal:** Offrir une gestion avancée de l'asynchronisme via les streams et événements CUDA.
+        *   **Detailed Steps:**
+            *   [ ] Permettre la création et l'utilisation de plusieurs streams CUDA.
+            *   [ ] Implémenter la gestion des événements CUDA (`CudaEvent`) pour la synchronisation fine.
+            *   [ ] Ajouter un exemple montrant l'utilisation de plusieurs streams et la synchronisation via événements.
+            *   [ ] Documenter l'utilisation des streams et événements.
+    *   **Step 3.D.5: Interopérabilité avec d'autres frameworks**
+        *   🎯 **Goal:** Faciliter l'échange de données GPU avec d'autres frameworks (ex : PyTorch) via DLPack.
+        *   **Detailed Steps:**
+            *   [ ] Implémenter l'import/export de buffers CUDA via DLPack.
+            *   [ ] Ajouter un exemple d'échange de tensors entre NeuraRust et PyTorch (si possible).
+            *   [ ] Documenter l'API d'interopérabilité et les limitations.
+    *   **Step 3.D.6: Gestion avancée de la mémoire GPU**
+        *   🎯 **Goal:** Offrir des outils de monitoring et de gestion fine de la mémoire GPU.
+        *   **Detailed Steps:**
+            *   [ ] Implémenter des outils pour monitorer la fragmentation mémoire, la taille du cache, et la libération manuelle de la mémoire GPU.
+            *   [ ] Ajouter une fonction pour "vider" le cache CUDA.
+            *   [ ] Ajouter un exemple d'utilisation de ces outils.
+            *   [ ] Documenter les outils de gestion mémoire.
+    *   **Step 3.D.7: Support des DTypes avancés sur GPU**
+        *   🎯 **Goal:** Étendre le support GPU à d'autres DTypes (int, bool, float16/bfloat16) et garantir la cohérence CPU/GPU.
+        *   **Detailed Steps:**
+            *   [ ] Implémenter le support des DTypes int, bool, float16/bfloat16 sur GPU.
+            *   [ ] Ajouter des tests de cohérence CPU/GPU pour ces types.
+            *   [ ] Documenter le support des DTypes avancés sur GPU.
+    *   **Step 3.D.8: Tests de robustesse et fuzzing GPU**
+        *   🎯 **Goal:** Garantir la robustesse des kernels CUDA via des tests intensifs et du fuzzing.
+        *   **Detailed Steps:**
+            *   [ ] Mettre en place des tests de robustesse/fuzzing sur les kernels CUDA (entrées aléatoires, stress tests mémoire).
+            *   [ ] Ajouter des rapports de bugs ou crashs détectés.
+            *   [ ] Documenter la méthodologie de test.
+    *   **Step 3.D.9: Documentation et guides GPU**
+        *   🎯 **Goal:** Fournir un guide complet d'utilisation GPU, bonnes pratiques, debug et ressources externes.
+        *   **Detailed Steps:**
+            *   [ ] Rédiger un guide d'utilisation GPU (meilleures pratiques, limitations connues, debug courant).
+            *   [ ] Ajouter des liens vers des ressources externes (NVIDIA, Rust CUDA, etc.).
+            *   [ ] Intégrer la documentation dans la rustdoc et le README.
 
 *   **Phase 3 Notes:**
     *   *This phase introduces significant complexity due to CUDA interop, memory management across devices, and kernel writing/integration. Focus on correctness and then performance.*
