@@ -615,10 +615,9 @@
             *   [✅] Ensure the example(s) run and output expected results, showcasing the API.
             *   [✅] Add to `Cargo.toml` and document the example(s).
         *   **Step 2.C.11: Review and Update `NeuraNumeric` (and potentially add `NeuraIntegral`, `NeuraBoolean`)**
-            *   🎯 **Goal:** Ensure trait abstractions are suitable for new DTypes or extend them.
-            *   [ ] Evaluate if current `NeuraNumeric` (designed for Floats) can be used/adapted for Integer ops, or if specific integer kernels are simpler.
-            *   [ ] Consider if new marker traits like `NeuraIntegral` or `NeuraBoolean` would simplify generic code for ops specific to these types.
-            *   [ ] For now, prioritize direct implementation of kernels for new DTypes and revisit generic abstractions later if clear patterns emerge.
+            *   [✅] Evaluate if current `NeuraNumeric` (designed for Floats) can be used/adapted for Integer ops, or if specific integer kernels are simpler.
+            *   [✅] Consider if new marker traits like `NeuraIntegral` or `NeuraBoolean` would simplify generic code for ops specific to these types.
+            *   [✅] For now, prioritize direct implementation of kernels for new DTypes and revisit generic abstractions later if clear patterns emerge.
         *   **Step 2.C.12: Update `rustdoc` for all new DType functionalities.**
             *   [ ] Document DType enum, new buffer variants, creation functions, tensor methods, and op behaviors with new DTypes.
 
