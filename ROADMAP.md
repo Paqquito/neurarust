@@ -640,8 +640,8 @@
             *   🎯 **Goal:** Integrate a CUDA binding crate and manage CUDA context lifecycle.
             *   [✅] Choose and integrate a CUDA binding crate (e.g., `rustacuda` or `cuda-rs`).
             *   [✅] Implement CUDA context initialization (e.g., `cuInit`) and destruction.
-            *   [ ] Implement device enumeration and selection (`cuDeviceGetCount`, `cuDeviceGet`).
-            *   [ ] Expose device properties query (e.g., name, total memory, compute capability).
+            *   [✅] Implement device enumeration and selection (`cuDeviceGetCount`, `cuDeviceGet`).
+            *   [✅] Expose device properties query (e.g., name, total memory, compute capability).
             *   [ ] Implement basic CUDA error handling, converting CUDA errors to `NeuraRustError`.
             *   [✅] Add `rustdoc` for CUDA setup and basic context functions.
             *   [✅] Add tests for context initialization, device enumeration, and property queries.
