@@ -608,7 +608,7 @@
             *   [✅] Create a new example file (e.g., `examples/dtype_operations_example.rs`) or multiple smaller ones.
             *   [✅] Show creation of Integer and Boolean tensors (`zeros`, `ones`, `full`, `randint`, `bernoulli`).
             *   [✅] Démontrer les opérations arithmétiques sur Integer et logiques sur Bool.
-            *   [ ] Demonstrate Integer arithmetic and Boolean logical operations.
+            *   [✅] Demonstrate Integer arithmetic and Boolean logical operations.
             *   [ ] Demonstrate `index_select`, `masked_select`, `masked_fill_`.
             *   [ ] Demonstrate `where_op` usage.
             *   [ ] Demonstrate `bincount` usage.

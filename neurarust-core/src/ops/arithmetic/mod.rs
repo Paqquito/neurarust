@@ -164,7 +164,7 @@ where
             let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterI32::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
             let mut output_data_vec = Vec::with_capacity(numel);
             for (va, vb) in iter_a.zip(iter_b) {
-                if vb == 0 {
+                if op_name == "div_op" && vb == 0 {
                     return Err(NeuraRustError::ArithmeticError("Tentative de division entière par zéro (I32)".to_string()));
                 }
                 output_data_vec.push(op_i32(va, vb));
@@ -185,7 +185,7 @@ where
             let iter_b = crate::tensor::iter_utils::NdArrayBroadcastingIterI64::new(b_buffer, &b_guard.shape, &b_guard.strides, b_guard.offset, &output_shape)?;
             let mut output_data_vec = Vec::with_capacity(numel);
             for (va, vb) in iter_a.zip(iter_b) {
-                if vb == 0 {
+                if op_name == "div_op" && vb == 0 {
                     return Err(NeuraRustError::ArithmeticError("Tentative de division entière par zéro (I64)".to_string()));
                 }
                 output_data_vec.push(op_i64(va, vb));

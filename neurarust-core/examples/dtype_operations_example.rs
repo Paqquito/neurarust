@@ -4,6 +4,7 @@
 use neurarust_core::{DType, StorageDevice, NeuraRustError};
 use neurarust_core::tensor::create::{zeros_dtype, ones_dtype, full_dtype_i32, full_dtype_i64, full_dtype_bool, randint, bernoulli_scalar};
 use neurarust_core::ops::arithmetic::{add_op, sub_op, mul_op, div_op};
+use neurarust_core::tensor::Tensor;
 
 fn main() -> Result<(), NeuraRustError> {
     println!("--- Création de tenseurs Integer et Bool ---");
@@ -80,6 +81,70 @@ fn main() -> Result<(), NeuraRustError> {
     assert_eq!(or.get_bool_data()?, vec![true, true, true, true]);
     assert_eq!(xor.get_bool_data()?, vec![true, true, true, true]);
     assert_eq!(not.get_bool_data()?, vec![false, false, false, false]);
+
+    // --- Opérations avancées : index_select, masked_select, masked_fill_ ---
+    println!("\n--- Opérations avancées sur Integer (I32) ---");
+    let t = randint(0, 10, vec![4, 4], DType::I32, StorageDevice::CPU)?;
+    println!("Tenseur de base : {:?}", t.get_i32_data()?);
+
+    // Exemple : sélectionner la 2e ligne d'un tenseur I32
+    let indices = full_dtype_i64(&[1], 1)?; // Indice 1 (2e ligne)
+    match t.index_select(0, &indices) {
+        Ok(selected) => println!("Sélection de la 2e ligne : {:?}", selected),
+        Err(e) => println!("Erreur lors de l'index_select (2e ligne) : {:?}", e),
+    }
+
+    // Masque des éléments pairs (I32)
+    let t = match full_dtype_i32(&[4], 1) {
+        Ok(t) => t,
+        Err(e) => { println!("Erreur lors de la création du tenseur t : {:?}", e); return Err(e); }
+    };
+    let incr = match full_dtype_i32(&[4], 0) {
+        Ok(i) => i,
+        Err(e) => { println!("Erreur lors de la création du tenseur incr : {:?}", e); return Err(e); }
+    };
+    let mut incr_data = match incr.get_i32_data() {
+        Ok(d) => d,
+        Err(e) => { println!("Erreur lors de l'accès aux données incr : {:?}", e); return Err(e); }
+    };
+    for (i, v) in incr_data.iter_mut().enumerate() { *v = i as i32; }
+    let incr = match Tensor::new_i32(incr_data, vec![4]) {
+        Ok(t) => t,
+        Err(e) => { println!("Erreur lors de la création du tenseur incr final : {:?}", e); return Err(e); }
+    };
+    let t = match add_op(&t, &incr) {
+        Ok(t) => t,
+        Err(e) => { println!("Erreur lors de l'addition pour t : {:?}", e); return Err(e); }
+    }; // t = [1,2,3,4]
+    // Création du masque booléen des éléments pairs
+    let t_data = match t.get_i32_data() {
+        Ok(d) => d,
+        Err(e) => { println!("Erreur lors de l'accès aux données t : {:?}", e); return Err(e); }
+    };
+    let mask_data: Vec<bool> = t_data.iter().map(|x| x % 2 == 0).collect();
+    let mask = match Tensor::new_bool(mask_data, vec![4]) {
+        Ok(m) => m,
+        Err(e) => { println!("Erreur lors de la création du masque : {:?}", e); return Err(e); }
+    };
+    println!("Masque des éléments pairs : {:?}", mask);
+
+    // Sélection par masque
+    match t.masked_select(&mask) {
+        Ok(masked) => println!("Éléments pairs sélectionnés : {:?}", masked),
+        Err(e) => println!("Erreur lors du masked_select (pairs) : {:?}", e),
+    }
+
+    // Gestion d'erreur : index hors bornes
+    let indices_out = full_dtype_i64(&[1], 10)?;
+    let res = t.index_select(0, &indices_out);
+    assert!(res.is_err());
+    println!("index_select avec indice hors borne : {:?}", res);
+
+    // Gestion d'erreur : masque de mauvaise forme
+    let bad_mask = zeros_dtype(&[2, 2], DType::Bool)?;
+    let res = t.masked_select(&bad_mask);
+    assert!(res.is_err());
+    println!("masked_select avec masque de mauvaise forme : {:?}", res);
 
     Ok(())
 } 

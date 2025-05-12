@@ -13,7 +13,8 @@
 │   │   ├── basic_mlp_cpu_inplace_optim.rs
 │   │   ├── basic_mlp_cpu_manual_inplace.rs
 │   │   ├── basic_mlp_cpu_param_groups.rs
-│   │   └── basic_mlp_cpu.rs
+│   │   ├── basic_mlp_cpu.rs
+│   │   └── dtype_operations_example.rs
 │   ├── src
 │   │   ├── autograd
 │   │   │   ├── backward_op.rs
@@ -236,4 +237,4 @@
 ├── STRUCTURE.md
 └── text.txt
 
-32 directories, 205 files
+32 directories, 206 files
