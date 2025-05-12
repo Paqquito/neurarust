@@ -102,7 +102,7 @@ impl BackwardOp for AddBackward {
 /// Performs element-wise addition (`a + b`) on two tensors with broadcasting.
 ///
 /// Supports autograd.
-pub(crate) fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
+pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,

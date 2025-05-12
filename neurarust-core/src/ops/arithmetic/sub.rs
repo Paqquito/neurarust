@@ -114,7 +114,7 @@ impl BackwardOp for SubBackward {
 /// - Tensors are not `DType::F32` (`UnsupportedOperation`).
 /// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
 /// - An internal error occurs during computation or memory allocation.
-pub(crate) fn sub_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
+pub fn sub_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,
         b,

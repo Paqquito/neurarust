@@ -17,10 +17,10 @@ pub mod sub;
 pub mod max_elemwise;
 
 // Re-export specific op functions after declaring modules
-pub(crate) use add::add_op;
-pub(crate) use div::div_op;
-pub(crate) use mul::mul_op;
-pub(crate) use sub::sub_op;
+pub use add::add_op;
+pub use div::div_op;
+pub use mul::mul_op;
+pub use sub::sub_op;
 // pub(crate) use max_elemwise::max_elemwise_op; // This line will be commented out or removed
 
 // --- Centralized Helper for Binary Ops with Broadcasting --- 
