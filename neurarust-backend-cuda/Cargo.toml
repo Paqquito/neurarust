@@ -1,0 +1,7 @@
+[package]
+name = "neurarust-backend-cuda"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rustacuda = "0.1"

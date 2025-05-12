@@ -6,6 +6,10 @@
 ├── Goals copy.md
 ├── Goals.md
 ├── LICENSE
+├── neurarust-backend-cuda
+│   ├── Cargo.toml
+│   └── src
+│       └── lib.rs
 ├── neurarust-core
 │   ├── Cargo.toml
 │   ├── examples
@@ -21,6 +25,7 @@
 │   │   │   ├── grad_check.rs
 │   │   │   ├── graph.rs
 │   │   │   └── mod.rs
+│   │   ├── backend
 │   │   ├── buffer.rs
 │   │   ├── data
 │   │   ├── device.rs
@@ -234,7 +239,6 @@
 │           └── traits.rs
 ├── README.md
 ├── ROADMAP.md
-├── STRUCTURE.md
-└── text.txt
+└── STRUCTURE.md
 
-32 directories, 206 files
+35 directories, 207 files
