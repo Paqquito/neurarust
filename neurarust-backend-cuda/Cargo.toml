@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 rustacuda = "0.1"
+lazy_static = "1.4"
