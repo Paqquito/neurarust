@@ -126,7 +126,39 @@ impl BackwardOp for PowBackward {
 
 // --- pow_op Implementation (Refactored) ---
 
-/// Computes `base` raised to the power of `exponent` element-wise (`base` ^ `exponent`).
+/// Raises each element of the `base` tensor to the power of the corresponding element in `exponent`, supporting broadcasting and autograd.
+///
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
+///
+/// # Unsupported Types
+/// - `DType::I32`, `DType::I64`, `DType::Bool` (returns an `UnsupportedOperation` error)
+///
+/// # Arguments
+/// * `base` - Base tensor.
+/// * `exponent` - Exponent tensor.
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing the element-wise power, or a `NeuraRustError`.
+///
+/// # Errors
+/// - `DeviceMismatch` if tensors are not on the CPU.
+/// - `DataTypeMismatch` if the DTypes do not match.
+/// - `BroadcastError` if the shapes are not broadcast-compatible.
+/// - `UnsupportedOperation` if the DType is not supported.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::pow;
+/// let base = Tensor::new_f64(vec![2.0, 3.0, 4.0], vec![3]).unwrap();
+/// let exp = Tensor::new_f64(vec![3.0, 2.0, 0.5], vec![3]).unwrap();
+/// let c = pow::pow_op(&base, &exp).unwrap();
+/// assert_eq!(c.get_f64_data().unwrap(), vec![8.0, 9.0, 2.0]);
+/// assert_eq!(c.dtype(), DType::F64);
+/// ```
 pub fn pow_op(base: &Tensor, exponent: &Tensor) -> Result<Tensor, NeuraRustError> {
     let base_guard = base.read_data();
     let exponent_guard = exponent.read_data();

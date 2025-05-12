@@ -619,7 +619,7 @@
             *   [✅] Consider if new marker traits like `NeuraIntegral` or `NeuraBoolean` would simplify generic code for ops specific to these types.
             *   [✅] For now, prioritize direct implementation of kernels for new DTypes and revisit generic abstractions later if clear patterns emerge.
         *   **Step 2.C.12: Update `rustdoc` for all new DType functionalities.**
-            *   [ ] Document DType enum, new buffer variants, creation functions, tensor methods, and op behaviors with new DTypes.
+            *   [✅] Document DType enum, new buffer variants, creation functions, tensor methods, and op behaviors with new DTypes.
 
 *   **Phase 2 Notes:**
     *   *Optimizers will heavily rely on in-place operations from Phase 1.D and `Module` introspection (parameters) from Phase 1.B.*

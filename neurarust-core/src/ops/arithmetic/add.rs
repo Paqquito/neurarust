@@ -99,9 +99,41 @@ impl BackwardOp for AddBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise addition (`a + b`) on two tensors with broadcasting.
+/// Performs element-wise addition between two tensors, supporting broadcasting and autograd.
 ///
-/// Supports autograd.
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
+/// - `DType::I32`
+/// - `DType::I64`
+///
+/// # Unsupported Types
+/// - `DType::Bool` (returns an `UnsupportedOperation` error)
+///
+/// # Arguments
+/// * `a` - First input tensor (addend).
+/// * `b` - Second input tensor (addend).
+///
+/// # Returns
+/// A `Result` containing a new `Tensor` representing the element-wise sum, or a `NeuraRustError`.
+///
+/// # Errors
+/// - `DeviceMismatch` if tensors are not on the CPU.
+/// - `DataTypeMismatch` if the DTypes do not match.
+/// - `BroadcastError` if the shapes are not broadcast-compatible.
+/// - `UnsupportedOperation` if the DType is not supported.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::add_op;
+/// let a = Tensor::new_i32(vec![1, 2, 3], vec![3]).unwrap();
+/// let b = Tensor::new_i32(vec![4, 5, 6], vec![3]).unwrap();
+/// let c = add_op(&a, &b).unwrap();
+/// assert_eq!(c.get_i32_data().unwrap(), vec![5, 7, 9]);
+/// assert_eq!(c.dtype(), DType::I32);
+/// ```
 pub fn add_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,

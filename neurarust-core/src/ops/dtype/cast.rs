@@ -3,6 +3,28 @@ use crate::error::NeuraRustError;
 use crate::types::DType;
 use crate::device::StorageDevice;
 
+/// Convertit un tenseur vers un nouveau DType (type de données), en créant un nouveau tenseur avec les mêmes valeurs converties.
+///
+/// Cette opération ne modifie pas le tenseur d'origine, mais retourne un nouveau tenseur avec le type de données souhaité.
+///
+/// # Arguments
+/// * `tensor` - Référence vers le tenseur source à convertir.
+/// * `new_dtype` - Le DType cible vers lequel convertir les données.
+///
+/// # Erreurs
+/// Retourne une erreur si :
+/// - Le tenseur n'est pas sur le CPU (DeviceMismatch)
+/// - Le tenseur n'est pas contigu (UnsupportedOperation)
+/// - La conversion entre les DTypes n'est pas supportée
+///
+/// # Exemple
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::dtype::cast_op;
+/// let t = Tensor::new(vec![1.0f32, 2.0, 3.0], vec![3]).unwrap();
+/// let t_i32 = cast_op(&t, DType::I32).unwrap();
+/// assert_eq!(t_i32.dtype(), DType::I32);
+/// ```
 pub fn cast_op(tensor: &Tensor, new_dtype: DType) -> Result<Tensor, NeuraRustError> {
     let tensor_guard = tensor.read_data();
 

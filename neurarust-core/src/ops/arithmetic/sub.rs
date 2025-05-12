@@ -94,26 +94,41 @@ impl BackwardOp for SubBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise subtraction (`a - b`) on two tensors with broadcasting.
+/// Performs element-wise subtraction between two tensors, supporting broadcasting and autograd.
 ///
-/// Computes the difference between two tensors, element by element. If the tensors have different
-/// but compatible shapes, broadcasting rules are applied.
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
+/// - `DType::I32`
+/// - `DType::I64`
 ///
-/// This operation supports automatic differentiation.
+/// # Unsupported Types
+/// - `DType::Bool` (returns an `UnsupportedOperation` error)
 ///
 /// # Arguments
-/// * `a`: The first input `Tensor` (minuend).
-/// * `b`: The second input `Tensor` (subtrahend).
+/// * `a` - First input tensor (minuend).
+/// * `b` - Second input tensor (subtrahend).
 ///
 /// # Returns
 /// A `Result` containing a new `Tensor` representing the element-wise difference, or a `NeuraRustError`.
 ///
 /// # Errors
-/// Returns `NeuraRustError` if:
-/// - Tensors are not on the CPU (`DeviceMismatch`).
-/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
-/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
-/// - An internal error occurs during computation or memory allocation.
+/// - `DeviceMismatch` if tensors are not on the CPU.
+/// - `DataTypeMismatch` if the DTypes do not match.
+/// - `BroadcastError` if the shapes are not broadcast-compatible.
+/// - `UnsupportedOperation` if the DType is not supported.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::sub_op;
+/// let a = Tensor::new_i64(vec![10, 20, 30], vec![3]).unwrap();
+/// let b = Tensor::new_i64(vec![1, 2, 3], vec![3]).unwrap();
+/// let c = sub_op(&a, &b).unwrap();
+/// assert_eq!(c.get_i64_data().unwrap(), vec![9, 18, 27]);
+/// assert_eq!(c.dtype(), DType::I64);
+/// ```
 pub fn sub_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     crate::ops::arithmetic::apply_binary_op_broadcasted(
         a,

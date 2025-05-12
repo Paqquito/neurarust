@@ -4,7 +4,29 @@ use crate::tensor::Tensor;
 use crate::types::DType;
 
 /// Effectue un NON logique élément par élément sur un tenseur booléen.
-/// Le résultat est un tenseur booléen (true devient false et vice versa).
+///
+/// # Types supportés
+/// - Le tenseur doit être de type `Bool`.
+///
+/// # Arguments
+/// * `a` - Tenseur booléen d'entrée.
+///
+/// # Retour
+/// Un `Tensor` Bool de même forme que l'entrée, avec chaque valeur inversée.
+///
+/// # Erreurs
+/// - `DeviceMismatch` si le tenseur n'est pas sur le bon device.
+/// - `DataTypeMismatch` si le tenseur n'est pas de type `Bool`.
+/// - `InternalError` si la taille de la sortie ne correspond pas à l'attendu.
+///
+/// # Exemple
+/// ```
+/// use neurarust_core::Tensor;
+/// use neurarust_core::ops::comparison::logical_not_op;
+/// let t = Tensor::new_bool(vec![true, false, true, false], vec![2, 2]).unwrap();
+/// let result = logical_not_op(&t).unwrap();
+/// assert_eq!(result.get_bool_data().unwrap(), vec![false, true, false, true]);
+/// ```
 pub fn logical_not_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
 

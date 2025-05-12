@@ -5,7 +5,31 @@ use crate::tensor::Tensor;
 use crate::types::DType;
 
 /// Effectue une comparaison élément par élément (a < b) entre deux tenseurs.
-/// Le résultat est un tensor Bool (true si a < b, false sinon).
+///
+/// # Types supportés
+/// - Tous les types numériques (`F32`, `F64`, `I32`, `I64`, `Bool`).
+///
+/// # Arguments
+/// * `a` - Premier tenseur.
+/// * `b` - Second tenseur.
+///
+/// # Retour
+/// Un `Tensor` Bool de même forme (broadcastée) que les entrées.
+///
+/// # Erreurs
+/// - `DeviceMismatch` si les tenseurs ne sont pas sur le même device.
+/// - `DataTypeMismatch` si les dtypes ne correspondent pas.
+/// - `InternalError` si la taille de la sortie ne correspond pas à l'attendu.
+///
+/// # Exemple
+/// ```
+/// use neurarust_core::{Tensor};
+/// use neurarust_core::ops::comparison::lt_op;
+/// let a = Tensor::new(vec![1.0, 2.0, 3.0], vec![3]).unwrap();
+/// let b = Tensor::new(vec![2.0, 2.0, 2.0], vec![3]).unwrap();
+/// let lt = lt_op(&a, &b).unwrap();
+/// assert_eq!(lt.get_bool_data().unwrap(), vec![true, false, false]);
+/// ```
 pub fn lt_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();

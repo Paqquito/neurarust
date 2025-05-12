@@ -68,14 +68,41 @@ impl BackwardOp for MaxElementwiseBackward {
     }
 }
 
-/// Performs element-wise maximum of two tensors (`max(a, b)`), supporting broadcasting.
+/// Computes the element-wise maximum between two tensors, supporting broadcasting and autograd.
+///
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
+/// - `DType::I32`
+/// - `DType::I64`
+///
+/// # Unsupported Types
+/// - `DType::Bool` (returns an `UnsupportedOperation` error)
 ///
 /// # Arguments
-/// * `a`: The first input `Tensor`.
-/// * `b`: The second input `Tensor`.
+/// * `a` - First input tensor.
+/// * `b` - Second input tensor.
 ///
 /// # Returns
-/// A `Result` containing a new `Tensor` or a `NeuraRustError`.
+/// A `Result` containing a new `Tensor` representing the element-wise maximum, or a `NeuraRustError`.
+///
+/// # Errors
+/// - `DeviceMismatch` if tensors are not on the CPU.
+/// - `DataTypeMismatch` if the DTypes do not match.
+/// - `BroadcastError` if the shapes are not broadcast-compatible.
+/// - `UnsupportedOperation` if the DType is not supported.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::max_elemwise;
+/// let a = Tensor::new_i32(vec![1, 5, 3], vec![3]).unwrap();
+/// let b = Tensor::new_i32(vec![4, 2, 6], vec![3]).unwrap();
+/// let c = max_elemwise::max_elemwise_op(&a, &b).unwrap();
+/// assert_eq!(c.get_i32_data().unwrap(), vec![4, 5, 6]);
+/// assert_eq!(c.dtype(), DType::I32);
+/// ```
 pub fn max_elemwise_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_clone = a.clone();
     let b_clone = b.clone();

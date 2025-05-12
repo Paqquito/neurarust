@@ -5,7 +5,31 @@ use crate::tensor::Tensor;
 use crate::types::DType;
 
 /// Effectue un OU logique élément par élément entre deux tenseurs booléens.
-/// Le résultat est un tenseur booléen (true si au moins une des entrées est true, false sinon).
+///
+/// # Types supportés
+/// - Les deux tenseurs doivent être de type `Bool`.
+///
+/// # Arguments
+/// * `a` - Premier tenseur booléen.
+/// * `b` - Second tenseur booléen.
+///
+/// # Retour
+/// Un `Tensor` Bool de même forme (broadcastée) que les entrées.
+///
+/// # Erreurs
+/// - `DeviceMismatch` si les tenseurs ne sont pas sur le même device.
+/// - `DataTypeMismatch` si l'un des tenseurs n'est pas de type `Bool`.
+/// - `InternalError` si la taille de la sortie ne correspond pas à l'attendu.
+///
+/// # Exemple
+/// ```
+/// use neurarust_core::Tensor;
+/// use neurarust_core::ops::comparison::logical_or_op;
+/// let a = Tensor::new_bool(vec![true, false, true, false], vec![2, 2]).unwrap();
+/// let b = Tensor::new_bool(vec![true, true, false, false], vec![2, 2]).unwrap();
+/// let result = logical_or_op(&a, &b).unwrap();
+/// assert_eq!(result.get_bool_data().unwrap(), vec![true, true, true, false]);
+/// ```
 pub fn logical_or_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_guard = a.read_data();
     let b_guard = b.read_data();

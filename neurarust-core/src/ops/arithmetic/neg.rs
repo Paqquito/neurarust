@@ -55,24 +55,35 @@ fn neg_kernel<T: NeuraNumeric>(input_data: &[T]) -> Vec<T> {
     input_data.iter().map(|&x| -x).collect()
 }
 
-/// Computes the element-wise negation of the input tensor.
+/// Computes the element-wise negation of a tensor, with autograd support.
 ///
-/// Computes the negative of each element in the input tensor.
-/// Supports `DType::F32` and `DType::F64` tensors on the CPU.
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
 ///
-/// This operation supports automatic differentiation.
+/// # Unsupported Types
+/// - `DType::I32`, `DType::I64`, `DType::Bool` (returns an `UnsupportedOperation` error)
 ///
 /// # Arguments
-/// * `input`: The input `Tensor`.
+/// * `a` - Input tensor.
 ///
 /// # Returns
-/// A `Result` containing a new `Tensor` with the negated values, or a `NeuraRustError`.
+/// A `Result` containing a new `Tensor` representing the element-wise negation, or a `NeuraRustError`.
 ///
 /// # Errors
-/// Returns `NeuraRustError` if:
-/// - The tensor is not on the CPU (`DeviceMismatch`).
-/// - The tensor's `DType` is not F32 or F64 (`UnsupportedOperation`).
-/// - An internal error occurs.
+/// - `DeviceMismatch` if the tensor is not on the CPU.
+/// - `UnsupportedOperation` if the DType is not supported or the tensor is not contiguous.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::neg;
+/// let a = Tensor::new(vec![1.0, -2.0, 3.5], vec![3]).unwrap();
+/// let c = neg::neg_op(&a).unwrap();
+/// assert_eq!(c.get_f32_data().unwrap(), vec![-1.0, 2.0, -3.5]);
+/// assert_eq!(c.dtype(), DType::F32);
+/// ```
 pub fn neg_op(a: &Tensor) -> Result<Tensor, NeuraRustError> {
     if !a.is_contiguous() {
         return Err(NeuraRustError::UnsupportedOperation(format!(

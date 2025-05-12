@@ -84,27 +84,42 @@ impl BackwardOp for DivBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise division of two tensors (`a / b`), supporting broadcasting.
+/// Performs element-wise division between two tensors, supporting broadcasting and autograd.
 ///
-/// Computes the division of `a` by `b`, element by element. If the tensors have different
-/// but compatible shapes, broadcasting rules are applied.
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
+/// - `DType::I32`
+/// - `DType::I64`
 ///
-/// This operation supports automatic differentiation.
+/// # Unsupported Types
+/// - `DType::Bool` (returns an `UnsupportedOperation` error)
 ///
 /// # Arguments
-/// * `a`: The numerator `Tensor`.
-/// * `b`: The denominator `Tensor`.
+/// * `a` - Numerator (first input tensor).
+/// * `b` - Denominator (second input tensor).
 ///
 /// # Returns
 /// A `Result` containing a new `Tensor` representing the element-wise division, or a `NeuraRustError`.
 ///
 /// # Errors
-/// Returns `NeuraRustError` if:
-/// - Tensors are not on the CPU (`DeviceMismatch`).
-/// - Tensors are not `DType::F32` (`UnsupportedOperation`).
-/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
-/// - Division by zero occurs (`DivisionByZero`).
-/// - An internal error occurs during computation or memory allocation.
+/// - `DeviceMismatch` if tensors are not on the CPU.
+/// - `DataTypeMismatch` if the DTypes do not match.
+/// - `BroadcastError` if the shapes are not broadcast-compatible.
+/// - `DivisionByZero` or `ArithmeticError` for integer division by zero.
+/// - `UnsupportedOperation` if the DType is not supported.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::div_op;
+/// let a = Tensor::new_i64(vec![10, 20, 30], vec![3]).unwrap();
+/// let b = Tensor::new_i64(vec![2, 4, 5], vec![3]).unwrap();
+/// let c = div_op(&a, &b).unwrap();
+/// assert_eq!(c.get_i64_data().unwrap(), vec![5, 5, 6]);
+/// assert_eq!(c.dtype(), DType::I64);
+/// ```
 pub fn div_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_clone = a.clone();
     let b_clone = b.clone();

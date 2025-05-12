@@ -85,26 +85,41 @@ impl BackwardOp for MulBackward {
 
 // --- Forward Operation ---
 
-/// Performs element-wise multiplication of two tensors (`a * b`), supporting broadcasting.
+/// Performs element-wise multiplication between two tensors, supporting broadcasting and autograd.
 ///
-/// Computes the product of two tensors, element by element. If the tensors have different
-/// but compatible shapes, broadcasting rules are applied.
+/// # Supported Types
+/// - `DType::F32`
+/// - `DType::F64`
+/// - `DType::I32`
+/// - `DType::I64`
 ///
-/// This operation supports automatic differentiation.
+/// # Unsupported Types
+/// - `DType::Bool` (returns an `UnsupportedOperation` error)
 ///
 /// # Arguments
-/// * `a`: The first input `Tensor`.
-/// * `b`: The second input `Tensor`.
+/// * `a` - First input tensor (multiplicand).
+/// * `b` - Second input tensor (multiplier).
 ///
 /// # Returns
 /// A `Result` containing a new `Tensor` representing the element-wise product, or a `NeuraRustError`.
 ///
 /// # Errors
-/// Returns `NeuraRustError` if:
-/// - Tensors are not on the CPU (`DeviceMismatch`).
-/// - Tensors have different `DType`s (`DataTypeMismatch`).
-/// - Tensors have incompatible shapes for broadcasting (`BroadcastError`).
-/// - An internal error occurs during computation or memory allocation.
+/// - `DeviceMismatch` if tensors are not on the CPU.
+/// - `DataTypeMismatch` if the DTypes do not match.
+/// - `BroadcastError` if the shapes are not broadcast-compatible.
+/// - `UnsupportedOperation` if the DType is not supported.
+/// - `InternalError` for internal errors.
+///
+/// # Example
+/// ```
+/// use neurarust_core::{Tensor, DType};
+/// use neurarust_core::ops::arithmetic::mul_op;
+/// let a = Tensor::new_i32(vec![2, 3, 4], vec![3]).unwrap();
+/// let b = Tensor::new_i32(vec![5, 6, 7], vec![3]).unwrap();
+/// let c = mul_op(&a, &b).unwrap();
+/// assert_eq!(c.get_i32_data().unwrap(), vec![10, 18, 28]);
+/// assert_eq!(c.dtype(), DType::I32);
+/// ```
 pub fn mul_op(a: &Tensor, b: &Tensor) -> Result<Tensor, NeuraRustError> {
     let a_clone = a.clone();
     let b_clone = b.clone();
