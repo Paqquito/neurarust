@@ -131,7 +131,6 @@ where
                 operation: "clamp_".to_string(),
             });
         }
-        &mut Buffer::Cuda(_) => todo!(),
     }
     Ok(())
 } 

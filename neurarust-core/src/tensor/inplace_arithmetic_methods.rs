@@ -727,14 +727,16 @@ impl Tensor {
             });
         }
 
+        let op_name = "direct_sub_inplace";
+
         let mut self_tensor_data_guard = self.data.write().map_err(|e| NeuraRustError::LockError { 
             lock_type: "write".to_string(), 
-            reason: format!("Failed to lock self.data in direct_sub_inplace: {}", e) 
+            reason: format!("Failed to lock self.data in {}: {}", op_name, e) 
         })?;
 
         let other_tensor_data_guard = other.data.read().map_err(|e| NeuraRustError::LockError { 
             lock_type: "read".to_string(), 
-            reason: format!("Failed to lock other.data in direct_sub_inplace: {}", e) 
+            reason: format!("Failed to lock other.data in {}: {}", op_name, e) 
         })?;
         
         let self_buffer_internal_mut = Arc::make_mut(&mut self_tensor_data_guard.buffer);
@@ -749,6 +751,7 @@ impl Tensor {
                         for (s_val, o_val) in self_vec_mut.iter_mut().zip(other_vec.iter()) {
                             *s_val -= *o_val;
                         }
+                        Ok(())
                     }
                     (CpuBuffer::F64(self_f64_arc), CpuBuffer::F64(other_f64_arc)) => {
                         let self_vec_mut = Arc::make_mut(self_f64_arc);
@@ -756,36 +759,65 @@ impl Tensor {
                         for (s_val, o_val) in self_vec_mut.iter_mut().zip(other_vec.iter()) {
                             *s_val -= *o_val;
                         }
+                        Ok(())
                     }
-                    _ => return Err(NeuraRustError::DataTypeMismatch {
-                        expected: self.dtype(),
-                        actual: other.dtype(),
-                        operation: "direct_sub_inplace CPU buffer type mismatch".to_string(),
+                    (CpuBuffer::I32(self_i32_arc), CpuBuffer::I32(other_i32_arc)) => {
+                        let self_vec_mut = Arc::make_mut(self_i32_arc);
+                        let other_vec = &**other_i32_arc;
+                        for (s_val, o_val) in self_vec_mut.iter_mut().zip(other_vec.iter()) {
+                            *s_val -= *o_val;
+                        }
+                        Ok(())
+                    }
+                    (CpuBuffer::I64(self_i64_arc), CpuBuffer::I64(other_i64_arc)) => {
+                        let self_vec_mut = Arc::make_mut(self_i64_arc);
+                        let other_vec = &**other_i64_arc;
+                        for (s_val, o_val) in self_vec_mut.iter_mut().zip(other_vec.iter()) {
+                            *s_val -= *o_val;
+                        }
+                        Ok(())
+                    }
+                    (CpuBuffer::Bool(_), CpuBuffer::Bool(_)) => {
+                        Err(NeuraRustError::UnsupportedOperation(
+                            format!("{}: Subtraction not supported for Bool type.", op_name)
+                        ))
+                    }
+                    _ => Err(NeuraRustError::DataTypeMismatch {
+                        expected: self.dtype(), 
+                        actual: other.dtype(), 
+                        operation: format!("{}: Incompatible CPU buffer types for dtype {:?}. This is an internal error.", op_name, self.dtype()),
                     }),
                 }
             }
             #[cfg(feature = "gpu")]
             (Buffer::Gpu { .. }, Buffer::Gpu { .. }) => {
-                // ... GPU implementation ...
+                Err(NeuraRustError::UnsupportedOperation(format!(
+                    "In-place GPU-GPU {} not implemented yet", op_name
+                )))
             }
             #[cfg(not(feature = "gpu"))]
             (Buffer::Gpu { .. }, _) | (_, Buffer::Gpu { .. }) => {
                 return Err(NeuraRustError::UnsupportedOperation(
-                    "GPU support n'est pas activé dans cette compilation.".to_string(),
+                    format!("{}: GPU support n'est pas activé dans cette compilation.", op_name),
                 ));
             }
-            // Cas où l'un est CPU et l'autre GPU (toujours une erreur de device)
             #[cfg(feature = "gpu")]
-            (Buffer::Cpu(_), Buffer::Gpu { .. }) | (Buffer::Gpu { .. }, Buffer::Cpu(_)) => {
-                return Err(NeuraRustError::DeviceMismatch {
-                    expected: self.device(),
-                    actual: other.device(),
-                    operation: "direct_sub_inplace (device mismatch)".to_string(),
-                });
+            (Buffer::Cpu(_), Buffer::Gpu { device: other_dev, .. }) => {
+                Err(NeuraRustError::DeviceMismatch {
+                    expected: StorageDevice::CPU,
+                    actual: *other_dev,
+                    operation: op_name.to_string(),
+                })
             }
-            (&mut Buffer::Cuda(_), &Buffer::Cpu(_)) | (&mut Buffer::Cuda(_), &Buffer::Cuda(_)) | (&mut Buffer::Cpu(_), &Buffer::Cuda(_)) => todo!(),
+            #[cfg(feature = "gpu")]
+            (Buffer::Gpu { device: self_dev, .. }, Buffer::Cpu(_)) => {
+                Err(NeuraRustError::DeviceMismatch {
+                    expected: *self_dev,
+                    actual: StorageDevice::CPU,
+                    operation: op_name.to_string(),
+                })
+            }
         }
-        Ok(())
     }
 
     /// Performs an in-place scalar multiplication, **without** autograd checks.

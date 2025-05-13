@@ -1,6 +1,5 @@
 use std::fmt::Debug;
 use std::sync::Arc;
-use std::cmp::{Eq, PartialEq};
 
 use crate::device::StorageDevice;
 use crate::error::NeuraRustError;
@@ -26,8 +25,6 @@ pub enum Buffer {
         /// The number of elements in the buffer.
         len: usize 
     }, 
-    /// Data resides on a CUDA device, managed by a CudaBuffer
-    Cuda(CudaBuffer),
 }
 
 /// Enum representing concrete CPU buffer types, specialized by data type.
@@ -47,34 +44,6 @@ pub enum CpuBuffer {
     /// Buffer holding `bool` values.
     Bool(Arc<Vec<bool>>),
     // TODO: Add other CPU buffer types like I64, I32, U8, Bool later
-}
-
-/// Buffer for CUDA device memory (opaque pointer, size, dtype, device_id)
-#[derive(Clone, Debug)]
-pub struct CudaBuffer {
-    /// Device pointer (opaque, typiquement *mut u8 ou u64)
-    pub device_ptr: u64,
-    /// Taille en bytes
-    pub size_bytes: usize,
-    /// DType des éléments
-    pub dtype: DType,
-    /// ID du device CUDA
-    pub device_id: u32,
-}
-
-impl PartialEq for CudaBuffer {
-    fn eq(&self, other: &Self) -> bool {
-        self.device_ptr == other.device_ptr && self.size_bytes == other.size_bytes && self.dtype == other.dtype && self.device_id == other.device_id
-    }
-}
-
-impl Eq for CudaBuffer {}
-
-impl Drop for CudaBuffer {
-    fn drop(&mut self) {
-        // La libération réelle sera faite via le backend CUDA (à implémenter)
-        // Ici, on ne fait rien (mock)
-    }
 }
 
 impl Buffer {
@@ -110,11 +79,6 @@ impl Buffer {
                 actual: *device,
                 operation: "try_get_cpu_f32".to_string(),
             }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
-                operation: "try_get_cpu_f32".to_string(),
-            }),
         }
     }
 
@@ -148,11 +112,6 @@ impl Buffer {
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
-                operation: "try_get_cpu_f64".to_string(),
-            }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
                 operation: "try_get_cpu_f64".to_string(),
             }),
         }
@@ -199,11 +158,6 @@ impl Buffer {
                 actual: *device,
                 operation: op_name.to_string(),
             }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
-                operation: op_name.to_string(),
-            }),
         }
     }
 
@@ -248,11 +202,6 @@ impl Buffer {
                 actual: *device,
                 operation: op_name.to_string(),
             }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
-                operation: op_name.to_string(),
-            }),
         }
     }
 
@@ -283,11 +232,6 @@ impl Buffer {
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
-                operation: "try_get_cpu_i32".to_string(),
-            }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
                 operation: "try_get_cpu_i32".to_string(),
             }),
         }
@@ -322,11 +266,6 @@ impl Buffer {
                 actual: *device,
                 operation: "try_get_cpu_i64".to_string(),
             }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
-                operation: "try_get_cpu_i64".to_string(),
-            }),
         }
     }
 
@@ -357,11 +296,6 @@ impl Buffer {
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
-                operation: "try_get_cpu_bool".to_string(),
-            }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
                 operation: "try_get_cpu_bool".to_string(),
             }),
         }
@@ -401,11 +335,6 @@ impl Buffer {
                 actual: *device,
                 operation: op_name.to_string(),
             }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
-                operation: op_name.to_string(),
-            }),
         }
     }
     pub fn try_get_cpu_i64_mut(&mut self) -> Result<&mut Vec<i64>, NeuraRustError> {
@@ -440,11 +369,6 @@ impl Buffer {
             Buffer::Gpu { device, .. } => Err(NeuraRustError::DeviceMismatch {
                 expected: StorageDevice::CPU,
                 actual: *device,
-                operation: op_name.to_string(),
-            }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
                 operation: op_name.to_string(),
             }),
         }
@@ -483,38 +407,10 @@ impl Buffer {
                 actual: *device,
                 operation: op_name.to_string(),
             }),
-            Buffer::Cuda(_) => Err(NeuraRustError::DeviceMismatch {
-                expected: StorageDevice::CPU,
-                actual: StorageDevice::Cuda(0),
-                operation: op_name.to_string(),
-            }),
         }
     }
 
     // TODO: Add similar try_get methods for other DTypes (I64, Bool, etc.) when added.
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::types::DType;
-    #[test]
-    fn test_cudabuffer_and_buffer_cuda() {
-        let buf = CudaBuffer {
-            device_ptr: 0x12345678,
-            size_bytes: 1024,
-            dtype: DType::F32,
-            device_id: 0,
-        };
-        assert_eq!(buf.device_ptr, 0x12345678);
-        assert_eq!(buf.size_bytes, 1024);
-        assert_eq!(buf.dtype, DType::F32);
-        assert_eq!(buf.device_id, 0);
-        let b = Buffer::Cuda(buf);
-        assert!(matches!(b, Buffer::Cuda(_)));
-        // Debug print
-        println!("Buffer::Cuda: {:?}", b);
-    }
 }
 
 /* // Temporarily comment out old methods causing errors

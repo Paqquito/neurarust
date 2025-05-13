@@ -11,22 +11,12 @@ pub enum StorageDevice {
     /// This is the default device.
     #[default]
     CPU,
-    /// Data is stored on a CUDA-enabled NVIDIA GPU (with device ID)
-    Cuda(u32),
-    /// Data is stored on a generic GPU (legacy, à déprécier)
+    /// Data is stored on a CUDA-enabled NVIDIA GPU.
+    ///
+    /// **Note:** GPU support is planned for future phases and currently operations
+    /// primarily target the CPU.
+    /// TODO: Add device ID/index when multiple GPUs are supported.
     GPU,
     // TODO: Potentially add other devices like TPUs, Metal (Apple Silicon) in the future.
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    #[test]
-    fn test_storage_device_cuda() {
-        let dev = StorageDevice::Cuda(0);
-        assert_eq!(format!("{:?}", dev), "Cuda(0)");
-        let dev1 = StorageDevice::Cuda(1);
-        assert_eq!(format!("{:?}", dev1), "Cuda(1)");
-    }
 }
 

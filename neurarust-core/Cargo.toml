@@ -20,15 +20,13 @@ rand_distr = "0.4" # For specific random distributions (randn)
 # blas-src = { version = "0.8", features = ["openblas"] }
 # openblas-src = { version = "0.10", features = ["cblas"] }
 
-rustacuda = { version = "0.1", optional = true }
-
 [dev-dependencies]
 # Keep approx here too if tests directly use it
 # approx = "0.5"
 
 [features]
 default = []
-gpu = ["rustacuda"]
+gpu = [] # Déclare la fonctionnalité 'gpu'
 
 [[example]]
 name = "basic_mlp_cpu"

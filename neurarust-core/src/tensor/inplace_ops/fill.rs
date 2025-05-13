@@ -107,7 +107,6 @@ pub(crate) fn perform_fill_inplace<S: NeuraNumeric>(
                 tensor_dtype
             )));
         }
-        &mut Buffer::Cuda(_) => todo!(),
     }
 
     Ok(())

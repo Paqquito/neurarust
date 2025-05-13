@@ -1,5 +1,5 @@
 [workspace]
-members = [ "neurarust-backend-cuda",
+members = [ #"neurarust-backend-cuda",
     "neurarust-core",
     "neurarust-data",
     # "neurarust-vision", # Uncomment when this crate is added

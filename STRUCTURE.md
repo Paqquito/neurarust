@@ -9,7 +9,12 @@
 ├── neurarust-backend-cuda
 │   ├── Cargo.toml
 │   └── src
-│       └── lib.rs
+│       ├── context.rs
+│       ├── error.rs
+│       ├── lib.rs
+│       └── tests
+│           ├── context_test.rs
+│           └── mod.rs
 ├── neurarust-core
 │   ├── Cargo.toml
 │   ├── examples
@@ -25,7 +30,6 @@
 │   │   │   ├── grad_check.rs
 │   │   │   ├── graph.rs
 │   │   │   └── mod.rs
-│   │   ├── backend
 │   │   ├── buffer.rs
 │   │   ├── data
 │   │   ├── device.rs
@@ -241,4 +245,4 @@
 ├── ROADMAP.md
 └── STRUCTURE.md
 
-35 directories, 207 files
+35 directories, 211 files

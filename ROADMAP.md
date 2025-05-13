@@ -619,7 +619,7 @@
             *   [✅] Consider if new marker traits like `NeuraIntegral` or `NeuraBoolean` would simplify generic code for ops specific to these types.
             *   [✅] For now, prioritize direct implementation of kernels for new DTypes and revisit generic abstractions later if clear patterns emerge.
         *   **Step 2.C.12: Update `rustdoc` for all new DType functionalities.**
-            *   [✅] Document DType enum, new buffer variants, creation functions, tensor methods, and op behaviors with new DTypes.
+            *   [ ] Document DType enum, new buffer variants, creation functions, tensor methods, and op behaviors with new DTypes.
 
 *   **Phase 2 Notes:**
     *   *Optimizers will heavily rely on in-place operations from Phase 1.D and `Module` introspection (parameters) from Phase 1.B.*
@@ -633,463 +633,283 @@
 ## Phase 3: GPU Acceleration (CUDA First)
 *   🎯 **Goal:** Enable high-performance training and inference by adding GPU support (initially CUDA), including backend abstraction, CUDA kernel integration, and autograd compatibility for GPU tensors, with a focus on performance and robust device management.
 
-*   **Sub-Phase 3.A: Backend Abstraction & CUDA Core Integration (Revised & Enhanced)**
+*   **Sub-Phase 3.A: Backend Abstraction & CUDA Core Integration (Enriched)**
+    *   🎯 **Goal:** Establish the foundational support for CUDA devices, context/stream management, memory management (including a robust caching allocator), asynchronous operations, and CPU<->GPU data transfers, emphasizing robustness and modularity from the start.
+    *   **Detailed Steps:**
+        *   **Step 3.A.1: CUDA Bindings and Context Management (Enhanced Robustness)**
+            *   🎯 **Goal:** Integrate a CUDA binding crate and manage CUDA context lifecycle robustly and with clear device abstraction.
+            *   [ ] Choose and integrate a CUDA binding crate (e.g., `rustacuda` or `cuda-rs`) **within a dedicated internal module (e.g., `neurarust-core/src/cuda_api`)** to encapsulate bindings and ease future updates.
+            *   [ ] Implement **explicit and idempotent** CUDA runtime initialization (`cuInit`), ensuring thread-safety and handling multiple initialization attempts gracefully.
+            *   [ ] Implement **centralized CUDA context management**: Ensure clear creation, activation (setting current), and explicit destruction of contexts, ideally associated with device IDs. **Maintain a clear mapping (e.g., `deviceId -> Context`) to support multi-device scenarios** even if full multi-GPU ops are later.
+            *   [ ] Implement device enumeration (`cuDeviceGetCount`, `cuDeviceGet`) and selection (`cuCtxSetCurrent`).
+            *   [ ] Expose a **rich `CudaDevice` struct** containing essential device properties (name, total memory, compute capability, etc.) obtained via `cuDeviceGetAttribute` / `cuDeviceGetName`.
+            *   [ ] Implement **robust CUDA error handling**: map common and critical CUDA errors comprehensively to specific `NeuraRustError` variants, including context (e.g., originating function, device involved). **Add a basic debug/verbose logging mechanism** for raw CUDA errors via an environment variable or global flag.
+            *   [ ] Add `rustdoc` for CUDA setup procedures, the `CudaDevice` struct, context management functions, and the error handling philosophy (how CUDA errors map to `NeuraRustError`).
+            *   [ ] Add tests for: context initialization (idempotency, behavior with multiple devices present), device enumeration, property queries (correctness of values), **and basic error handling scenarios (e.g., trying to use an invalid device ID, checking error conversion).**
+        *   **Step 3.A.2: CUDA Stream & Event Management (Asynchrony & Fine-Grained Sync)**
+            *   🎯 **Goal:** Establish robust CUDA stream and event handling for asynchronous execution and precise synchronization.
+            *   [ ] Define a `CudaStream` wrapper struct (clonable, storing `CUstream`, associated with a device ID).
+            *   [ ] Implement stream creation (`cuStreamCreateWithFlags` - **explicitly use non-blocking flags by default**), destruction (`cuStreamDestroy`).
+            *   [ ] Implement essential stream synchronization methods: `CudaStream::synchronize()` (`cuStreamSynchronize`), `CudaStream::wait_event(event: &CudaEvent)` (`cuStreamWaitEvent`), `CudaStream::query()` (`cuStreamQuery`).
+            *   [ ] **Define a `CudaEvent` wrapper struct** (storing `CUevent`, creation with flags e.g., for timing, destruction, `record(stream)`, `synchronize()` (`cuEventSynchronize`), `query()` (`cuEventQuery`), `elapsed_time_since(start_event)` (`cuEventElapsedTime`)). **Crucially, integrate events for managing dependencies between streams (`wait_event`).**
+            *   [ ] Define a mechanism for managing a "current" or "default" stream **per thread per device (using thread-local storage)**. Provide a clear API to get/set the current stream for a device (e.g., `cuda::set_stream(stream)` / `cuda::current_stream()`).
+            *   [ ] **Mandate** that subsequent memory copies (3.A.4) and kernel launches (3.B.x) operate on a specific `CudaStream` passed explicitly or obtained from the current context.
+            *   [ ] Add tests for: stream/event creation & destruction, synchronization methods (stream-stream via event, stream-host via `synchronize`, event queries), **correct timing using events**, **and verifying the thread-local default stream management across threads.**
+            *   [ ] Add `rustdoc` explaining stream/event lifecycles, synchronization patterns, and the default stream mechanism.
+        *   **Step 3.A.3: Extend `StorageDevice` and `Buffer` for CUDA with Enhanced Caching Allocator**
+            *   🎯 **Goal:** Adapt core data structures for CUDA memory and implement a performant, robust, and inspectable caching allocator.
+            *   [ ] Add `StorageDevice::Cuda { device_id: u32 }` variant.
+            *   [ ] Design and Implement a **Robust Global Thread-Safe Caching CUDA Memory Allocator:**
+                *   [ ] Intercepts `cuMemAlloc_v2` and `cuMemFree_v2` calls internally.
+                *   [ ] Maintains pools of free memory blocks, **segregated by block size and device ID**. Use size buckets (e.g., powers of 2 or other suitable ranges).
+                *   [ ] Tries to satisfy allocation requests by reusing blocks from the appropriate pool (cache hit). Falls back to `cuMemAlloc` if no suitable block is found (cache miss).
+                *   [ ] On `free`, returns blocks to the corresponding pool instead of calling `cuMemFree` immediately.
+                *   [ ] **Implement basic free block coalescing:** When a block is freed, check if adjacent blocks (in address space) within the same pool are also free, and merge them into a larger free block if possible.
+                *   [ ] **Expose basic allocator statistics via an API (`cuda::allocator_stats(device_id) -> AllocatorStats`)**: Include current allocated bytes, peak allocated bytes, blocks in use, free blocks cached, total cache size per device.
+                *   [ ] **Implement a public `cuda::empty_cache()` function** to iterate through cached blocks on all devices and call `cuMemFree`, returning memory to the driver.
+                *   [ ] **(Foundation for Future)** Add internal support and runtime detection (`cuda::is_pinned_memory_supported()`) for **Pinned (Page-Locked) Host Memory**. Implement internal allocator functions (`alloc_pinned`, `free_pinned`) for potential use in Step 3.A.4.
+            *   [ ] Create `CudaBuffer` struct managing the CUDA device pointer. It should be opaque, non-copyable, and hold the pointer, size, device ID, and potentially a handle/reference back to the allocator for proper freeing.
+            *   [ ] Add `Buffer::Cuda(CudaBuffer)` variant to the main `Buffer` enum.
+            *   [ ] Ensure `TensorData` can own a `Buffer::Cuda` and correctly stores `StorageDevice::Cuda { device_id }`.
+            *   [ ] Add tests for `CudaBuffer` allocation/deallocation via the caching allocator, specifically testing: **cache hits/misses under load, basic coalescing behavior, correctness of `empty_cache()`, accuracy of reported statistics.**
+            *   [ ] Add `rustdoc` detailing the caching allocator's architecture, the `CudaBuffer` structure, the statistics API, and the usage/effect of `empty_cache()`.
+        *   **Step 3.A.4: Implement `Tensor::to(device)` for CPU <-> GPU Transfers (Stream-Aware & Robust)**
+            *   🎯 **Goal:** Enable moving tensor data between CPU and GPU asynchronously, robustly, and potentially leveraging performance enhancements like pinned memory.
+            *   [ ] Implement `Tensor::to(&self, device: StorageDevice, stream: Option<&CudaStream>) -> Result<Tensor, NeuraRustError>`. The stream argument should default to the current stream for the target device if `None`.
+            *   [ ] CPU -> GPU:
+                *   [ ] Allocate `CudaBuffer` on the target GPU via the caching allocator.
+                *   [ ] **If the source `CpuBuffer` resides in pinned memory (potentially allocated via internal pinned allocator), use it directly.** Otherwise, consider a temporary pinned buffer internally for the transfer if beneficial and supported.
+                *   [ ] Perform copy using **`cuMemcpyHtoDAsync_v2`** on the provided or default stream.
+            *   [ ] GPU -> CPU:
+                *   [ ] Allocate `CpuBuffer`. **Consider allocating pinned memory for the destination** if requested by a flag or context setting (e.g., `Tensor::to(CPU.pinned())`) for faster subsequent H2D transfers.
+                *   [ ] Perform copy using **`cuMemcpyDtoHAsync_v2`** on the stream.
+            *   [ ] GPU -> GPU (different devices):
+                *   [ ] Allocate `CudaBuffer` on the target GPU.
+                *   [ ] **Check for peer access capabilities between devices (`cuDeviceCanAccessPeer`) before initiating copy.**
+                *   [ ] Perform copy using **`cuMemcpyDtoDAsync_v2`** (or `cuMemcpyPeerAsync` if P2P is enabled and potentially beneficial later) on the stream.
+            *   [ ] Clarify synchronization: The `to` operation itself is asynchronous w.r.t the host. Users **must** ensure synchronization before accessing the *data* of the resulting tensor on a different stream or the CPU. Introduce `Tensor::synchronize(&self)` method that synchronizes the event associated with the last operation modifying this tensor's data, or the stream if event tracking isn't implemented yet.
+            *   [ ] **Handle potential transfer errors gracefully** (e.g., OOM on target device, invalid device ID, peer access denied) returning specific, informative `NeuraRustError` variants.
+            *   [ ] Add tests for all transfer types (H2D, D2H, D2D), verifying data integrity **after explicit stream/event synchronization**. Add tests for **error handling during transfers (e.g., insufficient memory).** (Performance tests for pinned memory might be complex now, defer if needed).
+            *   [ ] Add `rustdoc` covering the asynchronous nature, the user's responsibility for synchronization (and the `synchronize` method), pinned memory considerations, and potential errors.
+        *   **Step 3.A.5: Create CUDA Backend Basic Example (Updated & More Instructive)**
+            *   🎯 **Goal:** Demonstrate basic CUDA device interaction, memory allocation via caching allocator, stream/event usage for timing, and CPU<->GPU data transfers with explicit synchronization.
+            *   [ ] Create `examples/cuda_basics_example.rs`.
+            *   [ ] Show CUDA device enumeration, selection, and **printing properties from the `CudaDevice` struct.**
+            *   [ ] **Demonstrate getting/setting the default stream for the device.**
+            *   [ ] Create start/end `CudaEvent`s.
+            *   [ ] Create a CPU tensor. Record start event on stream. Move tensor to GPU using `to(cuda_device, stream)`. Record end event on stream.
+            *   [ ] **Call `end_event.synchronize()` on the host.** Query elapsed time between events and print it.
+            *   [ ] **Show basic allocator stats** (e.g., using `cuda::allocator_stats`) before allocation, after the H2D transfer (showing GPU usage).
+            *   [ ] Move the tensor back to CPU using `to(cpu_device, stream)`.
+            *   [ ] **Call `stream.synchronize()` on the host** before attempting to access the CPU tensor data.
+            *   [ ] Verify data integrity after the round trip.
+            *   [ ] **Demonstrate calling `cuda::empty_cache()` and show updated allocator stats.**
+            *   [ ] Ensure the example runs, outputs expected device info, transfer timings, allocator stats, and verified data.
+            *   [ ] Add to `Cargo.toml` and document the example thoroughly, explaining the concepts shown: device query, default stream, event usage for timing, async copy, explicit synchronization, and allocator inspection.
+            
+*   **Sub-Phase 3.B: GPU Kernels & Operations Integration (Enriched)**
+    *   🎯 **Goal:** Implement GPU-accelerated versions of core tensor operations by writing custom CUDA kernels or integrating with CUDA libraries (cuBLAS, cuDNN, Thrust), establishing robust kernel management, dispatch, validation, and profiling mechanisms.
+    *   **Detailed Steps:**
+        *   **Step 3.B.1: Flexible Build System & Kernel Management**
+            *   🎯 **Goal:** Set up a flexible build process for CUDA kernels and establish a system for managing them.
+            *   [ ] **Flexible Build System:**
+                *   [ ] Implement support for **both static compilation** (e.g., `build.rs` + `cc` crate for `.cu` files -> PTX/linked object files) **and potential JIT compilation** (e.g., using `cuda-ptx-jit` for runtime compilation from source strings). Provide clear configuration options.
+                *   [ ] Ensure build system automatically detects or allows configuration of target CUDA architecture(s) for PTX compatibility.
+                *   [ ] (Optional) Explore hot-reloading or dynamic loading of kernels for faster development cycles.
+            *   [ ] **Kernel Registry and Management:**
+                *   [ ] Design and implement a **central kernel registry** to manage loaded CUDA kernels/functions (e.g., mapping op signature/name to `CUfunction`).
+                *   [ ] Provide an internal API for registering kernels (statically or dynamically loaded).
+                *   [ ] Add basic versioning or compatibility checks if mixing pre-compiled and JIT kernels.
+            *   [ ] Add tests for kernel compilation (basic add kernel), loading into the registry, and error handling (e.g., compilation failure).
+            *   [ ] Add `rustdoc` explaining the build options and kernel registration process.
+        *   **Step 3.B.2: Unified GPU Kernel Launch Utilities & Dynamic Dispatch**
+            *   🎯 **Goal:** Create safe and ergonomic utilities for launching kernels and implement a dynamic dispatch system for tensor operations.
+            *   [ ] **Unified Kernel Launch API:**
+                *   [ ] Design functions/macros (e.g., `launch_kernel!(registry, kernel_name, grid, block, shared_mem, stream, args...)`) abstracting `cuLaunchKernel`.
+                *   [ ] **Ensure the utility handles:** Kernel lookup in the registry, grid/block dimension calculation (potentially with helpers based on input size/device properties), **automatic argument packing and type checking (if possible)**, stream association (`CUstream`), shared memory configuration, and **robust CUDA error checking** after launch.
+            *   [ ] **Dynamic Op Dispatch System:**
+                *   [ ] Implement a **central dispatch mechanism** for core tensor operations (`add`, `mul`, `matmul`, `relu`, `sum`, etc.).
+                *   [ ] The dispatcher should examine input tensor properties (`device`, `dtype`, `layout`, potentially shape hints) and route the call to the appropriate implementation: CPU kernel, custom GPU kernel (via launch utility), or GPU library function (cuBLAS, etc.).
+                *   [ ] **Implement a clear fallback strategy:** If a GPU kernel/library is unavailable or fails, attempt to fall back to the CPU implementation (with a warning/log).
+                *   [ ] Design the dispatch system to be easily extensible for new operations and backends later.
+            *   [ ] Add tests for the kernel launch utilities (argument packing, error handling) and the core dispatch logic (correct routing based on device, basic CPU fallback).
+            *   [ ] Add `rustdoc` for the launch utilities and the operation dispatch philosophy.
+        *   **Step 3.B.3: Implement Element-wise Unary Ops on GPU (Stream-Aware, Robust)**
+            *   🎯 **Goal:** Implement custom CUDA kernels for common unary operations, ensuring stream awareness and validation.
+            *   [ ] Write efficient CUDA C++ kernels for operations like `neg`, `relu`, `exp`, `log` (initially F32, F64).
+            *   [ ] Ensure kernels **correctly handle non-contiguous memory layouts** (using index calculations based on strides).
+            *   [ ] Register kernels in the registry (Step 3.B.1).
+            *   [ ] Integrate with the dispatch system (Step 3.B.2) to call these kernels via the launch utility on the correct `CudaStream` when inputs are on CUDA.
+            *   [ ] Add comprehensive tests comparing GPU results against CPU reference implementations for various shapes, layouts, and DTypes **(after stream synchronization)**.
+            *   [ ] Add `rustdoc` for the GPU implementations of these ops.
+        *   **Step 3.B.4: Implement Element-wise Binary Ops on GPU (Stream-Aware, Broadcasting)**
+            *   🎯 **Goal:** Implement custom CUDA kernels for binary arithmetic operations with robust broadcasting support.
+            *   [ ] Write efficient CUDA C++ kernels for `add`, `sub`, `mul`, `div`, `pow` (initially F32, F64).
+            *   [ ] Kernels **must implement broadcasting logic** compatible with NeuraRust's rules.
+            *   [ ] Ensure kernels handle non-contiguous inputs.
+            *   [ ] Register kernels and integrate with the dispatch system to launch on the correct `CudaStream`.
+            *   [ ] Add comprehensive tests comparing GPU results with CPU, specifically testing various broadcasting scenarios and memory layouts **(after stream synchronization)**.
+            *   [ ] Add `rustdoc`.
+        *   **Step 3.B.5: Implement `matmul_op` on GPU using cuBLAS (Context/Stream Aware)**
+            *   🎯 **Goal:** Leverage cuBLAS for high-performance matrix multiplication, ensuring proper context and stream management.
+            *   [ ] Ensure **cuBLAS context/handle management** is integrated (`cublasCreate_v2`, `cublasDestroy_v2`), likely managed per-device.
+            *   [ ] **Explicitly associate cuBLAS calls with the correct `CudaStream`** using `cublasSetStream_v2`.
+            *   [ ] Implement `matmul_op` dispatch for CUDA tensors using `cublasSgemm`/`cublasDgemm`.
+            *   [ ] Handle row-major vs column-major layout conversions if NeuraRust uses row-major by default.
+            *   [ ] Add tests comparing GPU matmul results with CPU reference **(after stream synchronization)** for various matrix dimensions and transpositions.
+            *   [ ] Add `rustdoc`.
+        *   **Step 3.B.6: Implement Reduction Ops on GPU (Custom Kernels or Thrust, Stream-Aware)**
+            *   🎯 **Goal:** Provide GPU accelerated reduction operations, leveraging libraries like Thrust where appropriate.
+            *   [ ] **Option A (Custom Kernels):** Write efficient CUDA C++ reduction kernels (e.g., for `sum`, `mean`, `max`, `min`). Needs careful handling of parallelism and potential shared memory usage.
+            *   [ ] **Option B (Thrust Integration):** Integrate the Thrust library (often bundled with CUDA). Use Thrust algorithms (e.g., `thrust::reduce`, `thrust::max_element`) for implementing reductions. Requires setting Thrust execution policy to use the correct `CudaStream`.
+            *   [ ] Choose A or B (or a mix) based on complexity vs performance needs.
+            *   [ ] Ensure implementations support different DTypes, reduction along specific axes (`dim`), and `keepdim`.
+            *   [ ] Integrate with the dispatch system to launch kernels/Thrust calls on the correct `CudaStream`.
+            *   [ ] Add tests comparing GPU reductions with CPU reference for various dtypes, axes, and `keepdim` settings **(after stream synchronization)**.
+            *   [ ] Add `rustdoc`.
+        *   **Step 3.B.7: Implement View Operations on GPU (Metadata & Stream-Aware Copy)**
+            *   🎯 **Goal:** Ensure view operations work correctly for GPU tensors, triggering stream-aware copies only when necessary.
+            *   [ ] `reshape`, `permute`, `slice`, `transpose`, `expand`, `squeeze`, `unsqueeze`: Ensure these primarily modify `TensorData` metadata (`shape`, `strides`) and work correctly when the underlying buffer is a `CudaBuffer`.
+            *   [ ] `contiguous_op`: If a GPU tensor (`TensorData` referencing a `CudaBuffer`) is not contiguous (`is_contiguous()` is false), this operation **must trigger a device-to-device copy using an efficient custom kernel or `cuMemcpyDtoDAsync_v2`**, launched on the provided `CudaStream`, to create a new contiguous `CudaBuffer`.
+            *   [ ] Add tests for all view ops on GPU tensors, ensuring metadata changes are correct and that `contiguous_op` produces a correct, contiguous copy on the GPU **(verified after stream synchronization)**.
+            *   [ ] Add `rustdoc` clarifying the behavior of view ops on GPU and when copies occur.
+        *   **Step 3.B.8: Implement In-Place Operations on GPU (Stream-Aware, CoW Safe)**
+            *   🎯 **Goal:** Enable in-place modification of GPU tensors, respecting autograd's Copy-on-Write needs and using streams.
+            *   [ ] Adapt element-wise GPU kernels (`add`, `mul`, etc.) to have in-place versions that write back to the input buffer.
+            *   [ ] Integrate these in-place kernels with the dispatch system and launch them on the appropriate `CudaStream`.
+            *   [ ] **Crucially, ensure the Copy-on-Write (CoW) logic within `Tensor`'s in-place methods (`add_`, `mul_`, etc.) correctly handles `CudaBuffer`s.** If an in-place modification is requested on a tensor that requires CoW (multiple views, requires grad and part of graph), it must first trigger a **stream-aware** copy (`contiguous_op` or similar D2D copy) before applying the in-place kernel to the *new* buffer.
+            *   [ ] Ensure standard autograd checks (preventing modification of graph intermediates needed for backward) are performed before attempting the GPU in-place kernel or CoW.
+            *   [ ] Add tests specifically for in-place GPU ops: correctness of modification, stream awareness, and **correct CoW behavior on GPU (verifying data isolation after modification) following synchronization**.
+        *   **Step 3.B.9: Integrate Core CUDA Libraries (cuBLAS, cuDNN, Thrust)**
+            *   🎯 **Goal:** Formalize the integration approach for core CUDA libraries, ensuring proper resource management and stream association.
+            *   [ ] **cuBLAS:** Confirm robust handle management (per-device) and consistent `cublasSetStream_v2` usage before calls (as done in 3.B.5).
+            *   [ ] **cuDNN:**
+                *   [ ] Integrate library bindings.
+                *   [ ] Implement robust handle management (`cudnnCreate`, `cudnnDestroy`, per-device).
+                *   [ ] **Consistently use `cudnnSetStream`** before any cuDNN call that should operate on a specific stream.
+                *   [ ] Use cuDNN for initial ops if beneficial and simple (e.g., activations `cudnnActivationForward`, potentially pooling `cudnnPoolingForward` in Phase 4), even if full layer support comes later. Document which ops use it.
+            *   [ ] **Thrust:** If used (e.g., for reductions in 3.B.6), ensure execution policies correctly target the desired `CudaStream`.
+            *   [ ] **General:** Design library integration with modularity in mind, allowing potential future additions (e.g., cuSPARSE, CUTLASS) without major refactoring. Ensure clear fallback mechanisms (to custom kernels or CPU) if a library is unavailable or fails.
+            *   [ ] Add basic tests for handle creation/destruction and stream association for each integrated library.
+            *   [ ] Add `rustdoc` outlining the integration strategy for each library.
+        *   **Step 3.B.10: GPU Operator Benchmarking Framework & Initial Results**
+            *   🎯 **Goal:** Establish a framework for benchmarking GPU operations and gather initial performance data.
+            *   [ ] Create a dedicated benchmarking suite (e.g., using `criterion.rs` adapted for CUDA, or a custom runner in `examples/gpu_benchmarks.rs`).
+            *   [ ] **Ensure proper CUDA synchronization (`cudaDeviceSynchronize` or event/stream sync)** before stopping timers to measure GPU execution time accurately.
+            *   [ ] Benchmark key implemented GPU ops (matmul, element-wise, reductions) against their CPU counterparts for a range of input sizes and DTypes (F32/F64).
+            *   [ ] (Optional) Compare with PyTorch GPU performance for the same operations if feasible.
+            *   [ ] Document the benchmarking setup and initial findings in the repository (e.g., `benchmarks/README.md`).
+        *   **Step 3.B.11: Create GPU Operations Example (Showcasing Integration)**
+            *   🎯 **Goal:** Demonstrate core tensor operations running on the GPU, highlighting library usage and stream awareness.
+            *   [ ] Create `examples/gpu_operations_example.rs`.
+            *   [ ] Create tensors directly on GPU or move from CPU using `to()`.
+            *   [ ] Showcase element-wise ops (unary & binary) using custom kernels.
+            *   [ ] Showcase `matmul_op` explicitly mentioning cuBLAS usage.
+            *   [ ] Showcase a reduction op mentioning Thrust or custom kernel usage.
+            *   [ ] **Demonstrate launching ops on a specific stream** and retrieving results to CPU **after explicit synchronization** (`stream.synchronize()` or `tensor.synchronize()`). Verify correctness against CPU.
+            *   [ ] Ensure the example runs and outputs verified results.
+            *   [ ] Add to `Cargo.toml` and document the example, explaining which backend (custom kernel, cuBLAS, Thrust) is used for each showcased op.
+        *   **Step 3.B.12: Validation, Profiling & Debugging Infrastructure (Foundational)**
+            *   🎯 **Goal:** Implement foundational mechanisms for validating GPU operations and enabling basic profiling and debugging.
+            *   [ ] **Cross-Validation:** Systematically ensure all GPU op tests compare results bit-by-bit (or within tolerance for floats) against CPU implementations. Add infrastructure (macros?) to simplify writing these validation tests.
+            *   [ ] **Profiling Hooks:** Integrate basic profiling using `CudaEvent`s (from 3.A.2). Add internal hooks around kernel launches and library calls to record start/end events on the relevant stream. Provide an API to enable/disable this profiling and retrieve timing results (e.g., `get_last_op_times()`).
+            *   [ ] **Debugging:** Ensure robust error propagation from kernel launches and library calls back to `NeuraRustError` (as started in 3.A.1). Enhance the debug logging mechanism to optionally include kernel launch parameters (grid/block dims) and stream IDs.
+            *   [ ] Add tests for the basic profiling mechanism (retrieving plausible times) and error propagation tests for kernel launch failures.
+            *   [ ] Add `rustdoc` explaining the validation strategy, how to use basic profiling, and debugging tips for GPU errors.
 
-🎯 **Goal:**  
-Establish a solid abstraction for the CUDA backend, enabling efficient device, memory, stream, error, and transfer management, while preparing for future extension to other backends (ROCm, Metal, etc.).
-The architecture must be modular, testable, thread-safe, and allow for advanced features (profiling, multi-GPU, hooks, etc.).
+*   **Sub-Phase 3.C: Autograd, Device Management & End-to-End GPU Training (Enriched)**
+    *   🎯 **Goal:** Ensure the autograd system is fully GPU-aware (asynchronous, correct device placement for gradients), adapt NN components for robust device placement and management, and culminate in an end-to-end GPU training example showcasing stream-aware asynchronous execution.
+    *   **Detailed Steps:**
+        *   **Step 3.C.1: GPU-Aware Autograd Engine (Stream-Aware, Device-Correct)**
+            *   🎯 **Goal:** Enable gradient computation for operations involving GPU tensors, ensuring asynchronous execution on streams and correct device placement for all gradient-related data.
+            *   [ ] **BackwardOp for GPU Ops:**
+                *   [ ] Each `BackwardOp` implementation corresponding to a GPU-accelerated forward operation **must produce gradient tensors on the correct GPU device** (same device as the output of the forward op, or as inputs if appropriate).
+                *   [ ] The backward operations themselves (e.g., GPU kernels for gradient computation) **must execute on the same `CudaStream` as the forward operation or a designated backward stream, respecting dependencies.**
+            *   [ ] **Gradient Accumulation on GPU:**
+                *   [ ] `tensor.acc_grad()` for a `Tensor` whose data is on a CUDA device **must use a dedicated GPU kernel for accumulation**. This kernel should be stream-aware and handle accumulation in-place on the GPU.
+            *   [ ] **Autograd Graph Execution:**
+                *   [ ] Ensure that `loss.backward()` calls involving GPU tensors correctly chain backward operations on their respective streams. **The autograd engine must manage stream dependencies correctly (e.g., using `CudaEvent`s) to ensure a backward op only runs after its necessary inputs (gradients from subsequent ops) are available.**
+                *   [ ] Handle mixed-device computation graphs: Gradients should flow back to the device of the original parameter. Support for this should be robust, potentially erroring on complex unsupported mixed-device scenarios initially.
+            *   [ ] **Memory Management for Autograd Intermediates:**
+                *   [ ] Ensure intermediate activations saved for the backward pass are stored on the correct device (GPU if forward op was on GPU).
+                *   [ ] Implement mechanisms to release this GPU memory as soon as it's no longer needed by the autograd graph (potentially hooks in `BackwardOp` or when nodes are consumed).
+            *   [ ] Add comprehensive tests comparing GPU autograd results with CPU reference results **(after full graph synchronization)**. Test various graph structures, including those with shared tensors and multiple outputs. **Test gradient accumulation on GPU.**
+            *   [ ] Add `rustdoc` detailing how autograd interacts with CUDA streams, device placement of gradients, and memory management for GPU autograd.
+        *   **Step 3.C.2: Device Context Manager & Tensor Allocation Rules (Enhanced)**
+            *   🎯 **Goal:** Implement a robust mechanism to set a default CUDA device for tensor allocations and establish clear tensor creation rules respecting this context.
+            *   [ ] Design a `DeviceScope` struct (e.g., `cuda::device(device_id) -> DeviceScopeGuard`) or `with_device(device: StorageDevice, closure: F)` function.
+                *   [ ] When active, **all new Tensors created without an explicit device argument** (e.g., `Tensor::new_zeros(shape, dtype)`) are allocated on this default device (CPU or specific CUDA device).
+                *   [ ] This should use **thread-local storage** to manage a stack of active device contexts, allowing for nested scopes.
+            *   [ ] **Refine Tensor Creation Functions:**
+                *   [ ] Functions like `zeros`, `ones`, `rand`, etc., should have an optional `device: Option<StorageDevice>` argument.
+                *   [ ] If `device` is `Some`, allocate there.
+                *   [ ] If `device` is `None`, allocate based on the current `DeviceScope`. If no scope, default to CPU.
+                *   [ ] `*_like(other_tensor)` creation functions should default to `other_tensor.device()`.
+            *   [ ] Add tests for tensor allocation respecting `DeviceScope` (nested scopes, multi-threaded scenarios, interaction with `*_like` and explicit device args).
+            *   [ ] Add `rustdoc` for `DeviceScope` and the device resolution logic in tensor creation functions.
+        *   **Step 3.C.3: Device Placement for NN Modules and Parameters (Stream-Aware `to()`, Robust)**
+            *   🎯 **Goal:** Allow moving entire NN modules to a specific device, using stream-aware tensor copies and ensuring all parameters/buffers are correctly moved.
+            *   [ ] Implement `Module::to(&mut self, device: StorageDevice, stream: Option<&CudaStream>)`.
+                *   [ ] This method should iterate through all `Parameter`s and registered (persistent) buffers of the module (and its sub-modules recursively).
+                *   [ ] For each tensor, it should call the **stream-aware `Tensor::to(device, stream_for_tensor_copy)`** (from 3.A.4), ensuring the tensor data is moved to the target device. The `stream` argument to `Module::to` could be used for all these copies.
+            *   [ ] **Handle non-parameter tensors within modules:** If modules have other `Tensor` members that are not parameters or registered buffers, document that users are responsible for moving them or adapt `Module::to` if a generic way to discover them is feasible (less likely).
+            *   [ ] Ensure device consistency: After `Module::to`, all parameters and buffers of the module must reside on the target device.
+            *   [ ] Add tests for moving modules (e.g., `SimpleMLP`) to GPU and back to CPU, verifying that all parameters and buffers are on the correct device and their data is intact **(after stream synchronization for all copies)**. Test with nested modules.
+            *   [ ] Add `rustdoc` for `Module::to`, explaining its behavior, stream usage, and what it covers (parameters, buffers).
+        *   **Step 3.C.4: Optimizer Support for GPU Parameters (Stream-Aware Updates)**
+            *   🎯 **Goal:** Adapt optimizers to handle parameters and states residing on GPU, performing updates using GPU kernels on appropriate streams.
+            *   [ ] **Optimizer State Placement:** All optimizer state (e.g., momentum buffers for SGD, `m` and `v` for Adam) must be allocated on the **same device as the parameters they correspond to**. If a parameter is on GPU, its state should also be on GPU.
+            *   [ ] **GPU-Accelerated Updates:** The `step()` method of optimizers, when updating GPU parameters, **must use GPU kernels for the update logic** (e.g., `param_gpu = param_gpu - lr * grad_gpu`). These kernels must be stream-aware, operating on the stream associated with the parameter/gradient computation or a designated optimizer stream.
+            *   [ ] `Optimizer::zero_grad()`: If parameters are on GPU, their gradients (which are also on GPU) should be zeroed out using a GPU kernel (e.g., `cudaMemsetAsync` or a custom fill kernel on the appropriate stream).
+            *   [ ] Handle mixed-device parameters within an optimizer group (ideally error out or warn, as this is complex; focus on homogeneous device groups first).
+            *   [ ] Add tests for optimizers (e.g., SGD, Adam) updating parameters located on the GPU. Verify parameter values are correct **after stream synchronization**. Test state allocation on GPU.
+            *   [ ] Add `rustdoc` explaining how optimizers handle GPU parameters and state.
+        *   **Step 3.C.5: End-to-End GPU Training Loop Example (Stream-Aware, Asynchronous Focus)**
+            *   🎯 **Goal:** Create a new example demonstrating a complete, asynchronous training loop on a GPU, highlighting stream usage and performance considerations.
+            *   [ ] Create `examples/basic_mlp_gpu_async.rs` (or significantly update any existing `basic_mlp_gpu.rs`).
+            *   [ ] **Device Setup:**
+                *   [ ] Use `DeviceScope` (from 3.C.2) to set the default device to a CUDA device.
+                *   [ ] Instantiate the model (e.g., `SimpleMLP`) and then move it to the GPU using `model.to(cuda_device, Some(&data_transfer_stream))`.
+                *   [ ] Instantiate the loss function (if it has parameters, also move to GPU).
+            *   [ ] **Data Loading:**
+                *   [ ] Create synthetic data (CPU tensors).
+                *   [ ] **In the training loop, for each batch:**
+                    *   [ ] Asynchronously copy input data and labels to the GPU using `batch_x.to(cuda_device, Some(&data_transfer_stream))` and `batch_y.to(cuda_device, Some(&data_transfer_stream))`.
+            *   [ ] **Asynchronous Training Steps:**
+                *   [ ] Define separate `CudaStream`s if desired (e.g., one for data H2D copies, one for compute FWD/BWD, one for D2H results). Or use the default stream.
+                *   [ ] **Forward Pass:** `output = model.forward(&batch_x_gpu)?`. This should use the compute stream internally if ops are stream-aware.
+                *   [ ] **Loss Calculation:** `loss = loss_fn.forward(&output, &batch_y_gpu)?`. Also on compute stream.
+                *   [ ] **Backward Pass:** `loss.backward()?`. This internally triggers GPU autograd ops on their respective streams.
+                *   [ ] **Optimizer Step:** `optimizer.step()?`. This triggers GPU parameter updates on their streams.
+                *   [ ] `optimizer.zero_grad()?`.
+            *   [ ] **Synchronization & Logging:**
+                *   [ ] To log loss: copy the scalar loss tensor to CPU: `loss_cpu = loss.to(CPU, Some(&results_stream))?`. Then, `results_stream.synchronize()` before calling `loss_cpu.item()`.
+                *   [ ] **Demonstrate potential for overlapping**: e.g., while current batch computes, next batch's data can be pre-fetched/copied to GPU if using separate streams and careful event dependencies. (This might be too advanced for a *basic* example, but mention the possibility).
+            *   [ ] Ensure the example runs, trains successfully on GPU (loss decreases), and outputs sensible loss values.
+            *   [ ] Add to `Cargo.toml`.
+            *   [ ] **Document the example thoroughly**: Explain stream usage, data transfer patterns, synchronization points, and how asynchronicity is managed. Highlight the difference between host-side blocking and device-side asynchronous execution.
+        *   **Step 3.C.6: (Foundation) Mixed Precision Training (AMP) - Initial DType & Casting Support for GPU**
+            *   🎯 **Goal:** Lay the absolute groundwork for future AMP by ensuring basic F16/BF16 DType representation and casting to/from F32 on GPU.
+            *   [ ] Add `DType::F16` (and optionally `DType::BF16` if bindings/kernels are readily available) to the core `DType` enum.
+            *   [ ] For `CudaBuffer`, ensure it can represent these DTypes.
+            *   [ ] Implement `Tensor::cast(new_dtype)` for GPU tensors to support casting between F32 and F16 (and BF16 if added). This will require a **GPU kernel for type casting** (e.g., `float2half_kernel`, `half2float_kernel`).
+            *   [ ] **No `GradScaler` or `autocast` context in this phase.** This is purely about having the DTypes and basic casting ops available on GPU. Full AMP is Phase 5.
+            *   [ ] Add tests for GPU `Tensor::cast()` to/from F16 (and BF16) ensuring data integrity (within precision limits) after round trip cast and stream synchronization.
+            *   [ ] Add `rustdoc` for the new DTypes (mentioning limited GPU op support initially) and GPU `cast` functionality.
 
-### Step 3.A.1: CUDA Bindings, Context & Device Management
-- [✅] **Encapsulate the CUDA binding** (`rustacuda`, `cuda-rs`, etc.) in an internal module (`cuda_api`) to ease replacement or evolution.
-- [✅] **Explicit, idempotent CUDA runtime initialization** (thread-safe, multi-init safe).
-- [✅] **Centralized CUDA context management:**
-    - [✅] Creation, activation, explicit destruction of contexts.
-    - [✅] Multi-device support (one context per device, device_id → context mapping).
-    - [✅] Thread-local or scope-based context switching (inspired by `torch.cuda.device`).
-    - [✅] Unit and robustness tests (context leak, double init, etc.).
-- [✅] **Device management:**
-    - [✅] Enumeration, selection, property query (name, memory, compute capability, etc.).
-    - [✅] API to list available devices, set/get current device, etc.
-    - [✅] Expose a rich `CudaDevice` struct (properties, state, etc.).
-    - [✅] Robustness tests (device unavailable, OOM, etc.).
-- [✅] **CUDA error handling:**
-    - [✅] Exhaustive mapping of CUDA errors to `NeuraRustError` (with explicit messages).
-    - [✅] Add debug/verbose mode to log CUDA errors and critical calls.
-    - [✅] Unit tests for each common error type (device unavailable, OOM, etc.).
-    - [✅] Clear documentation on CUDA error handling.
+*   **Phase 3 Notes:**
+    *   *This phase introduces significant complexity due to CUDA interop, memory management across devices, and kernel writing/integration. Focus on correctness and then performance.*
+    *   *Thorough testing comparing GPU results with CPU results is crucial for every implemented operation and for autograd. Synchronization is key for correct testing of async ops.*
+    *   *Initial focus should be on F32 DType for most GPU kernels, then F64. Integer/Boolean DTypes on GPU are lower priority for this phase.*
+    *   *Performance benchmarking (CPU vs GPU, and vs PyTorch if possible) should be an ongoing effort, guided by the new benchmarking framework (3.B.10).*
+    *   *Error handling for CUDA API calls must be robust and mapped to `NeuraRustError`. GPU OOM errors should be handled gracefully where possible.*
+    *   *The caching memory allocator (3.A.3) and asynchronous operations (via streams) are key for GPU performance.*
+    *   *Foundational cuDNN integration (3.B.9) prepares for advanced NN layers in Phase 4.*
+    *   *Intermediate examples (3.A.5, 3.B.11) help validate GPU backend and core operations before the full training loop (3.C.5).*
+    *   *Backend Abstraction Note: While Phase 3 focuses on CUDA, the design of `StorageDevice`, `Buffer`, and operation dispatch should eventually evolve towards a more generic backend trait system to facilitate future support for other accelerators (e.g., ROCm, Metal). This is a major architectural refactoring considered for post-Phase 5 iterations.*
 
-### Step 3.A.2: CUDA Stream & Event Management (Asynchrony & Profiling)
-- [✅] **CUDA stream abstraction:**
-    - [✅] `CudaStream` struct (wrapper around `CUstream`), clonable, shareable.
-    - [✅] Creation, destruction, synchronization, flag management (blocking/non-blocking).
-    - [✅] Default stream per thread and per device (thread-local).
-    - [✅] API to get current stream, create new ones, etc.
-    - [✅] Stream priority support (if supported by device).
-- [✅] **CUDA event management:**
-    - [✅] `CudaEvent` struct (wrapper around `CUevent`).
-    - [✅] Creation, destruction, recording, synchronization, timing.
-    - [✅] Integration with streams for fine synchronization.
-- [✅] **Profiling and hooks:**
-    - [✅] Add a hook/profiler system to measure kernel/transfer execution time, etc.
-    - [✅] API to register callbacks on streams/events.
-- [✅] **Unit and robustness tests:**
-    - [✅] Massive creation/destruction of streams/events.
-    - [✅] Cross-synchronization, deadlocks, etc.
-    - [✅] Latency and throughput measurement for streams.
-
-### Step 3.A.3: Memory Management & Caching Allocator (PyTorch-like)
-- [✅] **Implement a global thread-safe CUDA memory caching allocator** (PyTorch-inspired):
-    - [✅] Intercept all allocation/free calls (`cuMemAlloc_v2`, `cuMemFree_v2`).
-    - [✅] Pools of free blocks by size and device.
-    - [✅] Block reuse, fine cache management (memory limit, cache clearing, etc.).
-    - [ ] (Optional) Free block coalescing to reduce fragmentation.
-    - [ ] (Optional) Memory usage statistics, monitoring hooks.
-    - [ ] (Optional) Unified Memory and pinned memory support for fast transfers.
-- [ ] **`CudaBuffer` abstraction:**
-    - [ ] Opaque, non-copyable struct managing device pointer lifetime.
-    - [ ] Integration with the caching allocator.
-    - [ ] API to get raw pointer, size, device, etc.
-    - [ ] Support for async operations (copy, set, etc.) via stream.
-    - [ ] Robustness tests (double free, memory leak, etc.).
-- [ ] **Integration with high-level structures:**
-    - [ ] Add `Buffer::Cuda(CudaBuffer)` variant in the core.
-    - [ ] Support `StorageDevice::Cuda(device_id)`.
-    - [ ] Integrate with `TensorData` and related methods.
-    - [ ] Integration tests (Tensor → GPU, GPU → Tensor, etc.).
-- [ ] **Documentation and examples:**
-    - [ ] Detailed rustdoc for allocator, buffer, invariants.
-    - [ ] Advanced usage examples (profiling, cache clearing, etc.).
-
-### Step 3.A.4: Data Transfer & Device Placement (CPU <-> GPU, Multi-GPU)
-- [ ] **Data transfer API:**
-    - [ ] `Tensor::to(device, stream)` to transfer tensors between CPU and GPU (and between GPUs).
-    - [ ] Async transfers via stream (`cuMemcpyAsync`).
-    - [ ] Synchronization management (explicit wait, hooks, etc.).
-    - [ ] Support for slice/view transfers.
-    - [ ] Transfer error handling (OOM, device mismatch, etc.).
-- [ ] **Current device and scope management:**
-    - [ ] API to set default device in a scope (`with_device` or thread-local).
-    - [ ] Automatic allocation on the correct device according to context.
-    - [ ] Robustness tests (multi-thread, multi-device).
-- [ ] **Multi-GPU support:**
-    - [ ] Allocation, transfer, and execution on multiple GPUs in the same process.
-    - [ ] API for tensor scatter/gather, etc.
-    - [ ] Multi-GPU usage examples.
-- [ ] **Tests and documentation:**
-    - [ ] Transfer integrity tests (round-trip CPU→GPU→CPU).
-    - [ ] Rustdoc and usage examples.
-
-### Step 3.A.5: Backend Modularity & Extensibility
-- [ ] **Backend abstraction:**
-    - [ ] Define a `Backend` trait (or equivalent) to allow other backends (ROCm, Metal, etc.).
-    - [ ] Generic API for device, memory, stream, transfer management.
-    - [ ] Clear separation between CUDA-specific and generic code.
-    - [ ] Prepare for future backend integration without breaking the API.
-- [ ] **Non-regression and compatibility tests:**
-    - [ ] Ensure adding a backend does not impact CUDA backend stability.
-    - [ ] Extension examples (mock backend, CPU-only, etc.).
-- [ ] **Architecture documentation:**
-    - [ ] Diagrams and explanations on backend modularity.
-
-### Step 3.A.6: Robustness, Profiling & Advanced Debugging
-- [ ] **Advanced error handling** (see 3.D.1, but start here):
-    - [ ] Exhaustive CUDA error mapping, clear propagation through the stack.
-    - [ ] Debug tools (context dump, detailed logs, etc.).
-- [ ] **Memory and execution time profiling:**
-    - [ ] API to measure memory usage, fragmentation, kernel/transfer execution time.
-    - [ ] Integration with streams/events for fine profiling.
-    - [ ] Profiling usage examples.
-- [ ] **Stress and fuzz testing:**
-    - [ ] Intensive tests on memory management, transfers, context/stream creation/destruction.
-    - [ ] Bug/crash reports.
-    - [ ] Test methodology documentation.
-
-### **Key points to reinforce (vs. initial version):**
-- **Modularity:** Everything must be designed for future backend addition and evolution.
-- **Robustness:** Error handling, stress tests, debug/profiling hooks.
-- **Performance:** Memory cache, async transfers, multi-GPU, streams/events.
-- **Documentation:** Rustdoc, architecture guides, advanced examples.
-- **Testing:** Unit, integration, stress, multi-thread/multi-device.
-
-*   **Sub-Phase 3.B: GPU Kernels & Operations Integration (Revised & Enhanced)**
-
-🎯 **Goal:**  
-Implement a modular, high-performance, and extensible system for GPU-accelerated tensor operations, supporting custom CUDA kernels, library integration (cuBLAS, cuDNN, Thrust), dynamic dispatch, and robust validation against CPU reference implementations.
-
-### Step 3.B.1: Build System & Kernel Management
-- [ ] **Flexible build system for CUDA kernels:**
-    - [ ] Support for both static (build.rs + cc crate) and JIT (runtime) compilation of `.cu` files.
-    - [ ] Automatic detection of CUDA architecture and PTX compatibility.
-    - [ ] Hot-reload or dynamic loading of kernels for rapid development.
-    - [ ] Versioning and compatibility checks for kernels.
-    - [ ] Unit tests for kernel compilation, loading, and error handling.
-- [ ] **Kernel registry and management:**
-    - [ ] Central registry for all available GPU kernels (by op, dtype, shape, etc.).
-    - [ ] API for registering, querying, and launching kernels.
-    - [ ] Support for multiple kernel variants per op (e.g., optimized for different shapes or dtypes).
-    - [ ] Hooks for custom user kernels (plugin system).
-    - [ ] Documentation and examples for kernel registration and usage.
-
-### Step 3.B.2: GPU Kernel Launch Utilities & Dispatch
-- [ ] **Unified kernel launch API:**
-    - [ ] Macro or function (e.g., `launch_kernel!`) to abstract `cuLaunchKernel` calls.
-    - [ ] Automatic argument packing, grid/block calculation, and error checking.
-    - [ ] Support for stream-aware launches and shared memory configuration.
-    - [ ] Dynamic dispatch based on tensor device, dtype, and shape.
-    - [ ] Fallback to CPU implementation if GPU kernel is unavailable or fails.
-- [ ] **Dynamic op dispatch system:**
-    - [ ] Central dispatch for all tensor ops (unary, binary, reduction, etc.) based on device and dtype.
-    - [ ] Easy extension for new ops and kernels.
-    - [ ] Support for mixed-device and mixed-dtype operations (with clear promotion rules).
-    - [ ] Unit and integration tests for dispatch logic.
-
-### Step 3.B.3: Element-wise & Broadcasted Operations
-- [ ] **Element-wise unary ops (e.g., neg, relu, exp, log):**
-    - [ ] Custom CUDA kernels for F32, F64 (and later Int/Bool).
-    - [ ] Stream-aware, support for non-contiguous and broadcasted tensors.
-    - [ ] Validation against CPU reference.
-    - [ ] Profiling and performance tests.
-- [ ] **Element-wise binary ops (e.g., add, sub, mul, div, pow):**
-    - [ ] Custom CUDA kernels with broadcasting support.
-    - [ ] Support for all relevant dtypes and mixed-dtype promotion.
-    - [ ] Stream-aware, efficient memory access patterns.
-    - [ ] Validation and performance tests.
-- [ ] **Scalar-tensor ops:**
-    - [ ] Efficient kernels for tensor + scalar, scalar * tensor, etc.
-    - [ ] Support for all dtypes.
-    - [ ] Tests and benchmarks.
-
-### Step 3.B.4: Matrix & Linear Algebra Operations
-- [ ] **Matrix multiplication (matmul, gemm):**
-    - [ ] Integration with cuBLAS for F32/F64 (and later Int/Bool if supported).
-    - [ ] Stream-aware, handle row/column-major layouts.
-    - [ ] Fallback to custom kernel if cuBLAS is unavailable.
-    - [ ] Validation against CPU and PyTorch.
-    - [ ] Performance benchmarks.
-- [ ] **Batched matmul and advanced linalg ops:**
-    - [ ] Support for batched matmul, transpose, etc.
-    - [ ] Integration with cuBLAS and custom kernels.
-    - [ ] Tests and documentation.
-
-### Step 3.B.5: Reduction & Scan Operations
-- [ ] **Reduction ops (sum, mean, max, min, prod, etc.):**
-    - [ ] Custom CUDA kernels and/or Thrust integration.
-    - [ ] Support for all dtypes, axes, and keepdim.
-    - [ ] Stream-aware, efficient for large and small tensors.
-    - [ ] Validation and performance tests.
-- [ ] **Scan/Prefix-sum ops:**
-    - [ ] Thrust or custom kernel integration.
-    - [ ] Tests and benchmarks.
-
-### Step 3.B.6: View, Indexing & Memory Ops
-- [ ] **View ops (reshape, permute, slice, expand, squeeze, etc.):**
-    - [ ] Metadata-only for most, but `contiguous` triggers a GPU copy kernel if needed.
-    - [ ] Stream-aware, efficient memory layout handling.
-    - [ ] Tests for all view ops on GPU tensors.
-- [ ] **Indexing ops (index_select, masked_select, gather, scatter, etc.):**
-    - [ ] Custom kernels for advanced indexing.
-    - [ ] Support for all dtypes and broadcasted indices/masks.
-    - [ ] Validation and performance tests.
-- [ ] **Memory ops (copy, fill, zero, set):**
-    - [ ] Efficient device-to-device and host-device copy kernels.
-    - [ ] Stream-aware, support for async and sync copies.
-    - [ ] Tests and benchmarks.
-
-### Step 3.B.7: In-place & Mutating Operations
-- [ ] **In-place element-wise ops (add_, mul_, etc.):**
-    - [ ] Custom kernels for in-place modification.
-    - [ ] Copy-on-write logic for autograd compatibility.
-    - [ ] Stream-aware, robust error handling.
-    - [ ] Tests for in-place ops and CoW behavior.
-- [ ] **In-place view and indexing ops:**
-    - [ ] In-place scatter, masked_fill_, etc.
-    - [ ] Tests and validation.
-
-### Step 3.B.8: Library Integration (cuBLAS, cuDNN, Thrust, etc.)
-- [ ] **cuBLAS integration:**
-    - [ ] Context and handle management, stream association.
-    - [ ] Use for matmul, gemm, and other supported ops.
-    - [ ] Fallback to custom kernels if needed.
-- [ ] **cuDNN integration:**
-    - [ ] Context and handle management, stream association.
-    - [ ] Use for activations, convolutions, batchnorm, etc.
-    - [ ] Fallback to custom kernels if needed.
-- [ ] **Thrust integration:**
-    - [ ] Use for reductions, scans, and other supported ops.
-    - [ ] Fallback to custom kernels if needed.
-- [ ] **Extensibility for future libraries (CUTLASS, etc.):**
-    - [ ] Modular design to allow easy integration of new libraries.
-
-### Step 3.B.9: Validation, Profiling & Debugging
-- [ ] **Cross-validation with CPU and PyTorch:**
-    - [ ] Automated tests comparing GPU and CPU results for all ops.
-    - [ ] Optional comparison with PyTorch for reference.
-- [ ] **Profiling and benchmarking:**
-    - [ ] API and tools to measure kernel execution time, memory throughput, occupancy, etc.
-    - [ ] Integration with CUDA events and streams for fine-grained profiling.
-    - [ ] Benchmarks for all major ops (vs. CPU and PyTorch).
-- [ ] **Debugging and error handling:**
-    - [ ] Robust error propagation from kernels to Rust.
-    - [ ] Logging, kernel launch validation, and debug hooks.
-    - [ ] Tools for inspecting device memory, kernel parameters, etc.
-
-### Step 3.B.10: Documentation, Examples & Extensibility
-- [ ] **Comprehensive rustdoc for all GPU ops and kernel APIs.**
-- [ ] **Examples for custom kernel registration, advanced usage, and performance tuning.**
-- [ ] **Guides for adding new GPU ops/kernels, integrating new libraries, and extending the dispatch system.**
-- [ ] **Unit, integration, and stress tests for all GPU ops.**
-
-### **Key points to reinforce:**
-- **Performance:** All kernels and dispatch must be optimized for throughput, memory access, and asynchrony.
-- **Modularity:** Easy to add new ops, dtypes, and libraries; clear separation CPU/GPU; plugin system for custom kernels.
-- **Robustness:** Fallbacks, error handling, validation, and extensive testing.
-- **Extensibility:** Designed for future ops, dtypes, and hardware.
-- **Profiling & Debug:** Built-in tools for performance analysis and debugging.
-
-*   **Sub-Phase 3.C: Autograd, Device Management & End-to-End GPU Training (Revised & Enhanced)**
-
-🎯 **Goal:**  
-Ensure the autograd system, device management, and training loop are fully GPU-aware, robust, and modular, enabling high-performance, asynchronous, and multi-device training, with an architecture inspired by PyTorch and ready for future extensibility.
-
-### Step 3.C.1: GPU-Aware Autograd Engine
-- [ ] **Autograd support for GPU tensors:**
-    - [ ] All backward ops must produce gradients on the correct device (CPU or GPU).
-    - [ ] Backward ops for GPU must be stream-aware and support asynchronous execution.
-    - [ ] Gradients for GPU tensors must be accumulated using GPU kernels (in-place, stream-aware).
-    - [ ] Support for mixed-device computation graphs (automatic device propagation, error on invalid mixes).
-    - [ ] Fallback to CPU autograd for unsupported GPU ops (with warning).
-    - [ ] Unit and integration tests for all autograd paths (CPU, GPU, mixed).
-- [ ] **Efficient memory management in autograd:**
-    - [ ] Release intermediate GPU memory as soon as possible (lifetime tracking, hooks).
-    - [ ] Option to keep or free the computation graph after backward (for higher-order gradients).
-    - [ ] Profiling and debugging tools for autograd memory usage.
-- [ ] **Hooks and extensibility:**
-    - [ ] Support for backward hooks (per-tensor, per-op) for debugging, logging, or custom logic.
-    - [ ] API for user-defined custom autograd functions (forward + backward, device-aware).
-    - [ ] Documentation and examples for custom autograd ops.
-
-### Step 3.C.2: Device Context & Placement Management
-- [ ] **Device context manager:**
-    - [ ] API to set the default device for tensor allocation within a scope (e.g., `with_device` or context manager).
-    - [ ] Thread-local device context for safe multi-threaded usage.
-    - [ ] Automatic device inference for new tensors (based on inputs, context, or explicit argument).
-    - [ ] Unit tests for device context switching, nested scopes, and multi-threading.
-- [ ] **Module and parameter device placement:**
-    - [ ] `Module::to(device, stream)` to move all parameters and buffers to the target device (stream-aware).
-    - [ ] Support for moving entire models between devices (CPU↔GPU, GPU↔GPU).
-    - [ ] Validation of device consistency for all parameters/buffers.
-    - [ ] Tests for module/device placement, including edge cases (partial move, shared params, etc.).
-- [ ] **Multi-device and distributed support:**
-    - [ ] API for model/data parallelism (scatter/gather, replication, etc.).
-    - [ ] Hooks for distributed training (future extensibility).
-    - [ ] Documentation and examples for multi-GPU usage.
-
-### Step 3.C.3: Optimizer & State Management for GPU
-- [ ] **GPU-aware optimizers:**
-    - [ ] All optimizer state (momentum, Adam buffers, etc.) must be allocated on the same device as the parameters.
-    - [ ] Optimizer steps for GPU parameters must use GPU kernels (in-place, stream-aware).
-    - [ ] Support for mixed-device models (error or warning on invalid mixes).
-    - [ ] Efficient state transfer when moving parameters between devices.
-    - [ ] Unit and integration tests for optimizer/device interaction.
-- [ ] **Learning rate schedulers and hooks:**
-    - [ ] Ensure all schedulers are device-agnostic and work with GPU models.
-    - [ ] Support for custom optimizer hooks (profiling, logging, etc.).
-    - [ ] Documentation and examples.
-
-### Step 3.C.4: End-to-End GPU Training Loop & Examples
-- [ ] **Stream-aware, asynchronous training loop:**
-    - [ ] All forward, backward, and optimizer steps should be able to run asynchronously on CUDA streams.
-    - [ ] Expose APIs for explicit stream synchronization (e.g., `tensor.synchronize()`, `stream.synchronize()`).
-    - [ ] Support for overlapping data transfer and computation (pipelining).
-    - [ ] Option to enable/disable asynchrony for debugging.
-- [ ] **Comprehensive training example:**
-    - [ ] Example script for end-to-end training on GPU (MLP, CNN, etc.).
-    - [ ] Demonstrate device placement, stream usage, and performance profiling.
-    - [ ] Show correct loss decrease and parity with CPU training.
-    - [ ] Example for multi-GPU training (if hardware available).
-    - [ ] Add to documentation and test suite.
-- [ ] **Validation and benchmarking:**
-    - [ ] Automated tests to compare CPU and GPU training results (accuracy, speed).
-    - [ ] Benchmarks for training speed, memory usage, and scaling (single/multi-GPU).
-    - [ ] Profiling tools for bottleneck analysis.
-
-### Step 3.C.5: Robustness, Profiling & Debugging
-- [ ] **Error handling and diagnostics:**
-    - [ ] Clear error messages for device mismatches, unsupported ops, and memory issues.
-    - [ ] Debug hooks for autograd, optimizer, and device placement.
-    - [ ] Tools to inspect computation graph, device placement, and memory usage.
-- [ ] **Profiling and logging:**
-    - [ ] Built-in support for timing, memory profiling, and operation logging (per op, per step).
-    - [ ] Integration with CUDA events and streams for fine-grained profiling.
-    - [ ] Examples and documentation for profiling tools.
-- [ ] **Stress and fuzz testing:**
-    - [ ] Intensive tests for autograd, optimizer, and training loop on GPU (random graphs, large models, etc.).
-    - [ ] Bug/crash reporting and test methodology documentation.
-
-### **Key points to reinforce:**
-- **Performance & Asynchrony:** All training steps must leverage CUDA streams, overlap, and efficient memory management.
-- **Modularity & Extensibility:** Device management, autograd, and optimizer logic must be backend-agnostic and easy to extend.
-- **Robustness:** Error handling, validation, and extensive testing for all device and autograd paths.
-- **Developer Experience:** Ergonomic APIs, clear error messages, profiling, and debugging tools.
-- **Documentation & Examples:** Comprehensive guides, examples, and tests for all features.
-
-*   **Sub-Phase 3.D: GPU Extensions & Robustness (Revised & Enhanced)**
-
-🎯 **Goal:**  
-Reinforce the robustness, flexibility, and extensibility of the CUDA backend, providing advanced error handling, profiling, multi-GPU support, interop, and monitoring tools, while making the system future-proof and developer-friendly.
-
-### Step 3.D.1: Advanced CUDA Error Handling
-- [ ] **Comprehensive CUDA error mapping:**
-    - [ ] Map all CUDA error codes to `NeuraRustError` with explicit, actionable messages.
-    - [ ] Include context (op, device, stream, kernel, etc.) in error reports.
-    - [ ] Support for error categories (OOM, launch failure, device lost, etc.).
-- [ ] **Error propagation and diagnostics:**
-    - [ ] Ensure all CUDA errors are propagated up the stack and never silently ignored.
-    - [ ] Add debug/verbose modes for detailed error logging (with stack traces, kernel params, etc.).
-    - [ ] Provide suggestions or links to documentation for common errors.
-- [ ] **Unit and integration tests:**
-    - [ ] Simulate and test all common CUDA error scenarios (device unavailable, OOM, launch failure, etc.).
-    - [ ] Ensure error messages are clear and actionable.
-- [ ] **Documentation:**
-    - [ ] Document all CUDA error types, their meaning, and recommended user actions.
-
-### Step 3.D.2: GPU Profiling, Synchronization & Monitoring
-- [ ] **Explicit synchronization APIs:**
-    - [ ] `Tensor::synchronize()`, `CudaStream::synchronize()`, and event-based sync.
-    - [ ] Support for fine-grained synchronization (per op, per stream, per event).
-    - [ ] Tests for correct synchronization and deadlock prevention.
-- [ ] **Profiling tools:**
-    - [ ] Built-in API for measuring kernel execution time, memory usage, and occupancy.
-    - [ ] Integration with CUDA events and streams for precise timing.
-    - [ ] Support for memory usage and fragmentation monitoring (per device, per op).
-    - [ ] Profiling hooks for user-defined callbacks.
-    - [ ] Example scripts for profiling and performance analysis.
-- [ ] **Monitoring and logging:**
-    - [ ] Real-time logging of GPU memory usage, allocation/free events, and kernel launches.
-    - [ ] API for querying current and peak memory usage, cache stats, and fragmentation.
-    - [ ] Option to enable/disable logging and monitoring at runtime.
-    - [ ] Documentation and examples for monitoring tools.
-
-### Step 3.D.3: Multi-GPU (Multi-Device) Support
-- [ ] **Multi-GPU memory and execution:**
-    - [ ] Support allocation and execution of tensors on multiple GPUs in the same process.
-    - [ ] APIs for device-to-device transfers, peer access, and collective operations.
-    - [ ] Efficient scatter/gather, broadcast, and reduce primitives.
-    - [ ] Device affinity and placement policies (manual and automatic).
-- [ ] **Multi-GPU synchronization and communication:**
-    - [ ] Support for CUDA peer-to-peer (P2P) memory access and synchronization.
-    - [ ] APIs for synchronizing across devices and streams.
-    - [ ] Tests for multi-GPU correctness and performance.
-- [ ] **Distributed and future-proofing:**
-    - [ ] Hooks for distributed training and communication (NCCL, MPI, etc.).
-    - [ ] Documentation and examples for multi-GPU and distributed usage.
-
-### Step 3.D.4: Advanced CUDA Streams & Events Management
-- [ ] **Multiple stream management:**
-    - [ ] APIs for creating, destroying, and managing multiple CUDA streams per device.
-    - [ ] Stream priorities, dependencies, and scheduling policies.
-    - [ ] Stream pools and reuse for efficient resource management.
-- [ ] **CUDA event management:**
-    - [ ] APIs for creating, recording, and synchronizing CUDA events.
-    - [ ] Event-based profiling and synchronization.
-    - [ ] Tests for event correctness and performance.
-- [ ] **Asynchronous execution and overlap:**
-    - [ ] Support for overlapping computation, data transfer, and kernel launches.
-    - [ ] Examples and benchmarks for async execution patterns.
-
-### Step 3.D.5: Interoperability with Other Frameworks
-- [ ] **DLPack support:**
-    - [ ] Implement import/export of CUDA buffers via DLPack.
-    - [ ] APIs for zero-copy tensor exchange with PyTorch, TensorFlow, etc.
-    - [ ] Tests for correctness and performance of DLPack interop.
-- [ ] **Examples and documentation:**
-    - [ ] Example scripts for exchanging tensors with PyTorch.
-    - [ ] Document API, limitations, and best practices for interop.
-
-### Step 3.D.6: Advanced GPU Memory Management
-- [ ] **Memory monitoring and fragmentation tools:**
-    - [ ] APIs for querying fragmentation, cache size, and manual memory release.
-    - [ ] Support for cache clearing (`empty_cache`) and memory defragmentation.
-    - [ ] Real-time memory usage stats and leak detection.
-- [ ] **Manual and automatic memory management:**
-    - [ ] APIs for manual cache management and memory release.
-    - [ ] Support for memory pools, allocation limits, and OOM prevention.
-    - [ ] Documentation and examples for advanced memory management.
-
-### Step 3.D.7: Advanced DType Support on GPU
-- [ ] **Support for int, bool, float16/bfloat16 DTypes on GPU:**
-    - [ ] Implement kernels and memory management for all core DTypes.
-    - [ ] Ensure CPU/GPU consistency and correct type promotion.
-    - [ ] Tests for all DTypes, including mixed-type ops.
-- [ ] **Future-proofing for new DTypes:**
-    - [ ] Modular design to allow easy addition of new DTypes.
-    - [ ] Documentation and examples.
-
-### Step 3.D.8: GPU Robustness & Fuzz Testing
-- [ ] **Stress and fuzz testing for CUDA kernels:**
-    - [ ] Automated tests with random inputs, large tensors, and edge cases.
-    - [ ] Memory stress tests, OOM scenarios, and error injection.
-    - [ ] Bug/crash reporting and test methodology documentation.
-- [ ] **Continuous integration for GPU tests:**
-    - [ ] Integrate GPU tests into CI pipeline (with fallback for CPU-only environments).
-    - [ ] Track and report GPU-specific bugs and regressions.
-
-### Step 3.D.9: Documentation & GPU User Guides
-- [ ] **Comprehensive GPU usage guide:**
-    - [ ] Best practices, known limitations, and common pitfalls.
-    - [ ] Debugging and troubleshooting guide for CUDA errors.
-    - [ ] Links to external resources (NVIDIA docs, Rust CUDA ecosystem, etc.).
-    - [ ] Integration of GPU docs into rustdoc and README.
-- [ ] **Developer and contributor documentation:**
-    - [ ] Internal architecture, how to add new ops/kernels, and testing guidelines.
-    - [ ] Community resources and support channels.
-
-### **Key points to reinforce:**
-- **Robustness:** Advanced error handling, stress/fuzz testing, and monitoring.
-- **Extensibility:** Multi-GPU, DLPack, new DTypes, and future hardware support.
-- **Profiling & Debug:** Built-in tools for performance analysis, memory monitoring, and debugging.
-- **Interoperability:** Seamless exchange with other frameworks and ecosystems.
-- **Developer Experience:** Clear APIs, logs, documentation, and diagnostic tools.
+## Phase 4: Expanding NN Capabilities & Interoperability
+*   🎯 **Goal:** Broaden the scope of supported neural network architectures by implementing advanced layers (Convolutional, Pooling, RNN, Normalization, Activations), enhance DType support with robust mixed-type operations, enable model persistence, and foster interaction with the wider ML ecosystem through ONNX and Python bindings.
 
 *   **Sub-Phase 4.A: Advanced Layers & Architectures:**
     *   🎯 **Goal:** Implement key neural network layers for computer vision and sequence modeling, along with essential normalization layers, activation functions, and flexible initialization schemes.

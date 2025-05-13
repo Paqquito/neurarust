@@ -1,8 +1,16 @@
-[package]
-name = "neurarust-backend-cuda"
-version = "0.1.0"
-edition = "2024"
-
 [dependencies]
-rustacuda = "0.1"
-lazy_static = "1.4"
+# Assuming other dependencies might be here or it's empty
+rustacuda = "0.2.0"
+rustacuda_core = "0.2.0" # rustacuda often requires this explicitly
+rustacuda_derive = "0.2.0" # For custom derive macros if needed later
+once_cell = "1.18.0"
+thiserror = "1.0"
+log = "0.4.20"
+
+# Add other existing dependencies if any below or above
+# For example, if neurarust-core/error is used:
+# neurarust-core = { path = "../neurarust-core" }
+
+[dev-dependencies]
+# For tests if needed 
+env_logger = "0.10.0" # Added for initializing logger in tests 
